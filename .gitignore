@@ -30,4 +30,4 @@ pnpm-debug.log*
 *.tsbuildinfo
 
 docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md
-docs\04-ROADMAP-ZERO-TO-PRODUCTION.md
+docs/04-ROADMAP-ZERO-TO-PRODUCTION.md
