@@ -19,7 +19,7 @@ describe("tenant isolation", () => {
     // middleware overwrites it with the bound context regardless (see
     // tenant-middleware.ts) — proven by the "middleware overrides a
     // mismatched tenantId" test below.
-    return db.user.create({ data: { tenantId, email, role: "buyer_admin" } });
+    return db.user.create({ data: { tenantId, email, roles: ["buyer_admin"] } });
   }
 
   beforeAll(async () => {
@@ -92,7 +92,7 @@ describe("tenant isolation", () => {
     const result = await runWithTenant(tenantB.id, () =>
       db.user.updateMany({
         where: { id: userA.id },
-        data: { role: "tenant_admin" },
+        data: { roles: ["tenant_admin"] },
       }),
     );
 

@@ -28,6 +28,12 @@ model Tenant {
   name         String
   customDomain String?  @unique
   sapDriver    SapDriver @default(mock)
+  /// Branding (docs/05 P6): tenants change logo + primary color, not layout.
+  logoUrl      String?
+  primaryColor String?
+  /// Module toggles keyed by NavItem.key (@cc/domain navigation registry).
+  /// Absent key = enabled; tenants opt modules *out*.
+  moduleToggles Json    @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -55,7 +61,16 @@ model User {
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id])
   email     String
-  role      UserRole
+  /// One user may hold several roles; the JWT carries them all as claims
+  /// (docs/02 §3). Permissions are derived from roles in @cc/domain/auth.
+  roles     UserRole[]
+  /// scrypt hash, format "scrypt$N$r$p$salt$hash" (see @cc/service-identity).
+  /// Null for users provisioned before their credentials are issued.
+  passwordHash String?
+  isActive  Boolean  @default(true)
+  /// docs/05 §8: first-login forced password change.
+  mustChangePassword Boolean @default(false)
+  lastLoginAt DateTime?
   createdAt DateTime @default(now())
 
   accountLinks UserAccountLink[]

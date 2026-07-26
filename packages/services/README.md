@@ -1,5 +1,22 @@
-# services — stub
+# services
 
-Per `docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md`: business logic per module (`onboarding/`, `catalogue/`, `order/`, `delivery/`, `invoice/`, `payment/`, `support/`, `loyalty/`, `reporting/`), each exposing a typed service interface. Depends on `domain` + `adapters` + `db`; never on `ui` or `apps`.
+Business logic per module, each exposing a typed service interface. Depends on `domain` + `adapters` + `db` + `config`; never on `ui` or `apps`. Framework-free — no Next.js imports — so the service layer can move behind NestJS/Fastify without a rewrite (`docs/DECISIONS.md` ADR-002).
 
-Not yet built — no `package.json`, not a pnpm workspace member. The first module (`onboarding/`) arrives in Phase 2 (`docs/04-ROADMAP-ZERO-TO-PRODUCTION.md`), once the mock `SapAdapter` (Phase 1) exists for it to depend on.
+| Package                                            | Status                                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`identity/`](./identity) — `@cc/service-identity` | **Built (Phase 1).** Login, session tokens, tenant resolution, RBAC guards, dev seed. |
+| [`sap/`](./sap) — `@cc/service-sap`                | **Built (Phase 1).** Per-tenant adapter resolution + the dashboard summary read.      |
+| `onboarding/`                                      | Phase 2 — the 4-step wizard, approval queue, BAPI customer creation.                  |
+| `catalogue/`                                       | Phase 3                                                                               |
+| `order/`                                           | Phase 4                                                                               |
+| `invoice/`, `payment/`                             | Phase 5                                                                               |
+| `delivery/`, `support/`, `loyalty/`, `reporting/`  | Phase 6                                                                               |
+
+Not-yet-built services have no `package.json` and are not workspace members.
+
+## Adding a service
+
+1. Copy the shape of `identity/`: `package.json` (name `@cc/service-<module>`), `tsconfig.json`, `eslint.config.js`, `vitest.config.ts`, `README.md`.
+2. Depend on `@cc/domain` for types and registries, `@cc/adapter-*` for external systems, `@cc/db` for persistence. Wrap every DB call in `runWithTenant`.
+3. Throw typed domain errors (see `identity/src/errors.ts`) carrying an HTTP status and user-safe copy — route handlers map them, they never invent messages.
+4. Add it to `apps/web`'s dependencies and to `transpilePackages` in `next.config.mjs`.

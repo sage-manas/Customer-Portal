@@ -4,6 +4,46 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-008: Dev seed lives in `@cc/service-identity`, not `@cc/db`
+
+**Context:** The conventional home for a Prisma seed is `packages/db/prisma/seed.ts`. But the seed has to create users _with credentials_, and the password-hash format (`scrypt$N$r$p$salt$hash`) is owned by `@cc/service-identity`. `db` may only import `domain` + `config` (ADR-004), so `@cc/db` cannot import the hashing function — and hand-copying the format into the seed is exactly the duplication CLAUDE.md rule 3 forbids.
+
+**Decision:** The seed lives at `packages/services/identity/scripts/seed.ts` and runs via `pnpm --filter @cc/service-identity db:seed` (tsx). It is a `services` element, so importing both `@cc/db` and the hashing code is within the dependency rule. It seeds two tenants (`acme`, `globex`) on the mock driver, with users across every role family linked to the KUNNRs the mock SAP adapter seeds, and it performs every write inside `runWithTenant` — the seed gets no privileged path around tenant scoping.
+
+**Consequence:** Two tenants, not one, is deliberate: cross-tenant isolation is only demonstrable when a second tenant's data exists to fail to reach. If a future seed needs data from several service packages, it moves to a dedicated `packages/services/seed` package rather than back into `db`.
+
+---
+
+## ADR-007: SAP reads carry their own freshness; writes do not
+
+**Context:** Doc 05 P1 ("SAP is the truth; the UI is honest about it"), §6.1 and §12 require every screen to declare and display a freshness class — `Live`, `Synced <time>`, or a stale banner — and `SapSyncIndicator` renders it. The TRD §4.1 sketch of `SapAdapter`, however, returns bare domain objects, which leaves each screen to decide for itself how fresh its data is. Screens guessing their own freshness is precisely how a portal ends up claiming "Live" over a two-hour-old cache.
+
+**Decision:** Every read on `SapAdapter` returns `SapRead<T> = { data, freshness, syncedAt }`; writes return plain results. A driver reports `live` for a call it actually made and `stale` for a degraded answer served while SAP was unreachable; the cache-aside layer (docs/02 §4.3) sets `cached`. Composed reads take the least-fresh part (see `getDashboardSummary`).
+
+**Consequence:** Consumers unwrap `.data`, which is slightly more verbose than the TRD sketch — accepted, because the freshness contract is then impossible to forget. `FreshnessClass` is re-exported from `@cc/service-sap` so app code can render it without importing the adapters layer.
+
+---
+
+## ADR-006: Real SAP drivers fail loudly rather than falling back to the mock
+
+**Context:** A tenant configured for `ecc`/`s4` before those drivers exist (Phase 7) has to do _something_. The convenient option is for the factory to fall back to the mock driver so the app keeps working.
+
+**Decision:** It does not. `EccSapAdapter`/`S4SapAdapter` extend a shared skeleton whose every method throws a typed `not_implemented` `SapError`, and the factory refuses to construct them without connection settings. A mis-configured tenant fails at the call site with a translatable error.
+
+**Consequence:** Serving fabricated material prices, stock and credit limits to a real customer as if they were their own SAP data would be far worse than an error page — a mock fallback in production is indistinguishable from working software until someone acts on the numbers. The skeleton also gives Phase 7 a method-by-method migration path with the contract test-suite unchanged.
+
+---
+
+## ADR-005: Phase 1 adds two service packages — `identity` and `sap`
+
+**Context:** `packages/services/README.md` (Phase 0) said the first service arrives in Phase 2 with the Onboarding module. But Phase 1's scope — "auth (credentials → JWT with tenant/customer/roles claims), RBAC middleware, app shell" — is business logic that cannot live in `apps/web` without breaking ADR-002 (route handlers are thin adapters over a framework-free service layer). Separately, the dashboard needs SAP data, and `apps -> adapters` is not an allowed dependency edge, so the app cannot call the adapter factory itself.
+
+**Decision:** Create `@cc/service-identity` (login, tokens, tenant resolution, RBAC guards) and `@cc/service-sap` (per-tenant adapter resolution + the dashboard summary read) in Phase 1. `@cc/service-identity` ships a second entry point, `@cc/service-identity/edge`, containing only the pure/WebCrypto parts — Next middleware runs on the edge runtime where Prisma cannot load, and a route guard that can't run in the guard's runtime is not a guard.
+
+**Consequence:** `@cc/service-sap` currently holds `getDashboardSummary`, which is really reporting logic; it moves to `packages/services/reporting` in Phase 6, and its return shape is the contract so the page won't change. The module services (`onboarding/`, `catalogue/`, …) still start in their own phases as planned.
+
+---
+
 ## ADR-004: `packages/config` is importable from every layer, including at runtime
 
 **Context:** Doc 06's dependency rule enumerates `ui -> domain`, `services -> domain + adapters + db`, `apps -> ui + services + domain`, `domain -> nothing`, `adapters -> domain` (never services) — but never mentions `config` as a source or target. Doc 06 also explicitly assigns `packages/config` "eslint, tsconfig, tailwind preset, **shared constants**." The first `packages/ui` domain component (`Money`) needs `LOCALE`/`CURRENCY_SYMBOL` from those shared constants, which the literal dependency-rule enumeration would block.

@@ -1,0 +1,8 @@
+{
+  "extends": "@cc/config/typescript/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["src", "scripts"]
+}

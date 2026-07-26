@@ -9,8 +9,9 @@ apps/
 packages/
   ui/           design tokens, primitives, domain components (Storybook)
   domain/       pure TS: entities, status registry, SAP-mapping registry — no I/O
-  services/     business logic per module (stub — see packages/services/README.md)
-  adapters/     SapAdapter + GSTN/e-invoice/e-way/gateway/notification adapters (stub)
+  services/     business logic per module — identity/, sap/ built; rest per phase
+  adapters/     sap/ built (contract + mock/ecc/s4 drivers); GSTN/e-invoice/e-way/
+                gateway/notification adapters per phase
   db/           Prisma schema, tenant-scoped middleware, isolation tests
   config/       eslint, tsconfig, tailwind preset, shared constants (no product logic)
 docs/           product/architecture docs + docs/DECISIONS.md (ADR log)
@@ -38,9 +39,10 @@ Using Sales Order as the template (`packages/domain/src/sap-mapping/order.ts`, `
 3. **Entity**: add `packages/domain/src/entities/<module>.ts` building on the schema/registry.
 4. **Status**: if the module introduces new SAP status codes, add a `map<Field>ToStatus` function to `packages/domain/src/status.ts` and extend `CANONICAL_STATUSES`/`statusBadgeVariant` if needed.
 5. **DB**: add the Prisma model(s) with a `tenantId` column, register the model name in `TENANT_SCOPED_MODELS` (`packages/db/src/tenant-middleware.ts`), add an isolation-test case.
-6. **Adapter**: extend the `SapAdapter` interface and its `mock` driver (once `packages/adapters/sap` exists) before writing any service code against it.
-7. **Service**: add `packages/services/<module>/`, exposing a typed service interface; depends on `domain` + `adapters` + `db` only.
-8. **UI**: screens under `apps/web/app/(portal)/<module>/...`, built from `SapField`/`DataTable`/`StatusBadge`/etc., matching `docs/05-UI-UX-DESIGN.md`.
+6. **Adapter**: extend the `SapAdapter` interface (`packages/adapters/sap/src/contract.ts`) and its `mock` driver — with seeded data covering the unhappy paths — before writing any service code against it.
+7. **Service**: add `packages/services/<module>/`, exposing a typed service interface; depends on `domain` + `adapters` + `db` only. Add it to `apps/web`'s dependencies and to `transpilePackages` in `next.config.mjs`.
+8. **Permissions**: add the module's permissions to `packages/domain/src/auth.ts`, grant them to the right roles, and add its nav entry (route, icon, accent, permission) to `packages/domain/src/navigation.ts` — flipping `status` from `planned` to `live` when the screens land. Guard the route handlers with `requirePermission`.
+9. **UI**: screens under `apps/web/app/(portal)/<module>/...`, built from `SapField`/`DataTable`/`StatusBadge`/etc. inside the `AppShell`, matching `docs/05-UI-UX-DESIGN.md`. Render the freshness that came back on the SAP read (`SapSyncIndicator`); never assume it.
 
 ## Recording a decision (ADR)
 

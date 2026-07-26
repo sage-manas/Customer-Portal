@@ -24,7 +24,10 @@ Always import `db` from `./client` (or the package root) — never instantiate `
 docker compose -f ../../docker-compose.dev.yml up -d postgres
 cp .env.example .env
 pnpm --filter @cc/db db:push
+pnpm --filter @cc/service-identity db:seed   # dev tenants + users
 ```
+
+The seed lives in `@cc/service-identity`, not here: it writes credentials, and the password-hash format belongs to the identity service — `db -> services` is not an allowed dependency (`docs/DECISIONS.md` ADR-008).
 
 ## How to test
 

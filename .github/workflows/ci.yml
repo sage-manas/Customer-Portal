@@ -7,6 +7,11 @@ on:
 
 env:
   DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/customerconnect?schema=public"
+  # CI-only values. Real secrets never live in the workflow file (docs/02 §9);
+  # this key only ever signs tokens for throwaway CI databases.
+  AUTH_SECRET: "ci-only-secret-not-used-anywhere-else-32c"
+  ROOT_DOMAIN: "localhost"
+  DEFAULT_TENANT_SLUG: "acme"
 
 jobs:
   ci:
@@ -59,6 +64,11 @@ jobs:
 
       - name: Cross-tenant isolation tests
         run: pnpm --filter @cc/db test:isolation
+
+      # Proves the seed still matches the schema and the tenant-scoped
+      # writes it performs — it is the fixture every future e2e run needs.
+      - name: Seed development data
+        run: pnpm --filter @cc/service-identity db:seed
 
       - name: Build
         run: pnpm turbo run build

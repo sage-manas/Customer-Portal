@@ -6,7 +6,9 @@ Pure TypeScript: entities, the canonical status registry, and the SAP field-mapp
 
 - `sap-mapping/` — `SapFieldDef`/`SapMappingRegistry` types, the `onboardingMapping` and `orderMapping` registries (seeded verbatim from `docs/03-FUNCTIONAL-SPEC.md`), and `buildZodSchema(registry, mode)` which derives a Zod schema from a registry instead of hand-writing validation per screen.
 - `status.ts` — the canonical status enum (`docs/05-UI-UX-DESIGN.md` §6.5), the `statusBadgeVariant` map consumed by the UI's `StatusBadge`, and per-source mappers (e.g. `mapOrderGbstkToStatus`) that translate raw SAP codes to canonical statuses.
-- `entities/` — `Tenant`, `OnboardingApplication`, `SalesOrder` — built on top of the registries above, not duplicating their field lists.
+- `entities/` — `Tenant`, `OnboardingApplication`, `SalesOrder`, plus the canonical shapes the SAP adapter exchanges (`CanonicalCustomer`, `CreditInfo`, `Material`, `StockLevel`, `CustomerPrice`, `CreateSalesOrderInput`, `OrderStatusView`, `Delivery`, `Invoice`, `OpenItem`, …) — built on top of the registries above, not duplicating their field lists. These carry `CanonicalStatus`, never raw SAP status codes: drivers translate before returning.
+- `auth.ts` — the role/permission registry (`docs/02` §3, `docs/05` §4.3): `ROLES`, `PERMISSIONS`, `ROLE_PERMISSIONS`, `SessionClaims`, and `hasPermission`. Nothing in the codebase compares roles directly; it asks for a permission, so adding a role never means hunting down `if`s.
+- `navigation.ts` — the nav registry behind the sidebar (`docs/05` §4.1/§4.2): route, label, Lucide icon _name_, module accent, required permission, and build status per item, plus `visibleNavItems` (RBAC + tenant module toggles) and `activeNavItem` (longest-prefix match).
 
 ## Adding a new module's mapping
 

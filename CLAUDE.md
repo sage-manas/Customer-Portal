@@ -13,7 +13,9 @@ Guidance for Claude Code (or any future session) working in this repo. Read `doc
 
 4. **Tenant isolation is structural, not conventional.** Every tenant-owned Prisma model carries `tenantId` and is listed in `TENANT_SCOPED_MODELS` (`packages/db/src/tenant-middleware.ts`). All DB access must be wrapped in `runWithTenant(tenantId, fn)` (`packages/db/src/tenant-context.ts`) — a query with no bound tenant context throws before reaching Postgres. See `docs/DECISIONS.md` ADR-003 for why this is row-level `tenantId`, not schema-per-tenant, in Phase 0.
 
-5. **Build order matters.** `docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md` "Build order" section is sequential and each phase must have passing CI before the next starts. Don't build Phase 3 UI against a Phase 5 adapter that doesn't exist yet.
+5. **Permissions are a registry too, and the API is what enforces them.** Roles map to permissions in `packages/domain/src/auth.ts`; routes and nav items declare the permission they need (`packages/domain/src/navigation.ts`). Never write `if (role === "tenant_admin")` — ask `hasPermission(session, "...")`. Hiding a nav item is presentation; `requirePermission` in the route handler is the control (docs/05 §4.3). Cross-tenant and cross-customer access is always a **404**, never a 403 — the portal must not confirm that another tenant's or customer's data exists.
+
+6. **Build order matters.** `docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md` "Build order" section is sequential and each phase must have passing CI before the next starts. Don't build Phase 3 UI against a Phase 5 adapter that doesn't exist yet.
 
 ## Commands
 
@@ -24,13 +26,22 @@ docker compose -f docker-compose.dev.yml up -d   # local Postgres + Redis
 pnpm --filter <pkg> typecheck | lint | test | build
 pnpm --filter @cc/db db:push          # sync Prisma schema to local Postgres
 pnpm --filter @cc/db test:isolation   # cross-tenant isolation tests (needs Postgres)
+pnpm --filter @cc/service-identity db:seed   # dev tenants + users (see its README)
 pnpm --filter @cc/ui storybook        # component development
 pnpm --filter web dev                 # run the Next.js app
 
 turbo run typecheck lint test build   # whole-repo, from root
 ```
 
-Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `web` (apps/web). `packages/services/*`, `packages/adapters/*`, `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
+Local sign-in: copy `apps/web/.env.example` to `apps/web/.env.local`, seed, then open `http://acme.localhost:3000/login` (the subdomain is what resolves the tenant) as `buyer@acme.example` / `portal-dev-password`.
+
+Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`, `@cc/service-identity`, `@cc/service-sap`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
+
+## Where the moving parts live
+
+- **SAP access:** `@cc/adapter-sap` owns the `SapAdapter` contract and the mock/ecc/s4 drivers. App code never imports it — it goes through `@cc/service-sap` (`getSapAdapterForTenant`), because `apps -> adapters` is not an allowed edge. Reads return `SapRead<T>` with a freshness class; render it, don't assume it (ADR-007).
+- **Auth:** `@cc/service-identity` (Node) and `@cc/service-identity/edge` (middleware — no Prisma). Session cookies and env parsing live in `apps/web/lib/`.
+- **Shell:** `AppShell`/`TopBar`/`Sidebar` in `@cc/ui` render whatever nav items they're given; filter with `visibleNavItems(...)` on the server first.
 
 ## Conventions
 
