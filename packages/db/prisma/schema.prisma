@@ -1,0 +1,173 @@
+// Phase 0 scope: cross-cutting tenancy tables + the two modules with a
+// domain registry so far (Onboarding, Order). See docs/02-TRD-ARCHITECTURE.md
+// §7 for the full target data model; other modules' tables are added as
+// their phases begin (docs/04-ROADMAP-ZERO-TO-PRODUCTION.md).
+//
+// Tenancy model: row-level `tenantId` + Prisma middleware (docs/DECISIONS.md
+// ADR-003) — every tenant-owned model below carries `tenantId`.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SapDriver {
+  mock
+  ecc
+  s4
+}
+
+model Tenant {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  customDomain String?  @unique
+  sapDriver    SapDriver @default(mock)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users               User[]
+  onboardingApps      OnboardingApplication[]
+  salesOrders         SalesOrder[]
+  auditLogs           AuditLog[]
+
+  @@map("tenants")
+}
+
+enum UserRole {
+  platform_operator
+  tenant_admin
+  tenant_sales
+  tenant_credit
+  tenant_support
+  buyer_admin
+  buyer_user
+  buyer_view_only
+}
+
+model User {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  email     String
+  role      UserRole
+  createdAt DateTime @default(now())
+
+  accountLinks UserAccountLink[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+/** One user may act for multiple SAP sold-to accounts (KUNNR). */
+model UserAccountLink {
+  id       String @id @default(cuid())
+  tenantId String
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+  sapKunnr String
+
+  @@unique([tenantId, userId, sapKunnr])
+  @@index([tenantId])
+  @@map("user_account_links")
+}
+
+enum OnboardingStatus {
+  draft
+  submitted
+  pending_approval
+  approved
+  rejected
+}
+
+model OnboardingApplication {
+  id               String            @id @default(cuid())
+  tenantId         String
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  status           OnboardingStatus  @default(draft)
+  /// Shape validated against onboardingWriteSchema (@cc/domain)
+  data             Json
+  sapCustomerCode  String?
+  rejectionReasons String[]
+  submittedAt      DateTime?
+  decidedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  documents OnboardingDocument[]
+
+  @@index([tenantId])
+  @@map("onboarding_applications")
+}
+
+model OnboardingDocument {
+  id            String                @id @default(cuid())
+  tenantId      String
+  applicationId String
+  application   OnboardingApplication @relation(fields: [applicationId], references: [id])
+  /// panCardCopy | gstCertificate | incorporationCert
+  kind          String
+  storageKey    String
+  uploadedAt    DateTime              @default(now())
+
+  @@index([tenantId])
+  @@map("onboarding_documents")
+}
+
+model SalesOrder {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  customerKunnr String
+  /// SAP VBAK-VBELN once created; null while portal-only draft
+  soNumber      String?
+  orderStatus   String
+  creditStatus  String
+  /// Shape validated against orderHeaderWriteSchema (@cc/domain)
+  header        Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines SalesOrderLine[]
+
+  @@unique([tenantId, soNumber])
+  @@index([tenantId])
+  @@map("sales_orders")
+}
+
+model SalesOrderLine {
+  id       String     @id @default(cuid())
+  tenantId String
+  orderId  String
+  order    SalesOrder @relation(fields: [orderId], references: [id])
+  lineNo   Int
+  material String
+  quantity Decimal
+  uom      String
+  price    Decimal?
+  plant    String?
+
+  @@index([tenantId])
+  @@map("sales_order_lines")
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("audit_log")
+}

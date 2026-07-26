@@ -1,0 +1,25 @@
+{
+  "name": "@cc/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./eslint/base": "./eslint/base.js",
+    "./typescript/base.json": "./typescript/base.json",
+    "./typescript/nextjs.json": "./typescript/nextjs.json",
+    "./typescript/react-library.json": "./typescript/react-library.json",
+    "./tailwind/preset": "./tailwind/preset.ts",
+    "./constants": "./src/constants.ts"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint-plugin-boundaries": "^5.0.1",
+    "eslint-plugin-import": "^2.31.0",
+    "typescript-eslint": "^8.19.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.17.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2"
+  }
+}

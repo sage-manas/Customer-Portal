@@ -1,0 +1,8 @@
+node_modules
+.next
+dist
+storybook-static
+.turbo
+coverage
+packages/db/generated
+pnpm-lock.yaml

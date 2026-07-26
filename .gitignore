@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build outputs
+.next/
+dist/
+build/
+storybook-static/
+.turbo/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# testing
+coverage/
+
+# prisma
+packages/db/generated/
+
+# misc
+.DS_Store
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.vscode/*
+!.vscode/extensions.json
+*.tsbuildinfo
+
+docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md
+docs\04-ROADMAP-ZERO-TO-PRODUCTION.md

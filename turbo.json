@@ -1,0 +1,41 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "generated/**", "storybook-static/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "web#typecheck": {
+      // Next.js regenerates `.next/types/**/*.ts` (referenced from
+      // next-env.d.ts) on every `next build` — apps/web's own tsc run
+      // needs those generated route types to exist, not just upstream
+      // packages' builds. `pnpm turbo run typecheck` alone still runs this
+      // (cached) build first, so it's not extra work in CI.
+      "dependsOn": ["build", "^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "test:isolation": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "db:generate": {
+      "cache": false
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}
