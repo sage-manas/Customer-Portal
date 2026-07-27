@@ -15,6 +15,7 @@
   "dependencies": {
     "@cc/config": "workspace:*",
     "@cc/domain": "workspace:*",
+    "@cc/service-catalogue": "workspace:*",
     "@cc/service-identity": "workspace:*",
     "@cc/service-onboarding": "workspace:*",
     "@cc/service-sap": "workspace:*",

@@ -1,9 +1,11 @@
 "use client";
 
 import type { NavItem } from "@cc/domain";
-import { AppShell, type AccountOption } from "@cc/ui";
+import { AppShell, CartButton, type AccountOption } from "@cc/ui";
 import { useRouter, usePathname } from "next/navigation";
 import * as React from "react";
+
+import { useCart } from "./CartProvider";
 
 /**
  * Client wrapper around the `@cc/ui` AppShell.
@@ -22,6 +24,7 @@ export function AppShellClient({
   activeKunnr,
   children,
   banner,
+  showCart = false,
 }: {
   navItems: NavItem[];
   tenantName: string;
@@ -31,6 +34,8 @@ export function AppShellClient({
   activeKunnr?: string;
   children: React.ReactNode;
   banner?: React.ReactNode;
+  /** The back-office shell has no cart; only the customer plane does. */
+  showCart?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -65,8 +70,15 @@ export function AppShellClient({
       onSwitchAccount={switchAccount}
       onSignOut={signOut}
       banner={banner}
+      actions={showCart ? <CartTrigger /> : undefined}
     >
       {children}
     </AppShell>
   );
+}
+
+/** Split out so the cart context is only read when the cart is shown. */
+function CartTrigger() {
+  const { lineCount, open } = useCart();
+  return <CartButton count={lineCount} onClick={open} />;
 }

@@ -73,6 +73,12 @@ jobs:
       - name: Onboarding flow tests
         run: pnpm --filter @cc/service-onboarding test:integration
 
+      # The cart is the only stored part of the catalogue module, so it is
+      # the only part that needs a database — including its cross-account
+      # and cross-tenant 404 cases.
+      - name: Cart flow tests
+        run: pnpm --filter @cc/service-catalogue test:integration
+
       # Proves the seed still matches the schema and the tenant-scoped
       # writes it performs — it is the fixture every future e2e run needs.
       - name: Seed development data

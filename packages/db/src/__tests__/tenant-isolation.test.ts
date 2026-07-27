@@ -33,6 +33,8 @@ describe("tenant isolation", () => {
 
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
+      await db.cartLine.deleteMany();
+      await db.cart.deleteMany();
       await db.onboardingEvent.deleteMany();
       await db.onboardingApplication.deleteMany();
       await db.user.deleteMany();
@@ -126,5 +128,28 @@ describe("tenant isolation", () => {
 
     expect(asSeenByTenantB).toBeNull();
     expect(eventsForTenantB).toEqual([]);
+  });
+
+  it("scopes the Phase 3 cart models too", async () => {
+    const cart = await runWithTenant(tenantA.id, () =>
+      db.cart.create({ data: { tenantId: tenantA.id, customerKunnr: `0000001000` } }),
+    );
+    await runWithTenant(tenantA.id, () =>
+      db.cartLine.create({
+        data: { tenantId: tenantA.id, cartId: cart.id, material: "MAT-10001", quantity: 5 },
+      }),
+    );
+
+    const cartForTenantB = await runWithTenant(tenantB.id, () =>
+      db.cart.findUnique({ where: { id: cart.id } }),
+    );
+    const linesForTenantB = await runWithTenant(tenantB.id, () =>
+      db.cartLine.findMany({ where: { cartId: cart.id } }),
+    );
+
+    // Two customers may share a KUNNR string across tenants; the cart of one
+    // must still be unreachable from the other.
+    expect(cartForTenantB).toBeNull();
+    expect(linesForTenantB).toEqual([]);
   });
 });

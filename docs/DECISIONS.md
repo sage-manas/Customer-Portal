@@ -4,6 +4,26 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-014: The cart belongs to a sold-to account, and is repriced on every read
+
+**Context:** Doc 05 §7.2 specifies a persistent cart drawer with line edit, MOQ/stock warnings and a split CTA, but says nothing about who owns a cart or how long a price in it survives. Both defaults are tempting and both are wrong: a per-user cart (the e-commerce norm) and a cart that stores the price the line was added at (the obvious way to avoid re-reading SAP).
+
+**Decision:** The cart is keyed `(tenantId, customerKunnr)` — one basket per sold-to account, shared by every user acting for it — and stores only `material` + `quantity`. Price, stock, UoM, MOQ and the per-line issues are recomputed from `SapAdapter` on **every** read; nothing priced is persisted. `cart:manage` is a permission of its own, separate from `order:create`, so a buyer may stage a basket that a colleague converts.
+
+**Consequence:** B2B purchasing is a team activity against a customer account, not a personal session, so the shared basket matches how the buying actually happens; the cost is that two colleagues can edit concurrently, which is acceptable because the last read is always authoritative. Repricing means a cart open across a price-list change shows the new price rather than a stale one — the alternative fails at order creation, where the customer has already committed. When SAP is unreachable, `getCart` returns `priced: false` with null prices instead of failing (docs/05 P7), so Request Quote still works while Create Order is gated.
+
+---
+
+## ADR-013: Catalogue prices and stock are read per card, not per page
+
+**Context:** Doc 05 §7.2 says "price and stock lazily loaded per card with skeletons (they're per-customer SAP calls)". The simpler implementation is to compose the whole grid on the server — one page render, no client fetching — which is how every other Phase 0–2 screen works.
+
+**Decision:** The material list is read on the server, and each card fetches its own price and stock from `/api/catalogue/materials/[material]/availability` after mount. `getMaterialAvailability` is the service entry point for exactly one material, and the browse read deliberately carries no pricing.
+
+**Consequence:** A slow or missing condition record delays its own card rather than the grid, and the skeleton states doc 05 requires are real rather than decorative. It costs N requests per page (24 at the current page size), which is the trade the doc asks for; if it becomes a problem the fix is a batch endpoint over the same service function, not moving pricing back into the browse read. `getPriceList` does price everything at once — it is a table the customer asked for in full, not a grid they are scanning.
+
+---
+
 ## ADR-012: Object storage is an adapter, and uploaded documents are streamed through a route handler
 
 **Context:** Phase 2 introduces file uploads (PAN copy, GST certificate, incorporation certificate). Doc 03 Screen 1.4 says they are "stored in portal object storage; attached to SAP customer via GOS post-creation", but object storage is not on doc 06's adapter list (`gstn`, `einvoice`, `eway`, `payment-gateway`, `notifications`), so it would have been easy to write bytes to disk from inside the onboarding service.

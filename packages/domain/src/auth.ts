@@ -37,6 +37,10 @@ export const PERMISSIONS = [
   "account:view",
   "report:view",
   // Customer-plane writes
+  /** Add/edit/remove cart lines. Separate from `order:create` because the
+   * cart is a staging area — a buyer may build one and hand it to a
+   * colleague who holds the ordering permission (docs/05 §7.2 split CTA). */
+  "cart:manage",
   "inquiry:create",
   "quotation:accept",
   "order:create",
@@ -76,6 +80,7 @@ const BUYER_VIEW_ONLY: Permission[] = [
 /** View-only plus the everyday transactional actions a buyer performs. */
 const BUYER_USER: Permission[] = [
   ...BUYER_VIEW_ONLY,
+  "cart:manage",
   "inquiry:create",
   "quotation:accept",
   "order:create",

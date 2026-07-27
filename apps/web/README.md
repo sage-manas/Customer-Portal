@@ -2,12 +2,14 @@
 
 The customer portal + tenant back-office (Next.js App Router). Route groups match the sitemap in `docs/05-UI-UX-DESIGN.md` §4.1:
 
-- `app/(portal)/` — customer-facing portal (`/` dashboard today; `/catalogue`, `/orders`, … per phase)
+- `app/(portal)/` — customer-facing portal (`/` dashboard, `/catalogue` + `/catalogue/[matnr]` + `/catalogue/price-list` today; `/orders`, … per phase)
 - `app/(admin)/admin/` — tenant back-office
 - `app/(auth)/` — login, the 4-step registration wizard, `/register/status`
 - `app/api/auth/*` — login, logout, account switch
 - `app/api/onboarding/*` — the applicant's own endpoints (**public**, see below)
 - `app/api/admin/onboarding/*` — reviewer decisions and document downloads
+- `app/api/catalogue/*` — the per-card price/stock read (one material per request, per ADR-013)
+- `app/api/cart/*` — the cart. `catalogue:view` reads it, `cart:manage` changes it; the KUNNR comes from the session, so there is no cart id to tamper with
 
 ## How a request is guarded
 
@@ -49,6 +51,6 @@ pnpm --filter web build
 pnpm --filter web test:e2e     # Playwright, needs the build + a seeded database
 ```
 
-`e2e/` holds the module happy paths required by `docs/06` ("Playwright smoke E2E per module happy path, against mock adapters"). Phase 2's suite registers a company through all four wizard steps — including a live GSTN verify, two uploads and submission — then signs in to the back office and approves it, which creates the customer in the mock SAP landscape. A second test proves a GSTIN whose state disagrees with the billing address is blocked with an explanation.
+`e2e/` holds the module happy paths required by `docs/06` ("Playwright smoke E2E per module happy path, against mock adapters"). Phase 2's suite registers a company through all four wizard steps — including a live GSTN verify, two uploads and submission — then signs in to the back office and approves it, which creates the customer in the mock SAP landscape. A second test proves a GSTIN whose state disagrees with the billing address is blocked with an explanation. Phase 3's suite browses the catalogue at customer-specific prices, filters by material group, adds to the cart and edits the drawer, checks MOQ stepping on the product page, reads the price list, and proves a view-only buyer gets no Add to Cart CTA **and** a 403 if they call the API anyway.
 
 Playwright starts the app itself on port 3100 (`E2E_PORT` to change) at `acme.localhost`, so tenant resolution is exercised through the subdomain rather than the dev fallback. First run locally: `pnpm --filter web exec playwright install chromium`.
