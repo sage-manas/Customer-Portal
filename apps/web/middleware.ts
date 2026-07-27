@@ -21,7 +21,20 @@ import { NextResponse, type NextRequest } from "next/server";
 // `/api/auth/logout` is public deliberately: signing out must work even when
 // the token has already expired, or a stale session cookie can never be
 // cleared. It only deletes cookies, so there is nothing to authorize.
-const PUBLIC_PATHS = ["/login", "/register", "/api/auth/login", "/api/auth/logout", "/403", "/404"];
+// `/api/onboarding/*` is public for the same reason `/register` is: an
+// applicant has no portal user until their account is approved. Those
+// handlers are not unguarded — the tenant comes from the host and the
+// application from an unguessable draft token (docs/DECISIONS.md ADR-009).
+// `/api/admin/onboarding/*` is deliberately NOT in this list.
+const PUBLIC_PATHS = [
+  "/login",
+  "/register",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/onboarding",
+  "/403",
+  "/404",
+];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));

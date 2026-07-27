@@ -25,6 +25,12 @@ export {
 } from "./guard";
 
 export {
+  provisionPortalAccess,
+  type ProvisionPortalAccessInput,
+  type ProvisionPortalAccessResult,
+} from "./provisioning";
+
+export {
   findTenant,
   findTenantByHost,
   findTenantBySlug,

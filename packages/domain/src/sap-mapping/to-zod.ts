@@ -72,6 +72,12 @@ export function buildZodSchema<T extends SapMappingRegistry>(
 
     let fieldSchema = zodTypeFor(field);
     const isRequired = mode === "write" && field.required === "M";
+    // A mandatory CHAR field that accepts "" is not mandatory: SAP would
+    // store a blank and every downstream screen would render an empty
+    // required value. `z.string()` alone allows it, so require length here.
+    if (isRequired && fieldSchema instanceof z.ZodString) {
+      fieldSchema = fieldSchema.min(1, `${field.label} is required`);
+    }
     if (!isRequired) fieldSchema = fieldSchema.optional();
 
     shape[field.portalField] = fieldSchema;

@@ -26,22 +26,26 @@ docker compose -f docker-compose.dev.yml up -d   # local Postgres + Redis
 pnpm --filter <pkg> typecheck | lint | test | build
 pnpm --filter @cc/db db:push          # sync Prisma schema to local Postgres
 pnpm --filter @cc/db test:isolation   # cross-tenant isolation tests (needs Postgres)
+pnpm --filter @cc/service-onboarding test:integration   # onboarding flow (needs Postgres)
 pnpm --filter @cc/service-identity db:seed   # dev tenants + users (see its README)
 pnpm --filter @cc/ui storybook        # component development
 pnpm --filter web dev                 # run the Next.js app
+pnpm --filter web test:e2e            # Playwright smoke E2E (needs a build + seeded DB)
 
 turbo run typecheck lint test build   # whole-repo, from root
 ```
 
 Local sign-in: copy `apps/web/.env.example` to `apps/web/.env.local`, seed, then open `http://acme.localhost:3000/login` (the subdomain is what resolves the tenant) as `buyer@acme.example` / `portal-dev-password`.
 
-Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`, `@cc/service-identity`, `@cc/service-sap`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
+Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`, `@cc/adapter-gstn`, `@cc/adapter-storage`, `@cc/service-identity`, `@cc/service-sap`, `@cc/service-onboarding`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
 
 ## Where the moving parts live
 
 - **SAP access:** `@cc/adapter-sap` owns the `SapAdapter` contract and the mock/ecc/s4 drivers. App code never imports it — it goes through `@cc/service-sap` (`getSapAdapterForTenant`), because `apps -> adapters` is not an allowed edge. Reads return `SapRead<T>` with a freshness class; render it, don't assume it (ADR-007).
 - **Auth:** `@cc/service-identity` (Node) and `@cc/service-identity/edge` (middleware — no Prisma). Session cookies and env parsing live in `apps/web/lib/`.
 - **Shell:** `AppShell`/`TopBar`/`Sidebar` in `@cc/ui` render whatever nav items they're given; filter with `visibleNavItems(...)` on the server first.
+- **Onboarding:** `@cc/service-onboarding` owns the applicant flow and the approval queue. Applicants have no session — they hold a draft token (ADR-009), so `/api/onboarding/*` is public in `middleware.ts` while `/api/admin/onboarding/*` is not. The wizard's steps and sections are a registry (`ONBOARDING_STEPS` in `@cc/domain`), so no screen carries a field list.
+- **Cross-service work:** a service may not import another service. Where a flow spans two (approval = SAP create + credential issue), the route handler sequences them and passes adapters in — ADR-011.
 
 ## Conventions
 

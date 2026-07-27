@@ -22,12 +22,20 @@ enum SapDriver {
   s4
 }
 
+enum GstnDriver {
+  mock
+  api
+}
+
 model Tenant {
   id           String   @id @default(cuid())
   slug         String   @unique
   name         String
   customDomain String?  @unique
   sapDriver    SapDriver @default(mock)
+  /// GSTIN verification driver (docs/03 Screen 1.2); mock until a tenant
+  /// has real GSTN API credentials.
+  gstnDriver   GstnDriver @default(mock)
   /// Branding (docs/05 P6): tenants change logo + primary color, not layout.
   logoUrl      String?
   primaryColor String?
@@ -106,18 +114,40 @@ model OnboardingApplication {
   tenantId         String
   tenant           Tenant            @relation(fields: [tenantId], references: [id])
   status           OnboardingStatus  @default(draft)
-  /// Shape validated against onboardingWriteSchema (@cc/domain)
+  /// Shape validated against onboardingWriteSchema (@cc/domain). Partial
+  /// while the wizard is in progress; complete from `submitted` onwards.
   data             Json
+  /// Unguessable bearer handle for the applicant, who has no session until
+  /// their account is created at approval (docs/DECISIONS.md ADR-009).
+  draftToken       String
+  /// Denormalized out of `data` purely so they can be indexed: the dupe
+  /// guard and the reviewer queue both search on them.
+  contactEmail     String?
+  gstin            String?
+  /// GSTN verification evidence, captured at verify time (ADR-010).
+  /// Shape: GstinVerification (@cc/domain).
+  gstinVerification Json?
+  /// Internal approval fields (docs/03 Screen 1.4), set by the reviewer.
+  salesOrg            String?
+  distributionChannel String?
+  creditApprovalStatus String?
   sapCustomerCode  String?
   rejectionReasons String[]
+  /// Reviewer's note on a Request More Info / Reject decision.
+  reviewNote       String?
+  decidedByUserId  String?
   submittedAt      DateTime?
   decidedAt        DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
   documents OnboardingDocument[]
+  events    OnboardingEvent[]
 
+  @@unique([tenantId, draftToken])
   @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, gstin])
   @@map("onboarding_applications")
 }
 
@@ -129,10 +159,33 @@ model OnboardingDocument {
   /// panCardCopy | gstCertificate | incorporationCert
   kind          String
   storageKey    String
+  fileName      String
+  contentType   String
+  sizeBytes     Int
   uploadedAt    DateTime              @default(now())
 
+  /// One document per kind: re-uploading replaces rather than accumulating.
+  @@unique([tenantId, applicationId, kind])
   @@index([tenantId])
   @@map("onboarding_documents")
+}
+
+/// Append-only workflow timeline — what `/register/status` renders
+/// (docs/05 §7.1: Submitted -> Under review -> Approved/Rejected).
+model OnboardingEvent {
+  id            String                @id @default(cuid())
+  tenantId      String
+  applicationId String
+  application   OnboardingApplication @relation(fields: [applicationId], references: [id])
+  status        OnboardingStatus
+  note          String?
+  /// Null for applicant-driven events — they have no portal user yet.
+  actorUserId   String?
+  createdAt     DateTime              @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, applicationId])
+  @@map("onboarding_events")
 }
 
 model SalesOrder {

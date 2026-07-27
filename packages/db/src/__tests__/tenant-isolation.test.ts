@@ -32,7 +32,11 @@ describe("tenant isolation", () => {
   });
 
   afterAll(async () => {
-    await runWithTenant(tenantA.id, () => db.user.deleteMany());
+    await runWithTenant(tenantA.id, async () => {
+      await db.onboardingEvent.deleteMany();
+      await db.onboardingApplication.deleteMany();
+      await db.user.deleteMany();
+    });
     await runWithTenant(tenantB.id, () => db.user.deleteMany());
     await db.tenant.deleteMany({ where: { id: { in: [tenantA.id, tenantB.id] } } });
     await db.$disconnect();
@@ -97,5 +101,30 @@ describe("tenant isolation", () => {
     );
 
     expect(result.count).toBe(0);
+  });
+
+  it("scopes the Phase 2 onboarding models too", async () => {
+    // Every model added to TENANT_SCOPED_MODELS earns a case here — the list
+    // is the control, and an unlisted model would silently query unscoped.
+    const application = await runWithTenant(tenantA.id, () =>
+      db.onboardingApplication.create({
+        data: { tenantId: tenantA.id, data: {}, draftToken: `token-${runId}` },
+      }),
+    );
+    await runWithTenant(tenantA.id, () =>
+      db.onboardingEvent.create({
+        data: { tenantId: tenantA.id, applicationId: application.id, status: "draft" },
+      }),
+    );
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.onboardingApplication.findUnique({ where: { id: application.id } }),
+    );
+    const eventsForTenantB = await runWithTenant(tenantB.id, () =>
+      db.onboardingEvent.findMany({ where: { applicationId: application.id } }),
+    );
+
+    expect(asSeenByTenantB).toBeNull();
+    expect(eventsForTenantB).toEqual([]);
   });
 });

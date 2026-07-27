@@ -16,6 +16,13 @@ storybook-static/
 
 # testing
 coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# local object storage (the `local` driver's root — uploaded documents)
+.storage/
 
 # prisma
 packages/db/generated/

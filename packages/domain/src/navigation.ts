@@ -179,7 +179,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "FileCheck",
     accent: "onboard",
     permission: "onboarding:review",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-quotations",

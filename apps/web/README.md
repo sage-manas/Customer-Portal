@@ -4,14 +4,18 @@ The customer portal + tenant back-office (Next.js App Router). Route groups matc
 
 - `app/(portal)/` — customer-facing portal (`/` dashboard today; `/catalogue`, `/orders`, … per phase)
 - `app/(admin)/admin/` — tenant back-office
-- `app/(auth)/` — login, registration wizard
+- `app/(auth)/` — login, the 4-step registration wizard, `/register/status`
 - `app/api/auth/*` — login, logout, account switch
+- `app/api/onboarding/*` — the applicant's own endpoints (**public**, see below)
+- `app/api/admin/onboarding/*` — reviewer decisions and document downloads
 
 ## How a request is guarded
 
 1. **`middleware.ts`** (edge runtime) verifies the access-token cookie, checks that the tenant in the host matches the tenant in the JWT claim, and applies the coarse route permission (`/admin/*` needs `admin:view`). A host/claim mismatch rewrites to 404, never 403 — the portal never confirms another tenant's portal exists. It imports `@cc/service-identity/edge`, which contains no Prisma.
 2. **Route handlers and server components** re-check with `requirePermission` / `requireSession` from `@cc/service-identity`. Middleware is a gate so an unauthenticated user gets a redirect instead of a rendered shell; the API is what enforces (docs/05 §4.3).
 3. **Every DB query** runs inside `runWithTenant` in the service layer, so even a bug in the two layers above cannot read another tenant's rows.
+
+`/api/onboarding/*` is the deliberate exception to step 1: an applicant has no portal user until their account is approved. Those routes are still tenant-scoped by host, and the application is addressed by an unguessable draft token sent as `x-draft-token` — a wrong or missing one is a 404 (docs/DECISIONS.md ADR-009). `/api/admin/onboarding/*` is **not** public and re-checks `onboarding:review` / `onboarding:approve` per handler; the coarse `admin:view` middleware check is not enough, because a support role can see the shell without being allowed to create a customer in SAP.
 
 Route handlers stay thin: parse → call a service → map the typed error to a status (docs/DECISIONS.md ADR-002). No auth or SAP logic lives in this app.
 
@@ -42,6 +46,9 @@ Then open `http://acme.localhost:3000/login` — the subdomain is what resolves 
 pnpm --filter web typecheck
 pnpm --filter web lint
 pnpm --filter web build
+pnpm --filter web test:e2e     # Playwright, needs the build + a seeded database
 ```
 
-Playwright smoke tests arrive with the first full module flow (Phase 2), per `docs/06`.
+`e2e/` holds the module happy paths required by `docs/06` ("Playwright smoke E2E per module happy path, against mock adapters"). Phase 2's suite registers a company through all four wizard steps — including a live GSTN verify, two uploads and submission — then signs in to the back office and approves it, which creates the customer in the mock SAP landscape. A second test proves a GSTIN whose state disagrees with the billing address is blocked with an explanation.
+
+Playwright starts the app itself on port 3100 (`E2E_PORT` to change) at `acme.localhost`, so tenant resolution is exercised through the subdomain rather than the dev fallback. First run locally: `pnpm --filter web exec playwright install chromium`.

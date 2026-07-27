@@ -4,6 +4,46 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-012: Object storage is an adapter, and uploaded documents are streamed through a route handler
+
+**Context:** Phase 2 introduces file uploads (PAN copy, GST certificate, incorporation certificate). Doc 03 Screen 1.4 says they are "stored in portal object storage; attached to SAP customer via GOS post-creation", but object storage is not on doc 06's adapter list (`gstn`, `einvoice`, `eway`, `payment-gateway`, `notifications`), so it would have been easy to write bytes to disk from inside the onboarding service.
+
+**Decision:** Object storage is an external system like any other, so it gets `packages/adapters/storage` with an `ObjectStorage` contract, two mock drivers (`memory` for tests/CI, `local` for the dev server so uploads survive a hot reload) and an `s3` skeleton that throws `not_implemented`. Documents are **never** exposed by storage key: `/api/admin/onboarding/[id]/documents/[kind]` re-checks the session, the permission and the tenant on every read and streams the bytes itself.
+
+**Consequence:** Isolation for a shared store comes from the caller's key prefix (`<tenantId>/onboarding/<applicationId>/<kind>`) plus the tenant-scoped DB row that references it; the `local` driver additionally refuses any key resolving outside its root. Signed direct-to-bucket URLs are deliberately not used yet — they move the authorization check to the moment a link is minted rather than the moment it is used, which is the wrong trade for statutory documents.
+
+---
+
+## ADR-011: Cross-service orchestration happens in the route handler, not between services
+
+**Context:** Approving an application does three things: create the customer in SAP, record the decision, and issue portal credentials. Per-tenant SAP resolution lives in `@cc/service-sap`, and password hashing lives in `@cc/service-identity` (ADR-008) — but `services -> services` is not an allowed dependency edge (ADR-004), so `@cc/service-onboarding` can import neither.
+
+**Decision:** `approveApplication(tenantId, id, decision, sap)` takes the `SapAdapter` as a parameter — the pattern `getDashboardSummary(adapter, kunnr)` already established in Phase 1 — and returns `{ application, kunnr, contactEmail, legalEntityName }`. The route handler at `/api/admin/onboarding/[id]/approve` resolves the adapter from `@cc/service-sap`, calls onboarding, and then calls `provisionPortalAccess` from `@cc/service-identity`. GSTN and object storage, which no other module owns, _are_ resolved inside the onboarding service.
+
+**Consequence:** The sequencing is visible where it matters — credentials are only issued after SAP has accepted the customer, never before — and no service grows a dependency on another. The cost is that the handler is slightly thicker than a pure delegation; that is accepted, because the alternative is either duplicating the SAP resolver or breaking the boundary rule. If a third caller ever needs the same sequence, it moves into a `packages/services/orchestration` module rather than into either service.
+
+---
+
+## ADR-010: GSTN verification is stored as evidence, and only a state mismatch blocks the applicant
+
+**Context:** Doc 05 §7.1 requires a live GSTN verify on step 2 with "spinner → verified tick with legal name echo → mismatch warning", and says the result "must match Step-1 state code; mismatch blocks continue with explanation". It does not say what the reviewer sees later, or what happens when GSTN itself is down.
+
+**Decision:** Each verification attempt is persisted on the application as `GstinVerification` — the answer, the legal name GSTN returned, the taxpayer status, and `checkedAt` — and the approval screen renders _that_, rather than re-verifying. Outcomes are explicit (`verified` · `mismatch` · `inactive` · `not_found` · `invalid` · `unavailable`), and only the first four block submission: `unavailable` lets the application through to review, per doc 05 P7 ("the portal never hard-fails because SAP is down" — the same holds for GSTN). Changing the GSTIN discards the stored verification, because evidence belongs to a specific number. A legal-name mismatch is a warning, not a block: GSTN's registered name legitimately differs from a trading name.
+
+**Consequence:** The reviewer sees what was actually checked and when, instead of a boolean, and an application submitted during a GSTN outage is visibly unverified rather than silently trusted. The mock driver therefore never echoes the applicant's own input back as the legal name — a mock that did would make the mismatch state untestable.
+
+---
+
+## ADR-009: Applicants hold a draft token, not a session
+
+**Context:** The onboarding wizard is explicitly pre-auth (doc 05 §7.1: "public, pre-auth beyond email verification") and the applicant has no portal user until approval creates one — yet the wizard is a multi-request, resumable, autosaving flow over PAN, GSTIN and bank details, so "public" cannot mean "unaddressed".
+
+**Decision:** `startApplication` mints a 32-byte random draft token, stored on the application row; every applicant-facing operation takes `{ applicationId, draftToken }` and compares the token in constant time, treating a mismatch as **404**. The tenant still comes from the host and every query still runs inside `runWithTenant`, so the token narrows _within_ a tenant and never across one. The token is kept in `localStorage` and sent as `x-draft-token` — never in the URL, where it would leak through the address bar, `Referer`, bookmarks and shared links. `toApplication` never carries it, so it cannot escape through a reviewer's screen.
+
+**Consequence:** An applicant can resume only on the device they started on, which is why `/register/status` says so plainly rather than showing an empty state. Email-verification links (which would make the token portable) arrive with the notifications adapter in Phase 6. `/api/onboarding/*` is in the middleware's public list; `/api/admin/onboarding/*` deliberately is not.
+
+---
+
 ## ADR-008: Dev seed lives in `@cc/service-identity`, not `@cc/db`
 
 **Context:** The conventional home for a Prisma seed is `packages/db/prisma/seed.ts`. But the seed has to create users _with credentials_, and the password-hash format (`scrypt$N$r$p$salt$hash`) is owned by `@cc/service-identity`. `db` may only import `domain` + `config` (ADR-004), so `@cc/db` cannot import the hashing function — and hand-copying the format into the seed is exactly the duplication CLAUDE.md rule 3 forbids.

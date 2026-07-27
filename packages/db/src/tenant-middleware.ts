@@ -12,6 +12,7 @@ const TENANT_SCOPED_MODELS = new Set([
   "UserAccountLink",
   "OnboardingApplication",
   "OnboardingDocument",
+  "OnboardingEvent",
   "SalesOrder",
   "SalesOrderLine",
   "AuditLog",

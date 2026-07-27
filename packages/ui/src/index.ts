@@ -5,6 +5,8 @@ export * from "./tokens";
 export * from "./primitives/button";
 export * from "./primitives/input";
 export * from "./primitives/badge";
+export * from "./primitives/select";
+export * from "./primitives/textarea";
 export * from "./primitives/tooltip";
 export * from "./primitives/skeleton";
 
@@ -15,6 +17,10 @@ export * from "./components/SapField";
 export * from "./components/DataTable";
 export * from "./components/SapSyncIndicator";
 export * from "./components/KpiCard";
+export * from "./components/WizardShell";
+export * from "./components/FileUpload";
+export * from "./components/ComplianceBadge";
+export * from "./components/DecisionGate";
 
 export * from "./layout/AppShell";
 export * from "./layout/TopBar";

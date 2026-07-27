@@ -12,6 +12,8 @@ env:
   AUTH_SECRET: "ci-only-secret-not-used-anywhere-else-32c"
   ROOT_DOMAIN: "localhost"
   DEFAULT_TENANT_SLUG: "acme"
+  # Uploads land in an in-process store; nothing to clean up between jobs.
+  STORAGE_DRIVER: "memory"
 
 jobs:
   ci:
@@ -65,6 +67,12 @@ jobs:
       - name: Cross-tenant isolation tests
         run: pnpm --filter @cc/db test:isolation
 
+      # The onboarding vertical end to end (registry -> service -> mock SAP/
+      # GSTN/storage) against a real database, including its own cross-tenant
+      # 404 cases. Separate from the unit step because it needs Postgres.
+      - name: Onboarding flow tests
+        run: pnpm --filter @cc/service-onboarding test:integration
+
       # Proves the seed still matches the schema and the tenant-scoped
       # writes it performs — it is the fixture every future e2e run needs.
       - name: Seed development data
@@ -73,5 +81,11 @@ jobs:
       - name: Build
         run: pnpm turbo run build
 
-      # e2e (Playwright, per docs/06) is added once module screens exist to
-      # exercise — Phase 0 has scaffold pages only, no user flows yet.
+      - name: Install Playwright browser
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      # Module happy path against the mock adapters (docs/06 definition of
+      # done). Phase 2's flow is the onboarding wizard through to the
+      # back-office approval.
+      - name: E2E smoke tests
+        run: pnpm --filter web test:e2e
