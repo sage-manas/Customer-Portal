@@ -4,7 +4,7 @@ Design tokens, shadcn-style primitives, and the domain components that make this
 
 ## Public API
 
-Import everything from the package root: `import { AppShell, PageHeader, Button, Select, Textarea, StatusBadge, Money, DataTable, SapField, DocumentNumber, SapSyncIndicator, KpiCard, WizardShell, FormSection, FileUpload, ComplianceBadge, DecisionGate } from "@cc/ui"`. Also exports `./globals.css` (Tailwind directives + `tokens.css`) for apps to import once at the root layout.
+Import everything from the package root: `import { AppShell, PageHeader, Button, Select, Textarea, StatusBadge, Money, DataTable, SapField, DocumentNumber, SapSyncIndicator, KpiCard, WizardShell, FormSection, FileUpload, ComplianceBadge, DecisionGate, StockChip, QtyStepper, ProductCard, CartDrawer, CartButton } from "@cc/ui"`. Also exports `./globals.css` (Tailwind directives + `tokens.css`) for apps to import once at the root layout.
 
 ## Tokens
 
@@ -23,6 +23,10 @@ Import everything from the package root: `import { AppShell, PageHeader, Button,
 - **`FileUpload`** — drag-drop with type/size validation, uploading/scanning/uploaded/error states. A client component. Its caps come from `@cc/config`, the same constants the storage adapter enforces server-side, so the hint and the rule cannot drift.
 - **`ComplianceBadge`** — GSTIN / IRN / e-way bill as trust signals (docs/05 P5), with copy and a verified/failed state. The state is _reported_ by the caller, never inferred from the string: a tick nobody earned is a false compliance claim.
 - **`DecisionGate`** — pass/fail check list for approval and process-flow screens, so a reviewer decides against evidence rather than a wall of fields.
+- **`StockChip`** — In stock / Low / Out (docs/05 §7.2). Renders a `StockAvailability`; it never classifies a quantity itself — `stockAvailability()` in `@cc/domain` is the single authority, so the card, the drawer and the plant table cannot disagree about "low".
+- **`QtyStepper`** — MOQ-aware quantity control: MVKE-MINBM is both the floor and the step. A courtesy check, not the control — the cart service and SAP enforce it again.
+- **`ProductCard`** — catalogue card with MATNR in mono, "your price", stock chip, stepper and Add to Cart. Price and stock are **optional props** because doc 05 requires them to load lazily per card; pass `pricingLoading` for the skeleton.
+- **`CartDrawer`** / **`CartButton`** — the persistent cart drawer with line edit, per-line issue rendering, and the split CTA (Request Quote vs Create Order). It renders the issues the service computed and decides nothing.
 
 `SapField` also renders a `<select>` when given `options`; the lists themselves (state codes, GST registration types, account groups) come from `@cc/domain`, never from the component.
 

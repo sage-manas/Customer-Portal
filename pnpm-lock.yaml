@@ -35,6 +35,9 @@ importers:
       '@cc/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@cc/service-catalogue':
+        specifier: workspace:*
+        version: link:../../packages/services/catalogue
       '@cc/service-identity':
         specifier: workspace:*
         version: link:../../packages/services/identity
@@ -213,6 +216,37 @@ importers:
       '@cc/config':
         specifier: workspace:*
         version: link:../config
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/services/catalogue:
+    dependencies:
+      '@cc/adapter-sap':
+        specifier: workspace:*
+        version: link:../../adapters/sap
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)

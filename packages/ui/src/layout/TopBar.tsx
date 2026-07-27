@@ -28,6 +28,12 @@ export interface TopBarProps {
   onSearch?: () => void;
   onSignOut?: () => void;
   notificationCount?: number;
+  /**
+   * Module-owned controls placed left of the bell — the cart trigger is the
+   * first (docs/05 §7.2, persistent drawer). The shell renders whatever it
+   * is given and knows nothing about carts.
+   */
+  actions?: React.ReactNode;
   className?: string;
 }
 
@@ -41,6 +47,7 @@ export function TopBar({
   onSearch,
   onSignOut,
   notificationCount = 0,
+  actions,
   className,
 }: TopBarProps) {
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -90,6 +97,7 @@ export function TopBar({
       ) : null}
 
       <div className="ml-auto flex items-center gap-1">
+        {actions}
         <button
           type="button"
           aria-label={

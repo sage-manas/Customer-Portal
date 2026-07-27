@@ -188,6 +188,44 @@ model OnboardingEvent {
   @@map("onboarding_events")
 }
 
+/// Catalogue cart (docs/05 §7.2). Portal-owned staging area — SAP has no
+/// cart, so this is one of the few tables holding transactional data of its
+/// own. Scoped to a sold-to account rather than a user: colleagues on the
+/// same KUNNR build one basket, and the split CTA (Request Quote vs Create
+/// Order) may be exercised by whichever of them holds the permission.
+model Cart {
+  id            String   @id @default(cuid())
+  tenantId      String
+  customerKunnr String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines CartLine[]
+
+  /// One open cart per account, which is what makes add-to-cart idempotent.
+  @@unique([tenantId, customerKunnr])
+  @@index([tenantId])
+  @@map("carts")
+}
+
+/// A prospective order line. Price and stock are deliberately NOT stored:
+/// they are per-customer SAP reads that go stale, so the service reprices
+/// on every read (docs/05 P1 — the UI is honest about freshness).
+model CartLine {
+  id       String   @id @default(cuid())
+  tenantId String
+  cartId   String
+  cart     Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  material String
+  quantity Decimal
+  addedAt  DateTime @default(now())
+
+  /// Adding a material already in the cart updates its quantity.
+  @@unique([tenantId, cartId, material])
+  @@index([tenantId])
+  @@map("cart_lines")
+}
+
 model SalesOrder {
   id            String   @id @default(cuid())
   tenantId      String

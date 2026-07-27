@@ -77,7 +77,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "ShoppingCart",
     accent: "catalog",
     permission: "catalogue:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "inquiries",

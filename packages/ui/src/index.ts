@@ -21,6 +21,10 @@ export * from "./components/WizardShell";
 export * from "./components/FileUpload";
 export * from "./components/ComplianceBadge";
 export * from "./components/DecisionGate";
+export * from "./components/StockChip";
+export * from "./components/QtyStepper";
+export * from "./components/ProductCard";
+export * from "./components/CartDrawer";
 
 export * from "./layout/AppShell";
 export * from "./layout/TopBar";
