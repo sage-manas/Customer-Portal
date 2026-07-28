@@ -19,7 +19,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
  *   adapters -> domain only (never services)
  *   db -> domain only
  *   domain -> nothing internal
- *   nothing imports from apps
+ *   workers -> services + adapters + db + domain (docs/DECISIONS.md ADR-022)
+ *   nothing imports from apps or workers
  */
 export const boundariesElements = [
   { type: "domain", pattern: "packages/domain/**" },
@@ -28,6 +29,7 @@ export const boundariesElements = [
   { type: "adapters", pattern: "packages/adapters/**" },
   { type: "db", pattern: "packages/db/**" },
   { type: "config", pattern: "packages/config/**" },
+  { type: "workers", pattern: "packages/workers/**" },
   { type: "apps", pattern: "apps/**" },
 ];
 
@@ -42,6 +44,11 @@ const boundariesRules = [
   { from: "db", allow: ["domain", "config"] },
   { from: "config", allow: [] },
   { from: "apps", allow: ["ui", "services", "domain", "config"] },
+  // The background layer (ADR-022). It is the only element allowed to touch
+  // two services in one file — that is what a relay handler is for — and,
+  // like `apps`, nothing may import *from* it, so queue work can never creep
+  // back onto the request path.
+  { from: "workers", allow: ["services", "adapters", "db", "domain", "config"] },
 ];
 
 export const baseConfig = tseslint.config(
