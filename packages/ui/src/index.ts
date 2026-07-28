@@ -26,6 +26,7 @@ export * from "./components/QtyStepper";
 export * from "./components/ProductCard";
 export * from "./components/CartDrawer";
 export * from "./components/O2CTimeline";
+export * from "./components/DeliveryTracker";
 export * from "./components/AmountAging";
 
 export * from "./layout/AppShell";

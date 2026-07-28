@@ -31,6 +31,7 @@ const order: OrderStatusView = {
 const delivery: Delivery = {
   vbeln: "0080001947",
   salesOrder: order.vbeln,
+  kunnr: order.kunnr,
   status: "InTransit",
   plannedGoodsIssue: "2026-07-24",
   actualGoodsIssue: "2026-07-24",
