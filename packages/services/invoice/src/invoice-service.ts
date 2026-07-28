@@ -289,7 +289,7 @@ async function resolveOrder(
   if (direct) return direct;
 
   const delivery = await adapter
-    .getDeliveryDetail(invoice.reference)
+    .getDelivery(invoice.reference)
     .then((read) => read.data)
     .catch(() => null);
   if (!delivery) return null;
@@ -303,7 +303,7 @@ async function resolveOrder(
 async function resolveDeliveries(adapter: SapAdapter, invoice: Invoice): Promise<Delivery[]> {
   if (!invoice.reference) return [];
   return adapter
-    .getDeliveryDetail(invoice.reference)
+    .getDelivery(invoice.reference)
     .then((read) => [read.data])
     .catch(() => []);
 }

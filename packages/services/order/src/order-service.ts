@@ -202,7 +202,7 @@ export async function getOrder(
 
   const [deliveries, invoices] = await Promise.all([
     adapter
-      .getDeliveries(vbeln)
+      .getDeliveriesForOrder(vbeln)
       .then((read) => read.data)
       .catch(() => [] as Delivery[]),
     adapter
