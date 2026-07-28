@@ -25,8 +25,20 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 export const boundariesElements = [
   { type: "domain", pattern: "packages/domain/**" },
   { type: "ui", pattern: "packages/ui/**" },
-  { type: "services", pattern: "packages/services/**" },
-  { type: "adapters", pattern: "packages/adapters/**" },
+  /**
+   * `packages/services/*` with a capture, not `packages/services/**` — and
+   * the same for adapters. The difference is not cosmetic: with `**`, every
+   * service package resolved to the *same* element, so an import from one
+   * service to another was an intra-element import, which `element-types`
+   * does not check. ADR-011's central rule ("a service may not import
+   * another service") was therefore never enforced, silently, in exactly the
+   * way ADR-024 describes — found by running the negative control it
+   * mandates while building A2. Capturing the module makes each package its
+   * own element, so `services -> services` is a cross-element import and the
+   * `from: "services"` rule below (which does not allow `services`) applies.
+   */
+  { type: "services", pattern: "packages/services/*", capture: ["module"] },
+  { type: "adapters", pattern: "packages/adapters/*", capture: ["module"] },
   { type: "db", pattern: "packages/db/**" },
   { type: "config", pattern: "packages/config/**" },
   { type: "workers", pattern: "packages/workers/**" },
