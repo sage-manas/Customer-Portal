@@ -1,6 +1,6 @@
 import { isPaymentGatewayError, type PaymentGateway } from "@cc/adapter-payment";
 import { isSapError, type SapAdapter } from "@cc/adapter-sap";
-import { db, getTenantId, runWithTenant } from "@cc/db";
+import { db, getTenantId, runWithTenant, writeOutboxEvent } from "@cc/db";
 import type { Payment, PaymentInitiateInput, PaymentStatus } from "@cc/domain";
 import {
   allocationTotal,
@@ -303,9 +303,31 @@ export async function handleGatewayWebhook(
   // from the posting, so a SAP failure can never lose the fact of the charge.
   if (canTransitionPayment(current, "captured")) {
     await runWithTenant(tenantId, () =>
-      db.payment.update({
-        where: { id: row.id },
-        data: { state: "captured", lastEventId: event.eventId },
+      db.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { id: row.id },
+          data: { state: "captured", lastEventId: event.eventId },
+        });
+
+        // Same transaction as the capture itself (ADR-023). The posting is
+        // still attempted inline below — this event is what makes sure it
+        // *eventually* happens when that attempt fails, which until now
+        // nothing did: a payment that captured cleanly and then met a SAP
+        // outage had no second chance, because no further webhook is coming.
+        await writeOutboxEvent(tx, {
+          name: "payment.captured",
+          payload: {
+            occurredAt: new Date(),
+            paymentId: row.id,
+            kunnr: row.customerKunnr,
+            amount: toNumber(row.amount),
+            currency: row.currency,
+          },
+          // The payment id, not the gateway event id: a redelivered webhook
+          // and a reconciliation retry describe the same capture and must
+          // produce one event.
+          dedupeKey: `payment.captured:${row.id}`,
+        });
       }),
     );
   }
@@ -369,26 +391,43 @@ export async function postCapturedPayment(
 
   const cleared = new Set(result.clearedItems);
 
-  await runWithTenant(tenantId, async () => {
-    await db.payment.update({
-      where: { id: row.id },
-      data: {
-        state: "posted",
-        fiDocumentNumber: result.documentNumber,
-        postedAt: new Date(),
-      },
-    });
-    // Which items actually cleared vs. left a residual — the receipt says so,
-    // and reconciliation needs it.
-    await Promise.all(
-      row.allocations.map((allocation) =>
-        db.paymentAllocation.updateMany({
-          where: { paymentId: row.id, documentNumber: allocation.documentNumber },
-          data: { cleared: cleared.has(allocation.documentNumber) },
-        }),
-      ),
-    );
-  });
+  await runWithTenant(tenantId, () =>
+    db.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: row.id },
+        data: {
+          state: "posted",
+          fiDocumentNumber: result.documentNumber,
+          postedAt: new Date(),
+        },
+      });
+      // Which items actually cleared vs. left a residual — the receipt says so,
+      // and reconciliation needs it.
+      await Promise.all(
+        row.allocations.map((allocation) =>
+          tx.paymentAllocation.updateMany({
+            where: { paymentId: row.id, documentNumber: allocation.documentNumber },
+            data: { cleared: cleared.has(allocation.documentNumber) },
+          }),
+        ),
+      );
+
+      // The receipt is final, so the customer can be told (A7 consumes this).
+      // Written here rather than after the transaction so it cannot be
+      // emitted for a posting that then rolled back — a "payment confirmed"
+      // email for a payment SAP never accepted is the worst of both.
+      await writeOutboxEvent(tx, {
+        name: "payment.posted",
+        payload: {
+          occurredAt: new Date(),
+          paymentId: row.id,
+          kunnr: row.customerKunnr,
+          fiDocumentNumber: result.documentNumber,
+        },
+        dedupeKey: `payment.posted:${row.id}`,
+      });
+    }),
+  );
 
   return { status: "posted", fiDocumentNumber: result.documentNumber };
 }

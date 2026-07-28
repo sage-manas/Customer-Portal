@@ -45,6 +45,7 @@ describe("payment flow", () => {
   async function wipe() {
     for (const tenant of [tenantA, tenantB]) {
       await runWithTenant(tenant.id, async () => {
+        await db.outboxEvent.deleteMany();
         await db.paymentAllocation.deleteMany();
         await db.payment.deleteMany();
       });
@@ -366,6 +367,74 @@ describe("payment flow", () => {
       const payment = await getPayment(tenantA.id, KUNNR, initiated.paymentId);
       expect(payment.amount).toBe(1234.57);
       expect(payment.allocations[0]?.amount).toBe(1234.57);
+    });
+  });
+
+  describe("outbox (ADR-023)", () => {
+    async function events(tenantId = tenantA.id) {
+      return runWithTenant(tenantId, () =>
+        db.outboxEvent.findMany({ orderBy: { createdAt: "asc" } }),
+      );
+    }
+
+    it("records captured and posted in the transactions that made them true", async () => {
+      const { initiated } = await pay(1000);
+
+      const rows = await events();
+      const names = rows.map((row) => row.eventName);
+
+      expect(names).toContain("payment.captured");
+      expect(names).toContain("payment.posted");
+      expect(rows.every((row) => row.state === "pending")).toBe(true);
+      // Keyed on the payment, not the gateway event: a redelivery and a
+      // reconciliation retry describe the same capture.
+      expect(rows.map((row) => row.dedupeKey)).toContain(`payment.captured:${initiated.paymentId}`);
+    });
+
+    it("emits one captured event however many times the webhook is redelivered", async () => {
+      const d = deps();
+      const initiated = await initiatePayment(
+        tenantA.id,
+        KUNNR,
+        { mode: "upi", allocations: [{ documentNumber: OVERDUE_INVOICE, amount: 1000 }] },
+        d,
+      );
+      const { body, signature } = d.gateway.buildWebhook(initiated.gatewayReference);
+
+      await handleGatewayWebhook(tenantA.id, body, signature, d);
+      await handleGatewayWebhook(tenantA.id, body, signature, d);
+
+      const captured = (await events()).filter((row) => row.eventName === "payment.captured");
+      expect(captured).toHaveLength(1);
+    });
+
+    it("emits no posted event when SAP refuses the posting", async () => {
+      const gateway = new MockPaymentGateway();
+      const initiated = await initiatePayment(
+        tenantA.id,
+        KUNNR,
+        { mode: "upi", allocations: [{ documentNumber: OVERDUE_INVOICE, amount: 1000 }] },
+        { sap: new MockSapAdapter(), gateway },
+      );
+      const { body, signature } = gateway.buildWebhook(initiated.gatewayReference);
+
+      await expect(
+        handleGatewayWebhook(tenantA.id, body, signature, {
+          sap: new MockSapAdapter({ unavailable: true }),
+          gateway,
+        }),
+      ).rejects.toMatchObject({ code: "posting_failed" });
+
+      const names = (await events()).map((row) => row.eventName);
+      // The capture happened and is announced; the posting did not, so no
+      // "payment confirmed" event exists to tell the customer otherwise.
+      expect(names).toContain("payment.captured");
+      expect(names).not.toContain("payment.posted");
+    });
+
+    it("keeps each tenant's events to itself", async () => {
+      await pay(1000);
+      expect(await events(tenantB.id)).toEqual([]);
     });
   });
 });
