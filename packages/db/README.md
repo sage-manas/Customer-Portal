@@ -18,6 +18,28 @@ Always import `db` from `./client` (or the package root) — never instantiate `
 3. Run `pnpm --filter @cc/db db:push` (dev) or add a migration.
 4. Add an isolation-test case in `src/__tests__/tenant-isolation.test.ts` covering it.
 
+## The transactional outbox (`src/outbox.ts`, docs/DECISIONS.md ADR-023)
+
+Asynchronous work is produced here and nowhere else. A service records an effect by calling `writeOutboxEvent(tx, …)` **inside the same `db.$transaction` as the state change that justifies it** — one commit, so an event can neither be lost after its cause committed nor fired for a transaction that rolled back.
+
+```ts
+await runWithTenant(tenantId, () =>
+  db.$transaction(async (tx) => {
+    await tx.payment.update({ where: { id }, data: { state: "captured" } });
+    await writeOutboxEvent(tx, {
+      name: "payment.captured", // a DomainEventName from the @cc/domain registry
+      payload: { occurredAt: new Date(), paymentId: id, kunnr, amount, currency },
+      dedupeKey: `payment.captured:${id}`, // producer-side idempotency
+    });
+  }),
+);
+```
+
+- The payload is validated against the event's registered Zod schema, so a malformed event fails at the producer.
+- `dedupeKey` is unique per tenant: a producer that runs twice writes the same key and the second write is a **no-op**, not an error (a retried webhook must not fail the operation it's attached to). Key it on the cause, never a timestamp.
+- `recordEvent(...)` is the shorthand for the no-transaction case.
+- Nothing here publishes. The relay in `@cc/workers` is the only thing that talks to BullMQ; this package never imports it (`db -> domain, config` only).
+
 ## Local development
 
 ```

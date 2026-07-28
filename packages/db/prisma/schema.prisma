@@ -70,6 +70,7 @@ model Tenant {
   onboardingApps      OnboardingApplication[]
   salesOrders         SalesOrder[]
   payments            Payment[]
+  outboxEvents        OutboxEvent[]
   auditLogs           AuditLog[]
 
   @@map("tenants")
@@ -361,6 +362,63 @@ model PaymentAllocation {
   @@unique([tenantId, paymentId, documentNumber])
   @@index([tenantId])
   @@map("payment_allocations")
+}
+
+/// Relay state of an outbox row. Deliberately not merged with a nullable
+/// `publishedAt`: `failed` is a state an operator must be able to *list*
+/// (docs/07 B4's exception tray), and "published is null and attempts > 3"
+/// is a query nobody remembers to write correctly.
+enum OutboxState {
+  pending
+  publishing
+  published
+  failed
+}
+
+/// The transactional outbox (docs/DECISIONS.md ADR-023).
+///
+/// A service writes one of these in the *same transaction* as the state
+/// change that caused it, and the relay in `@cc/workers` is the only thing
+/// that publishes to BullMQ. That is the whole point: there is one commit,
+/// so an event can neither be lost after its cause committed nor fired for a
+/// transaction that rolled back.
+///
+/// Nothing here is a projection of business data — `payload` is the event's
+/// registered `@cc/domain` shape and answers "what happened", never "what is
+/// true now". A handler that needs current state re-reads it (ADR-016).
+model OutboxEvent {
+  id        String      @id @default(cuid())
+  tenantId  String
+  tenant    Tenant      @relation(fields: [tenantId], references: [id])
+  /// A `DomainEventName` from the @cc/domain registry — never a free string.
+  eventName String
+  /// Validated against the event's registered Zod schema before it is
+  /// written, and again by the worker before a handler sees it.
+  payload   Json
+  /// The BullMQ queue this routes to, denormalised from the registry so the
+  /// relay can batch by queue without loading the domain package per row.
+  queue     String
+  /// Producer-side idempotency key (ADR-023): a producer that runs twice
+  /// writes the same key and the second write is a no-op. Consumers dedupe
+  /// on their own terms — this key is not theirs.
+  dedupeKey String
+  state     OutboxState @default(pending)
+  /// Relay attempts. Bounded by the worker; a row that exhausts them lands
+  /// in `failed` for the exception tray rather than spinning forever.
+  attempts  Int         @default(0)
+  lastError String?
+  /// When the *fact* occurred — not when it was relayed. An SLA timer must
+  /// measure from here (see @cc/domain events.ts).
+  occurredAt  DateTime  @default(now())
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([tenantId, dedupeKey])
+  /// The relay's only query: oldest pending rows first, per tenant.
+  @@index([tenantId, state, occurredAt])
+  @@index([tenantId])
+  @@map("outbox_events")
 }
 
 model AuditLog {

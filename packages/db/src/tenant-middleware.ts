@@ -19,6 +19,7 @@ const TENANT_SCOPED_MODELS = new Set([
   "SalesOrderLine",
   "Payment",
   "PaymentAllocation",
+  "OutboxEvent",
   "AuditLog",
 ]);
 

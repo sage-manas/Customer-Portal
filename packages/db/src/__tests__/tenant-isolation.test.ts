@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { db, getTenantId, runWithTenant } from "../index";
+import { db, getTenantId, runWithTenant, writeOutboxEvent } from "../index";
 
 /**
  * Cross-tenant isolation tests (docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md:
@@ -33,13 +33,17 @@ describe("tenant isolation", () => {
 
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
+      await db.outboxEvent.deleteMany();
       await db.cartLine.deleteMany();
       await db.cart.deleteMany();
       await db.onboardingEvent.deleteMany();
       await db.onboardingApplication.deleteMany();
       await db.user.deleteMany();
     });
-    await runWithTenant(tenantB.id, () => db.user.deleteMany());
+    await runWithTenant(tenantB.id, async () => {
+      await db.outboxEvent.deleteMany();
+      await db.user.deleteMany();
+    });
     await db.tenant.deleteMany({ where: { id: { in: [tenantA.id, tenantB.id] } } });
     await db.$disconnect();
   });
@@ -151,5 +155,49 @@ describe("tenant isolation", () => {
     // must still be unreachable from the other.
     expect(cartForTenantB).toBeNull();
     expect(linesForTenantB).toEqual([]);
+  });
+
+  it("scopes the outbox, including its dedupe key (ADR-023)", async () => {
+    const dedupeKey = `payment.captured:shared-${runId}`;
+
+    const forA = await runWithTenant(tenantA.id, () =>
+      writeOutboxEvent(db, {
+        name: "payment.captured",
+        payload: {
+          occurredAt: new Date(),
+          paymentId: `pay-a-${runId}`,
+          kunnr: "0010001001",
+          amount: 100,
+          currency: "INR",
+        },
+        dedupeKey,
+      }),
+    );
+
+    // The dedupe key is unique *per tenant*, not globally: two tenants
+    // legitimately produce the same logical event, and one must not silence
+    // the other's.
+    const forB = await runWithTenant(tenantB.id, () =>
+      writeOutboxEvent(db, {
+        name: "payment.captured",
+        payload: {
+          occurredAt: new Date(),
+          paymentId: `pay-b-${runId}`,
+          kunnr: "0010001001",
+          amount: 100,
+          currency: "INR",
+        },
+        dedupeKey,
+      }),
+    );
+
+    expect(forA).toBeTruthy();
+    expect(forB).toBeTruthy();
+    expect(forA).not.toBe(forB);
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.outboxEvent.findUnique({ where: { id: forA! } }),
+    );
+    expect(asSeenByTenantB).toBeNull();
   });
 });
