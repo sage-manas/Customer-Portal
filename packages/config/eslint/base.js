@@ -70,9 +70,45 @@ export const baseConfig = tseslint.config(
   {
     plugins: { boundaries, import: importPlugin },
     settings: {
-      "boundaries/root": repoRoot,
+      /**
+       * Without this, the boundary rules below are decorative.
+       *
+       * pnpm links workspace packages as symlinks, so `@cc/db` resolves to
+       * `packages/services/payment/node_modules/@cc/db/src/index.ts` — a path
+       * that matches none of the element patterns. eslint-plugin-boundaries
+       * stays silent on imports it cannot classify, so *every* cross-package
+       * import in the repo was going unchecked. `preserveSymlinks: false`
+       * resolves through the link to `packages/db/src/index.ts`, which the
+       * `db` pattern matches. The extensions list is needed for the same
+       * reason: every package's entry point is a `.ts` file, which the
+       * resolver does not consider by default.
+       */
+      "import/resolver": {
+        node: {
+          extensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"],
+          preserveSymlinks: false,
+        },
+      },
+      /**
+       * `boundaries/root-path`, not `boundaries/root` — the latter is not a
+       * setting the plugin reads, so it was silently ignored and the plugin
+       * fell back to `process.cwd()`. Each package runs `eslint .` from its
+       * own directory, which made every file's path relative to *that*
+       * package, so `packages/services/**` matched nothing and every file
+       * was "not of any known element type". An unclassified file is one the
+       * rule says nothing about, which is why the boundaries were passing.
+       */
+      "boundaries/root-path": repoRoot,
       "boundaries/elements": boundariesElements,
-      "boundaries/ignore": ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts"],
+      "boundaries/ignore": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        // Tooling config, not application code — it takes part in no layer.
+        // (It also can't be classified: a glob's `**` does not cross a
+        // dot-directory, so `packages/ui/**` never matched `.storybook/`.)
+        "**/.storybook/**",
+      ],
     },
     rules: {
       "@typescript-eslint/no-explicit-any": ["error", { ignoreRestArgs: false }],
@@ -88,6 +124,14 @@ export const baseConfig = tseslint.config(
           alphabetize: { order: "asc", caseInsensitive: true },
         },
       ],
+      /**
+       * The guard on the guard. `element-types` says nothing about a file it
+       * cannot classify, so a misconfiguration doesn't fail — it goes quiet,
+       * which is exactly how the `boundaries/root` typo above survived. This
+       * rule makes an unclassifiable file an error in its own right, so the
+       * next time the settings drift, CI says so instead of shrugging.
+       */
+      "boundaries/no-unknown-files": "error",
       "boundaries/element-types": [
         "error",
         {

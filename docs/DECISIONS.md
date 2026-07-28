@@ -4,6 +4,16 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-024: The boundary rules are verified by a negative control, not by a green CI run
+
+**Context:** CLAUDE.md rule 1 has said since Phase 0 that the dependency graph is "enforced by `eslint-plugin-boundaries`", and lint had been green for five phases. While adding the `workers` edge (ADR-022) the obvious sanity check — temporarily forbid something that is definitely imported and watch the error appear — produced nothing. Two independent misconfigurations were suppressing every check: the settings key was `boundaries/root` where the plugin reads **`boundaries/root-path`**, so it fell back to `process.cwd()` and, because each package runs `eslint .` from its own directory, no file's path ever matched `packages/services/**`; and the resolver returned pnpm's **symlink** path (`packages/services/payment/node_modules/@cc/db/...`) for every workspace import, which matches no element pattern either. The plugin says nothing about a file or a dependency it cannot classify. So the rule was not failing — it was silent, which looks identical from CI.
+
+**Decision:** Fix both (`boundaries/root-path`, and an `import/resolver` with `preserveSymlinks: false` plus TypeScript extensions), and then add **`boundaries/no-unknown-files`** as a permanent rule. That is the part worth recording: an unclassifiable file is now an error in its own right, so the failure mode that hid this — a rule going quiet rather than red — becomes loud the next time the settings drift. `.storybook/**` joins the ignore list, since tooling config takes part in no layer (and a glob's `**` does not cross a dot-directory, so it could not be classified anyway).
+
+**Consequence:** The architecture turned out to be intact — with enforcement genuinely on, the repo has zero violations, so five phases of hand-maintained discipline held. But that was luck, not a control, and every ADR that leans on the boundaries (ADR-004, ADR-011, ADR-022) was resting on a rule that had never once fired. The general lesson is the reason this is an ADR and not a commit message: **a passing test that has never been observed to fail is not evidence.** Any future rule whose job is to forbid something should be checked the same way — break it deliberately, watch it complain, put it back.
+
+---
+
 ## ADR-023: Every cross-module effect goes through the outbox, written in the same transaction as the fact that caused it
 
 **Context:** docs/07 A1 asks for an outbox table and a BullMQ relay, but leaves open how much may bypass it. From A2 onwards, modules need to cause effects in each other — a POD discrepancy raises a support ticket, a posted payment sends an email, an SLA timer breaches. The two obvious shortcuts are for a service to call another service directly (already forbidden: CLAUDE.md, ADR-011) or for a route handler to enqueue to BullMQ itself after its database write commits.

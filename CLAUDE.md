@@ -5,7 +5,7 @@ Guidance for Claude Code (or any future session) working in this repo. Read `doc
 ## The rules that must never be silently broken
 
 1. **Dependency boundaries** (enforced by `eslint-plugin-boundaries`, `packages/config/eslint/base.js`):
-   `domain -> config only` · `ui -> domain, config` · `services -> domain, adapters, db, config` · `adapters -> domain, config` (never `services`) · `db -> domain, config` · `apps -> ui, services, domain, config` · `workers -> services, adapters, db, domain, config` · nothing imports from `apps` **or `workers`**. `config` has zero dependencies of its own. Full rationale: `docs/DECISIONS.md` ADR-004, and ADR-022 for the workers edge.
+   `domain -> config only` · `ui -> domain, config` · `services -> domain, adapters, db, config` · `adapters -> domain, config` (never `services`) · `db -> domain, config` · `apps -> ui, services, domain, config` · `workers -> services, adapters, db, domain, config` · nothing imports from `apps` **or `workers`**. `config` has zero dependencies of its own. Full rationale: `docs/DECISIONS.md` ADR-004, ADR-022 for the workers edge, and ADR-024 for why enforcement is checked with a negative control (break a rule on purpose, watch it complain, put it back) rather than trusted because lint is green.
 
 2. **Mock-first.** Every external system (SAP, GSTN, e-invoice, e-way bill, payment gateway) sits behind an interface with a mock implementation built first. App/service code never imports a driver directly — only the interface, resolved per tenant via a factory.
 
