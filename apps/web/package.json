@@ -16,6 +16,7 @@
     "@cc/config": "workspace:*",
     "@cc/domain": "workspace:*",
     "@cc/service-catalogue": "workspace:*",
+    "@cc/service-delivery": "workspace:*",
     "@cc/service-identity": "workspace:*",
     "@cc/service-invoice": "workspace:*",
     "@cc/service-onboarding": "workspace:*",

@@ -1,5 +1,6 @@
 import type { Permission, SessionClaims } from "@cc/domain";
 import { isCatalogueError } from "@cc/service-catalogue";
+import { isDeliveryError } from "@cc/service-delivery";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInvoiceError } from "@cc/service-invoice";
 import { isOrderError } from "@cc/service-order";
@@ -27,6 +28,7 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
   if (
     isCatalogueError(error) ||
     isOrderError(error) ||
+    isDeliveryError(error) ||
     isInvoiceError(error) ||
     isPaymentError(error)
   ) {

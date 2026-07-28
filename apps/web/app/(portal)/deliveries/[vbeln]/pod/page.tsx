@@ -1,0 +1,81 @@
+import { getPodFormDefaults, isDeliveryError } from "@cc/service-delivery";
+import { getSapAdapterForTenant } from "@cc/service-sap";
+import { PageHeader, SapSyncIndicator, formatDisplayDate } from "@cc/ui";
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+
+import { PodForm } from "./PodForm";
+
+import { getSession } from "@/lib/session";
+
+/**
+ * Proof of Delivery (docs/03 Screen 5.2, docs/05 §7.5).
+ *
+ * Whether this screen may be opened at all is decided by the service, not by
+ * whoever linked to it: a customer who bookmarks this URL for a shipment
+ * still in the warehouse — or one already signed for — gets the same answer
+ * as one who never saw a button. Permission is enforced here *and* on the
+ * POST behind it; hiding the link is presentation, the route is the control
+ * (docs/05 §4.3).
+ */
+
+export const dynamic = "force-dynamic";
+
+export default async function PodPage({ params }: { params: Promise<{ vbeln: string }> }) {
+  const session = await getSession();
+  if (!session) redirect("/login");
+
+  const { vbeln } = await params;
+
+  // A view-only buyer must not be handed a form they cannot submit.
+  if (!session.roles.some((role) => role !== "buyer_view_only")) redirect(`/deliveries/${vbeln}`);
+
+  const sap = await getSapAdapterForTenant(session.tenantId);
+  const defaults = await getPodFormDefaults(sap, session.kunnr, vbeln).catch((error: unknown) => {
+    if (isDeliveryError(error) && error.code === "not_found") notFound();
+    // Not despatched, or already signed for: the shipment screen explains
+    // which, and it is the right place to land.
+    if (isDeliveryError(error) && error.code === "not_allowed") redirect(`/deliveries/${vbeln}`);
+    throw error;
+  });
+
+  const { delivery } = defaults;
+
+  return (
+    <>
+      <nav aria-label="Breadcrumb" className="text-[11.5px] text-text-dim">
+        <Link href="/deliveries" className="hover:text-primary">
+          Deliveries
+        </Link>
+        <span aria-hidden> / </span>
+        <Link href={`/deliveries/${delivery.vbeln}`} className="font-mono hover:text-primary">
+          {delivery.vbeln}
+        </Link>
+        <span aria-hidden> / </span>
+        <span className="text-text-mid">Proof of delivery</span>
+      </nav>
+
+      <PageHeader
+        title="Confirm receipt"
+        subtitle={
+          delivery.actualGoodsIssue
+            ? `Delivery ${delivery.vbeln}, dispatched ${formatDisplayDate(delivery.actualGoodsIssue)}${delivery.carrier ? ` via ${delivery.carrier}` : ""}.`
+            : `Delivery ${delivery.vbeln}.`
+        }
+        meta={<SapSyncIndicator state={defaults.freshness} syncedAt={defaults.syncedAt} />}
+      />
+
+      <PodForm
+        vbeln={delivery.vbeln}
+        lines={delivery.lines.map((line) => ({
+          lineNo: line.lineNo,
+          material: line.material,
+          description: line.description,
+          uom: line.uom,
+          dispatchedQty: line.quantity,
+        }))}
+        actualGoodsIssue={delivery.actualGoodsIssue}
+      />
+    </>
+  );
+}
