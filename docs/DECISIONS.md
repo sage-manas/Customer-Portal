@@ -4,6 +4,28 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-023: Every cross-module effect goes through the outbox, written in the same transaction as the fact that caused it
+
+**Context:** docs/07 A1 asks for an outbox table and a BullMQ relay, but leaves open how much may bypass it. From A2 onwards, modules need to cause effects in each other — a POD discrepancy raises a support ticket, a posted payment sends an email, an SLA timer breaches. The two obvious shortcuts are for a service to call another service directly (already forbidden: CLAUDE.md, ADR-011) or for a route handler to enqueue to BullMQ itself after its database write commits.
+
+**Decision:** The queue is never written to from application code. A service records its effect by writing an `OutboxEvent` row **inside the same Prisma transaction as the state change that justifies it**, and the only process that publishes to BullMQ is the relay in `@cc/workers`. The event's name and payload shape come from the `DOMAIN_EVENTS` registry in `@cc/domain`, so an event is a declared contract with a Zod schema rather than a string and a `Json` blob. The relay is deliberately **at-least-once**: it claims a batch, publishes, then marks the rows published, and a crash between publish and mark republishes. Handlers are therefore required to be idempotent, and the queue job id is the outbox row id so BullMQ collapses the obvious duplicates on its own.
+
+**Consequence:** The failure mode that makes async systems untrustworthy — the row committed but the event lost, or the event fired for a transaction that then rolled back — is structurally impossible, because there is exactly one commit. The price is latency (an event waits for the next relay tick, not the response) and the standing obligation that every handler be idempotent, which is the same discipline ADR-021 already imposes on payments and is enforced by the dedupe key rather than remembered. Choosing at-least-once over at-most-once is the deliberate half of that trade: a duplicated notification is an annoyance, a dropped dispatch event is a customer who was never told their goods shipped.
+
+**Also decided here:** the dedupe key. `OutboxEvent` carries `@@unique([tenantId, dedupeKey])`, so a producer that runs twice (a retried webhook, a re-processed job) writes the same key and the second write is a no-op rather than a second event. It is the producer's key, not the consumer's — consumers still dedupe on their own terms.
+
+---
+
+## ADR-022: Workers are a new layer with their own edge, not code hidden inside a service
+
+**Context:** docs/07 A1 introduces a background process and names the edge `workers -> services, adapters, db, domain, config`. That edge is unlike any existing one: `services` may not import `services` (ADR-011), yet a worker's whole job is to sequence work across modules — relay an event a delivery service wrote into a ticket the support service creates. Putting the worker inside a service package would have let it borrow that service's identity and quietly acquire an import it isn't allowed.
+
+**Decision:** `packages/workers` (`@cc/workers`) becomes a seventh element type in `packages/config/eslint/base.js` with exactly that allow-list, and **nothing may import from `workers`** — the same rule `apps` has. Its handlers are the one place in the codebase permitted to touch two services in a single file, which is the worker equivalent of the role docs/DECISIONS ADR-011 gives to a route handler: the sequencer sits above the services, passes adapters in, and owns the ordering.
+
+**Consequence:** The cross-module sequencing the remaining Track A phases need has a legal home, and it is a home the linter can see. Because nothing imports `workers`, the process can be deployed separately (its own container, its own scaling) without any package following it, and a route handler cannot start reaching into worker internals to "just run it inline" — which would put queue work back on the request path. The cost is one more layer to keep honest in the boundary rules, and the fact that `apps -> workers` being disallowed means the web app can never enqueue directly; it writes to the outbox, which is what ADR-023 wanted anyway.
+
+---
+
 ## ADR-021: A payment's idempotency is enforced in three places, because one is not enough
 
 **Context:** Doc 02 §6 asks for an "idempotent webhook design". Gateways deliver at least once, and the obvious reading is a single deduplication check — remember which event ids have been seen and drop repeats. The trouble is that a payment can be duplicated at three different moments by three different actors: the customer double-clicking Pay, the gateway redelivering a webhook, and the reconciliation job retrying a posting that timed out somewhere inside SAP.

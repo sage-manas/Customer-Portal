@@ -5,7 +5,7 @@ Guidance for Claude Code (or any future session) working in this repo. Read `doc
 ## The rules that must never be silently broken
 
 1. **Dependency boundaries** (enforced by `eslint-plugin-boundaries`, `packages/config/eslint/base.js`):
-   `domain -> config only` · `ui -> domain, config` · `services -> domain, adapters, db, config` · `adapters -> domain, config` (never `services`) · `db -> domain, config` · `apps -> ui, services, domain, config` · nothing imports from `apps`. `config` has zero dependencies of its own. Full rationale: `docs/DECISIONS.md` ADR-004.
+   `domain -> config only` · `ui -> domain, config` · `services -> domain, adapters, db, config` · `adapters -> domain, config` (never `services`) · `db -> domain, config` · `apps -> ui, services, domain, config` · `workers -> services, adapters, db, domain, config` · nothing imports from `apps` **or `workers`**. `config` has zero dependencies of its own. Full rationale: `docs/DECISIONS.md` ADR-004, and ADR-022 for the workers edge.
 
 2. **Mock-first.** Every external system (SAP, GSTN, e-invoice, e-way bill, payment gateway) sits behind an interface with a mock implementation built first. App/service code never imports a driver directly — only the interface, resolved per tenant via a factory.
 
@@ -30,6 +30,8 @@ pnpm --filter @cc/service-onboarding test:integration   # onboarding flow (needs
 pnpm --filter @cc/service-catalogue test:integration    # cart flow (needs Postgres)
 pnpm --filter @cc/service-order test:integration        # draft -> order flow (needs Postgres)
 pnpm --filter @cc/service-payment test:integration      # pay -> webhook -> SAP posting (needs Postgres)
+pnpm --filter @cc/workers test:integration              # outbox relay (needs Postgres; no Redis)
+pnpm --filter @cc/workers start        # the background process: outbox relay + queue consumers
 pnpm --filter @cc/service-identity db:seed   # dev tenants + users (see its README)
 pnpm --filter @cc/ui storybook        # component development
 pnpm --filter web dev                 # run the Next.js app
@@ -40,7 +42,7 @@ turbo run typecheck lint test build   # whole-repo, from root
 
 Local sign-in: copy `apps/web/.env.example` to `apps/web/.env.local`, seed, then open `http://acme.localhost:3000/login` (the subdomain is what resolves the tenant) as `buyer@acme.example` / `portal-dev-password`.
 
-Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`, `@cc/adapter-gstn`, `@cc/adapter-storage`, `@cc/adapter-payment`, `@cc/service-identity`, `@cc/service-sap`, `@cc/service-onboarding`, `@cc/service-catalogue`, `@cc/service-order`, `@cc/service-invoice`, `@cc/service-payment`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
+Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/workers`, `@cc/adapter-sap`, `@cc/adapter-gstn`, `@cc/adapter-storage`, `@cc/adapter-payment`, `@cc/service-identity`, `@cc/service-sap`, `@cc/service-onboarding`, `@cc/service-catalogue`, `@cc/service-order`, `@cc/service-invoice`, `@cc/service-payment`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
 
 ## Where the moving parts live
 
@@ -52,6 +54,7 @@ Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`
 - **Sales orders:** `@cc/service-order`. SAP owns submitted orders, so **nothing about them is stored** — every read goes through the adapter and carries its freshness (ADR-016). Only _drafts_ are portal-owned. The sold-to account is the security boundary: `getOrder`/`cancelOrder` compare the document's KUNNR to the session's and answer **404**, because SAP reads a sales order by VBELN alone. A credit block is not an error — SAP creates the order and holds it, and so does the portal. The O2C timeline is derived by `buildO2CTimeline` in `@cc/domain` and merely rendered by `O2CTimeline` in `@cc/ui` (ADR-015).
 - **Invoices:** `@cc/service-invoice`. SAP owns billing documents, so **nothing is stored** and every read carries its freshness — ADR-016 applied to VBRK, and the reason the package has no `@cc/db` dependency. The KUNNR check is the boundary and answers 404, as with orders. The portal **never computes GST**: CGST/SGST/IGST come off KONV as SAP calculated them, and `invoiceTax()` in `@cc/domain` only reads _which_ conditions were populated to decide intra- vs inter-state (ADR-018). Credit/debit notes are `Invoice`s carrying `billingType` (FKART), excluded from the invoice list and given their own screen (ADR-020).
 - **Payments:** `@cc/service-payment` and `@cc/adapter-payment`. Payments are the **one O2C document the portal stores** (ADR-019) — between the gateway capturing money and SAP clearing the items, nothing in SAP accounts for the debit yet. `captured` and `posted` are separate states and a captured payment is never rolled back to `failed`. **The webhook is the truth, not the browser redirect:** `initiatePayment` charges nothing, and only a signature-verified callback advances a payment. Idempotency is enforced at three points with three keys (ADR-021). The statement and aging come from BSID on every read; the stored rows answer "what did we take?", never "what does the customer owe?".
+- **Async work:** `@cc/workers` owns the outbox relay and the queue consumers. A service produces an effect by calling `writeOutboxEvent(tx, …)` (`@cc/db`) **inside the transaction that made the effect true** — never by touching BullMQ, which lives in `@cc/workers` alone. Event names and payload schemas are a registry (`DOMAIN_EVENTS` in `@cc/domain`); the relay is at-least-once, so **every handler must be idempotent** (ADR-023). A `dedupeKey` on the outbox row makes a producer that runs twice a no-op.
 - **Cross-service work:** a service may not import another service. Where a flow spans two (approval = SAP create + credential issue), the route handler sequences them and passes adapters in — ADR-011.
 
 ## Conventions
