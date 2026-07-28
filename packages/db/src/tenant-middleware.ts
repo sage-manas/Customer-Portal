@@ -21,6 +21,10 @@ const TENANT_SCOPED_MODELS = new Set([
   "PodConfirmationLine",
   "Payment",
   "PaymentAllocation",
+  "SupportTicket",
+  "TicketComment",
+  "TicketAttachment",
+  "TicketCounter",
   "OutboxEvent",
   "AuditLog",
 ]);

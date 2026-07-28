@@ -140,7 +140,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Headphones",
     accent: "support",
     permission: "support:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "account",
@@ -206,7 +206,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Headphones",
     accent: "support",
     permission: "support:resolve",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-settings",

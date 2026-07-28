@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { TICKET_CATEGORIES, TICKET_PRIORITIES } from "./entities/support";
+
 /**
  * Domain event registry (docs/07 A1, docs/DECISIONS.md ADR-023).
  *
@@ -131,6 +133,44 @@ export const DOMAIN_EVENTS = {
         .default([]),
       /** The customer's own words, when they left any. */
       notes: z.string().optional(),
+    }),
+  },
+  "support.ticket.created": {
+    queue: "notifications",
+    description: "A ticket exists — tell the customer, and tell the queue it routed to.",
+    schema: eventBase.extend({
+      ticketId: z.string().min(1),
+      ticketNo: z.string().min(1),
+      kunnr: z.string().min(1),
+      category: z.enum(TICKET_CATEGORIES),
+      priority: z.enum(TICKET_PRIORITIES),
+      subject: z.string().min(1),
+      /** Absent when the portal raised it (a POD discrepancy), not a person. */
+      raisedByUserId: z.string().optional(),
+    }),
+  },
+  "support.ticket.resolved": {
+    queue: "notifications",
+    description: "An agent answered; the customer may reopen for 7 days or rate the resolution.",
+    schema: eventBase.extend({
+      ticketId: z.string().min(1),
+      ticketNo: z.string().min(1),
+      kunnr: z.string().min(1),
+      resolvedByUserId: z.string().optional(),
+    }),
+  },
+  "support.sla.breached": {
+    queue: "workflow",
+    description:
+      "A ticket passed its resolution deadline unanswered; A7 escalates (docs/03 Module 8 flow).",
+    schema: eventBase.extend({
+      ticketId: z.string().min(1),
+      ticketNo: z.string().min(1),
+      kunnr: z.string().min(1),
+      priority: z.enum(TICKET_PRIORITIES),
+      /** Deadline that was missed — `occurredAt` is when the sweep noticed. */
+      deadline: z.coerce.date(),
+      assigneeUserId: z.string().optional(),
     }),
   },
 } as const satisfies Record<string, EventDefinition>;

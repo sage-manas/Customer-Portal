@@ -9,3 +9,4 @@ export * from "./delivery";
 export * from "./ar";
 export * from "./payment";
 export * from "./o2c";
+export * from "./support";

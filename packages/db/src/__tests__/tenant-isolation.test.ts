@@ -34,6 +34,10 @@ describe("tenant isolation", () => {
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
       await db.outboxEvent.deleteMany();
+      await db.ticketAttachment.deleteMany();
+      await db.ticketComment.deleteMany();
+      await db.supportTicket.deleteMany();
+      await db.ticketCounter.deleteMany();
       await db.podConfirmationLine.deleteMany();
       await db.podConfirmation.deleteMany();
       await db.cartLine.deleteMany();
@@ -44,6 +48,7 @@ describe("tenant isolation", () => {
     });
     await runWithTenant(tenantB.id, async () => {
       await db.outboxEvent.deleteMany();
+      await db.ticketCounter.deleteMany();
       await db.user.deleteMany();
     });
     await db.tenant.deleteMany({ where: { id: { in: [tenantA.id, tenantB.id] } } });
@@ -201,6 +206,74 @@ describe("tenant isolation", () => {
     expect(asSeenByTenantB).toBeNull();
     expect(linesForTenantB).toEqual([]);
     expect(byDeliveryForTenantB).toEqual([]);
+  });
+
+  it("scopes the Phase A3 support models too", async () => {
+    const ticket = await runWithTenant(tenantA.id, () =>
+      db.supportTicket.create({
+        data: {
+          tenantId: tenantA.id,
+          ticketNo: `TKT-${runId}`,
+          customerKunnr: "0010001001",
+          category: "delivery",
+          priority: "high",
+          subject: "Short delivery",
+          description: "Two cartons of ten did not arrive.",
+          comments: {
+            create: [
+              {
+                tenantId: tenantA.id,
+                body: "Internal: chase the warehouse.",
+                internal: true,
+                authorIsAgent: true,
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.supportTicket.findUnique({ where: { id: ticket.id } }),
+    );
+    const commentsForTenantB = await runWithTenant(tenantB.id, () =>
+      db.ticketComment.findMany({ where: { ticketId: ticket.id } }),
+    );
+    // The customer-facing reference is the one string a user reads off a
+    // screen and types into a search box, so it is the most likely thing to
+    // be quoted across a tenant boundary — deliberately probed by value.
+    const byTicketNoForTenantB = await runWithTenant(tenantB.id, () =>
+      db.supportTicket.findMany({ where: { ticketNo: ticket.ticketNo } }),
+    );
+
+    expect(asSeenByTenantB).toBeNull();
+    expect(commentsForTenantB).toEqual([]);
+    expect(byTicketNoForTenantB).toEqual([]);
+  });
+
+  it("gives each tenant its own ticket counter", async () => {
+    // The counter is keyed by tenantId alone, so a scoping bug here would not
+    // leak data — it would hand tenant B tenant A's next ticket number, and
+    // the tenants' numbering would interleave visibly.
+    const bump = (tenantId: string) =>
+      runWithTenant(tenantId, () =>
+        db.ticketCounter.upsert({
+          where: { tenantId },
+          create: { tenantId, value: 1 },
+          update: { value: { increment: 1 } },
+        }),
+      );
+
+    await bump(tenantA.id);
+    await bump(tenantA.id);
+    const forB = await bump(tenantB.id);
+
+    const forA = await runWithTenant(tenantA.id, () =>
+      db.ticketCounter.findUnique({ where: { tenantId: tenantA.id } }),
+    );
+
+    expect(forA?.value).toBe(2);
+    expect(forB.value).toBe(1);
   });
 
   it("scopes the outbox, including its dedupe key (ADR-023)", async () => {

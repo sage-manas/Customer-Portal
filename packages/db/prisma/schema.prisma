@@ -71,6 +71,8 @@ model Tenant {
   salesOrders         SalesOrder[]
   podConfirmations    PodConfirmation[]
   payments            Payment[]
+  supportTickets      SupportTicket[]
+  ticketCounter       TicketCounter?
   outboxEvents        OutboxEvent[]
   auditLogs           AuditLog[]
 
@@ -509,4 +511,184 @@ model AuditLog {
 
   @@index([tenantId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// Service & Support (docs/03 Module 8, docs/05 §7.8, docs/07 A3)
+//
+// Portal-owned outright, and the deliberate opposite of orders/deliveries/
+// invoices: doc 03 Screen 8.1 allows either a QM notification or "portal-
+// native ticket per tenant config", and there is no SAP document to defer to
+// while the tenant runs portal-native. ADR-016 is not in tension with this —
+// it says don't mirror what SAP owns, and SAP owns none of this.
+//
+// Enum values mirror the @cc/domain support registry exactly; the registry
+// stays the authority for SLA hours, routing and transitions, and none of
+// that behaviour is duplicated in the database.
+// ---------------------------------------------------------------------------
+
+enum TicketCategory {
+  delivery
+  quality
+  billing
+  product
+  general
+}
+
+enum TicketPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+/// Which O2C document a ticket is about (docs/03 Screen 8.1 "Related doc").
+/// The number is stored, the document is not — it is read from SAP on every
+/// render, exactly as ADR-016 requires.
+enum TicketRelatedDocType {
+  order
+  delivery
+  invoice
+}
+
+model SupportTicket {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  /// Human-facing reference (docs/03 Screen 8.2 "Ticket No."), per-tenant
+  /// sequential via TicketCounter. Never the key a URL or a lookup trusts —
+  /// a sequential number leaks a tenant's ticket volume.
+  ticketNo  String
+  /// Sold-to account — the security boundary, as on carts, payments and PODs.
+  /// A ticket belongs to the *account*, so a colleague sees it too.
+  customerKunnr String
+  /// Null when the portal raised the ticket rather than a person: a POD
+  /// discrepancy auto-ticket has a reporter in its event, but no session.
+  raisedByUserId String?
+
+  category  TicketCategory
+  priority  TicketPriority
+  status    TicketStatus   @default(open)
+  subject   String
+  description String
+
+  relatedDocType   TicketRelatedDocType?
+  relatedDocNumber String?
+
+  /// QMEL-VERAN. A portal user in the tenant back office; null while the
+  /// ticket sits in its routed queue unclaimed.
+  assigneeUserId String?
+
+  /// Customer-visible resolution text (QMEL-IDATE's companion).
+  resolution String?
+
+  /// The SLA clock's start. Distinct from `createdAt` because a reopen
+  /// restarts it: the tenant owes a fresh response to a reopened problem,
+  /// and measuring against the original creation would book every reopened
+  /// ticket as breached on arrival. The deadline itself is *derived* from
+  /// this plus the priority (@cc/domain slaDeadline) and never stored.
+  openedAt   DateTime  @default(now())
+  startedAt  DateTime?
+  resolvedAt DateTime?
+  closedAt   DateTime?
+
+  /// CSAT (docs/05 §7.8 "Rate Resolution (1–5 stars + comment)").
+  rating        Int?
+  ratingComment String?
+
+  /// Set once `support.sla.breached` has been emitted for the current
+  /// openedAt window, so the sweep is idempotent across runs without having
+  /// to ask the outbox what it already wrote. Cleared on reopen.
+  slaBreachedAt DateTime?
+
+  /// Identifies the upstream fact that caused an auto-raised ticket — for A2
+  /// discrepancies, the delivery. Unique per tenant below, which is what
+  /// makes the worker's handler idempotent as ADR-023 requires: a redelivered
+  /// event hits the constraint instead of raising a second ticket.
+  sourceKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments    TicketComment[]
+  attachments TicketAttachment[]
+
+  @@unique([tenantId, ticketNo])
+  @@unique([tenantId, sourceKey])
+  @@index([tenantId])
+  @@index([tenantId, customerKunnr, status])
+  /// The workbench's query: open work, most urgent and oldest first.
+  @@index([tenantId, status, priority, openedAt])
+  @@map("support_tickets")
+}
+
+/// Threaded comments (docs/05 §7.8). Flat by design — a support thread is
+/// read top to bottom, and nesting invites replies nobody sees.
+model TicketComment {
+  id       String        @id @default(cuid())
+  tenantId String
+  ticketId String
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorUserId String?
+  /// Whether the author acted as the customer or as the tenant's agent, so
+  /// the thread renders sides correctly without re-deriving it from the
+  /// author's current roles — which change.
+  authorIsAgent Boolean @default(false)
+  body     String
+  /// An internal note is invisible to the customer. Enforced in the service
+  /// (a customer session may never set it, and a customer read never selects
+  /// it), never by the screen that draws the thread.
+  internal Boolean @default(false)
+  createdAt DateTime @default(now())
+
+  attachments TicketAttachment[]
+
+  @@index([tenantId])
+  @@index([tenantId, ticketId, createdAt])
+  @@map("ticket_comments")
+}
+
+/// A file on a ticket or one of its comments, held in `@cc/adapter-storage`
+/// exactly like the signed-POD scan: the bytes never enter Postgres, only the
+/// key does.
+model TicketAttachment {
+  id       String        @id @default(cuid())
+  tenantId String
+  ticketId String
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Null for a file attached when the ticket was raised.
+  commentId String?
+  comment   TicketComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  storageKey  String
+  fileName    String
+  contentType String
+  sizeBytes   Int
+  uploadedByUserId String?
+  createdAt   DateTime @default(now())
+
+  @@unique([tenantId, storageKey])
+  @@index([tenantId])
+  @@index([tenantId, ticketId])
+  @@map("ticket_attachments")
+}
+
+/// Per-tenant ticket sequence.
+///
+/// A counter row rather than a Postgres sequence because sequences are not
+/// tenant-scoped and cannot be: one shared sequence would make TKT-000042
+/// mean "the 42nd ticket on the platform", which both leaks other tenants'
+/// volume and makes a tenant's own numbering full of gaps.
+model TicketCounter {
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  value    Int    @default(0)
+
+  @@map("ticket_counters")
 }
