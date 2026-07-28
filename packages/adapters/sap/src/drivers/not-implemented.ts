@@ -1,5 +1,7 @@
 import type {
   CanonicalCustomer,
+  ConfirmPodInput,
+  ConfirmPodResult,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -85,17 +87,26 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   async createSalesOrder(_input: CreateSalesOrderInput): Promise<SalesOrderResult> {
     this.fail("createSalesOrder");
   }
+  async cancelSalesOrder(_vbeln: string, _reason?: string): Promise<SalesOrderResult> {
+    this.fail("cancelSalesOrder");
+  }
   async getOrderStatus(_vbeln: string): Promise<SapRead<OrderStatusView>> {
     this.fail("getOrderStatus");
   }
   async getOrders(_kunnr: string): Promise<SapRead<Page<OrderStatusView>>> {
     this.fail("getOrders");
   }
-  async getDeliveries(_vbeln: string): Promise<SapRead<Delivery[]>> {
+  async getDeliveries(_kunnr: string): Promise<SapRead<Page<Delivery>>> {
     this.fail("getDeliveries");
   }
-  async getDeliveryDetail(_deliveryVbeln: string): Promise<SapRead<Delivery>> {
-    this.fail("getDeliveryDetail");
+  async getDeliveriesForOrder(_vbeln: string): Promise<SapRead<Delivery[]>> {
+    this.fail("getDeliveriesForOrder");
+  }
+  async getDelivery(_deliveryVbeln: string): Promise<SapRead<Delivery>> {
+    this.fail("getDelivery");
+  }
+  async confirmPod(_input: ConfirmPodInput): Promise<ConfirmPodResult> {
+    this.fail("confirmPod");
   }
   async getInvoices(_kunnr: string): Promise<SapRead<Page<Invoice>>> {
     this.fail("getInvoices");

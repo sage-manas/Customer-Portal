@@ -2,15 +2,16 @@
 
 Business logic per module, each exposing a typed service interface. Depends on `domain` + `adapters` + `db` + `config`; never on `ui` or `apps`. Framework-free — no Next.js imports — so the service layer can move behind NestJS/Fastify without a rewrite (`docs/DECISIONS.md` ADR-002).
 
-| Package                                                  | Status                                                                                              |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| [`identity/`](./identity) — `@cc/service-identity`       | **Built (Phase 1).** Login, session tokens, tenant resolution, RBAC guards, dev seed.               |
-| [`sap/`](./sap) — `@cc/service-sap`                      | **Built (Phase 1).** Per-tenant adapter resolution + the dashboard summary read.                    |
-| [`onboarding/`](./onboarding) — `@cc/service-onboarding` | **Built (Phase 2).** The 4-step wizard, GSTIN verification, approval queue, BAPI customer creation. |
-| [`catalogue/`](./catalogue) — `@cc/service-catalogue`    | **Built (Phase 3).** Browse, product detail, customer price list, and the cart.                     |
-| `order/`                                                 | Phase 4                                                                                             |
-| `invoice/`, `payment/`                                   | Phase 5                                                                                             |
-| `delivery/`, `support/`, `loyalty/`, `reporting/`        | Phase 6                                                                                             |
+| Package                                                  | Status                                                                                                                 |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| [`identity/`](./identity) — `@cc/service-identity`       | **Built (Phase 1).** Login, session tokens, tenant resolution, RBAC guards, dev seed.                                  |
+| [`sap/`](./sap) — `@cc/service-sap`                      | **Built (Phase 1).** Per-tenant adapter resolution + the dashboard summary read.                                       |
+| [`onboarding/`](./onboarding) — `@cc/service-onboarding` | **Built (Phase 2).** The 4-step wizard, GSTIN verification, approval queue, BAPI customer creation.                    |
+| [`catalogue/`](./catalogue) — `@cc/service-catalogue`    | **Built (Phase 3).** Browse, product detail, customer price list, and the cart.                                        |
+| [`order/`](./order) — `@cc/service-order`                | **Built (Phase 4).** Order list/detail, ATP simulate, credit-check gate, create, cancel, drafts.                       |
+| `invoice/`, `payment/`                                   | Phase 5                                                                                                                |
+| [`delivery/`](./delivery) — `@cc/service-delivery`       | **Built (A2).** Shipment tracking and proof of delivery. SAP owns the delivery; only POD evidence is stored (ADR-026). |
+| `support/`, `loyalty/`, `reporting/`                     | A3–A6 (see docs/07)                                                                                                    |
 
 Not-yet-built services have no `package.json` and are not workspace members.
 

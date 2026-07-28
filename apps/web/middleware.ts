@@ -26,12 +26,17 @@ import { NextResponse, type NextRequest } from "next/server";
 // handlers are not unguarded — the tenant comes from the host and the
 // application from an unguessable draft token (docs/DECISIONS.md ADR-009).
 // `/api/admin/onboarding/*` is deliberately NOT in this list.
+// `/api/webhooks/*` is public because the caller is a payment gateway, not a
+// person — there is no session to check. Those handlers authenticate the
+// *request* instead, by verifying an HMAC signature over the raw body before
+// parsing it (docs/02 §6); an unsigned body never reaches any logic.
 const PUBLIC_PATHS = [
   "/login",
   "/register",
   "/api/auth/login",
   "/api/auth/logout",
   "/api/onboarding",
+  "/api/webhooks",
   "/403",
   "/404",
 ];

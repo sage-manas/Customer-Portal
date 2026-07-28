@@ -404,16 +404,27 @@ export const SEED_ORDERS: OrderStatusView[] = [
   },
 ];
 
+/**
+ * LIKP/LIPS, linked to the seeded sales orders above. Between them the three
+ * rows cover every state the delivery screens have to render: one signed for
+ * (POD already posted), one in transit (the POD happy path), and one still in
+ * the warehouse, which is the case where the portal must *not* offer a
+ * Confirm Receipt button.
+ */
 export const SEED_DELIVERIES: Delivery[] = [
   {
     vbeln: "0080001901",
     salesOrder: "0000004711",
+    kunnr: "0010001001",
     status: "Delivered",
     plannedGoodsIssue: shiftDays(SEED_TODAY, -14),
     actualGoodsIssue: shiftDays(SEED_TODAY, -14),
     carrier: "BLUEDART",
     trackingNumber: "BD48291733IN",
     ewayBillNumber: "291004718822",
+    // The customer signed for this one, which is what let VF01 bill it.
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -13),
     lines: [
       {
         lineNo: 10,
@@ -436,6 +447,7 @@ export const SEED_DELIVERIES: Delivery[] = [
   {
     vbeln: "0080001947",
     salesOrder: "0000004712",
+    kunnr: "0010001001",
     status: "InTransit",
     plannedGoodsIssue: shiftDays(SEED_TODAY, -2),
     actualGoodsIssue: shiftDays(SEED_TODAY, -2),
@@ -453,6 +465,26 @@ export const SEED_DELIVERIES: Delivery[] = [
       },
     ],
   },
+  {
+    // The balance of order 4712 (200 M ordered, 150 shipped above). Picked and
+    // packed but not yet issued, so it has no AWB, no e-way bill and — the
+    // point of seeding it — nothing a customer may sign for yet.
+    vbeln: "0080001960",
+    salesOrder: "0000004712",
+    kunnr: "0010001001",
+    status: "Packed",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, 3),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        quantity: 50,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 54280,
+      },
+    ],
+  },
 ];
 
 /**
@@ -466,6 +498,7 @@ export const SEED_INVOICES: Invoice[] = [
     billingDate: shiftDays(SEED_TODAY, -13),
     reference: "0080001901",
     kunnr: "0010001001",
+    billingType: "F2",
     taxableAmount: 582942,
     cgst: 52464.78,
     sgst: 52464.78,
@@ -482,6 +515,7 @@ export const SEED_INVOICES: Invoice[] = [
     billingDate: shiftDays(SEED_TODAY, -58),
     reference: "0080001855",
     kunnr: "0010001001",
+    billingType: "F2",
     taxableAmount: 121400,
     cgst: 10926,
     sgst: 10926,
@@ -498,6 +532,7 @@ export const SEED_INVOICES: Invoice[] = [
     billingDate: shiftDays(SEED_TODAY, -30),
     reference: "0080001880",
     kunnr: "0010001002",
+    billingType: "F2",
     taxableAmount: 964000,
     cgst: 0,
     sgst: 0,
@@ -514,6 +549,7 @@ export const SEED_INVOICES: Invoice[] = [
     billingDate: shiftDays(SEED_TODAY, -95),
     reference: "0080001790",
     kunnr: "0010001001",
+    billingType: "F2",
     taxableAmount: 74500,
     cgst: 6705,
     sgst: 6705,
@@ -523,6 +559,30 @@ export const SEED_INVOICES: Invoice[] = [
     dueDate: shiftDays(SEED_TODAY, -65),
     status: "Paid",
     pdfUrl: "/mock/sap/billing/0090002140.pdf",
+  },
+  /**
+   * A credit note (VBRK-FKART G2) against the overdue invoice above — short
+   * delivery, reason code 003. Screen 6.2 has a tab for these, and without a
+   * seeded one the whole tab would be permanently empty in every demo. It
+   * carries a negative FI posting, so the statement's running balance and the
+   * outstanding total both have to cope with a credit.
+   */
+  {
+    vbeln: "0090002250",
+    billingDate: shiftDays(SEED_TODAY, -20),
+    reference: "0090002190",
+    kunnr: "0010001001",
+    billingType: "G2",
+    reasonCode: "003",
+    taxableAmount: -12140,
+    cgst: -1092.6,
+    sgst: -1092.6,
+    igst: 0,
+    grossAmount: -14325.2,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -20),
+    status: "Cleared",
+    pdfUrl: "/mock/sap/billing/0090002250.pdf",
   },
 ];
 
@@ -569,6 +629,22 @@ export const SEED_OPEN_ITEMS: OpenItem[] = [
     status: "Cleared",
     clearingDocument: "1400000921",
   },
+  /**
+   * The credit note's FI side: a negative posting (BSEG posting key 15) that
+   * reduces what the customer owes. It is left open rather than cleared, so
+   * the statement shows a credit the customer can still set against a future
+   * invoice — which is how a G2 usually sits until the next clearing run.
+   */
+  {
+    documentNumber: "0090002250",
+    documentType: "G2",
+    postingDate: shiftDays(SEED_TODAY, -20),
+    dueDate: shiftDays(SEED_TODAY, -20),
+    amount: -14325.2,
+    openAmount: -14325.2,
+    currency: "INR",
+    status: "Open",
+  },
 ];
 
 /** Which KUNNR each open item belongs to (BSID is keyed by customer). */
@@ -576,6 +652,7 @@ export const SEED_OPEN_ITEM_OWNER: Record<string, string> = {
   "0090002211": "0010001001",
   "0090002190": "0010001001",
   "0090002140": "0010001001",
+  "0090002250": "0010001001",
   "0090002205": "0010001002",
 };
 

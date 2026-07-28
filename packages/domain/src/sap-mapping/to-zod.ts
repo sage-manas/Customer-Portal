@@ -86,6 +86,40 @@ export function buildZodSchema<T extends SapMappingRegistry>(
   return z.object(shape);
 }
 
+/**
+ * Registry-derived schema for a single CHAR/TEXT/DATS field, typed as
+ * `ZodString` rather than `ZodTypeAny`.
+ *
+ * `buildZodSchema` is the right tool when a whole screen's shape is
+ * generated and consumed dynamically (the onboarding wizard). It infers to
+ * `unknown` per field, though, which is unusable where the values are read
+ * individually or arithmetic is done on them — the cart and the order form.
+ * Those compose `z.object` by hand, and this keeps the *constraints* coming
+ * from the registry while they do (CLAUDE.md rule 3).
+ */
+export function sapStringSchema(
+  registry: SapMappingRegistry,
+  portalField: string,
+  options: { required?: boolean } = {},
+): z.ZodString {
+  const field = findField(registry, portalField);
+  const label = field?.label ?? portalField;
+
+  let schema = z.string();
+  if (field?.length) {
+    schema = schema.max(field.length, `${label} must be at most ${field.length} characters`);
+  }
+  if (field?.sapType === "DATS") {
+    schema = schema.regex(DATS_PATTERN, `${label} must be an ISO date (YYYY-MM-DD)`);
+  }
+  // Mandatory per the registry unless the caller says otherwise: a required
+  // CHAR that accepts "" is not required (see buildZodSchema).
+  if (options.required ?? field?.required === "M") {
+    schema = schema.min(1, `${label} is required`);
+  }
+  return schema;
+}
+
 /** Looks up a single field definition by its portal field name. */
 export function findField<T extends SapMappingRegistry>(
   registry: T,

@@ -4,6 +4,142 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-027: Each service and adapter package is its own boundary element, because a layer that contains itself checks nothing
+
+**Context:** ADR-024 established that a rule whose job is to forbid something must be checked by breaking it deliberately. Doing that for A2 — adding `import { getSapAdapterForTenant } from "@cc/service-sap"` to a file in `@cc/service-delivery`, which ADR-011 and CLAUDE.md rule 1 both forbid outright — produced no error. Two causes, in order. First the import was not a declared dependency, so it did not resolve and `boundaries` said nothing about a target it could not classify. Declaring it made it resolve, and it _still_ said nothing. The reason is the element pattern: `{ type: "services", pattern: "packages/services/**" }` matched every service package to the same element, so one service importing another was an **intra**-element import, and `element-types` only governs imports _between_ elements. `packages/adapters/**` had the identical defect.
+
+**Decision:** Elements are captured per package — `packages/services/*` with `capture: ["module"]`, and the same for `packages/adapters/*`. Each service and each adapter is now its own element, so `services -> services` and `adapters -> adapters` are cross-element imports that the existing rules (neither of which lists its own type as allowed) reject. Both were re-verified by negative control after the change and now fail with the module names named in the message; the repo lints clean otherwise, so no existing code was relying on the hole.
+
+**Consequence:** The rule this repo leans on most heavily — services are horizontal peers that may not call each other, which is why ADR-011 puts cross-service sequencing in route handlers and ADR-022 puts it in workers — is enforced for the first time. Everything downstream of it was resting on convention: nothing would have complained if the delivery service had simply imported the SAP service instead of taking the adapter as a parameter. It is worth stating plainly that ADR-024 was written about this exact class of bug and did not prevent this instance of it, because fixing the _settings_ was mistaken for fixing the _checking_. The lasting lesson is narrower and more useful than "verify your rules": **a negative control only proves the case it actually exercises.** The control ADR-024 ran was a cross-layer import; this one is same-layer, and no amount of the former would have revealed it. New rules get a control per case they claim to cover, not one per rule.
+
+**Also noted:** an import that does not resolve is still silent, and that is how the first attempt at this control failed. `import/no-unresolved` would make it loud, but it needs the TypeScript resolver configured for path aliases across the app; left as a follow-up rather than half-done here, and recorded so the next person meets a note instead of the same hour of confusion.
+
+---
+
+## ADR-026: SAP takes the receipt; the portal keeps the evidence around it
+
+**Context:** docs/07 A2 says deliveries follow ADR-016 — "store nothing except POD confirmations/discrepancies". That phrasing hides a genuine question, because a proof of delivery is not one fact. Doc 03 Screen 5.2 lists five: the receipt flag (LIKP-KOQUK, which VLPOD sets), the received quantity per line (LIPS-LFIMG, which VLPOD overwrites), the receipt date, discrepancy notes marked "portal field", and a signed-POD upload. The first three exist in SAP. The last two do not. So "store the POD" could mean anything from a portal-owned receipt that is later pushed to SAP, to a mirror of what SAP already holds.
+
+**Decision:** Split it by ownership, and make the split visible in the call order. `confirmReceipt` posts to SAP **first** (`confirmPod` → VLPOD), because SAP owns whether the goods were received and it is the only participant that can refuse — a delivery already signed for, or one not yet despatched. Only after SAP accepts does the portal write its row, and that row holds **only what SAP has nowhere to put**: the customer's notes, the storage key of their signed scan, who pressed the button, and the dispatched quantities as they stood at signing time. Everything the screens render about the shipment — status, POD flag, received quantities — is read back from SAP on every request, exactly as ADR-016 requires.
+
+**Consequence:** The failure mode this avoids is the one that makes mirrored data dangerous: a portal that recorded a signature SAP never accepted, or that kept saying "delivered" after the receipt was reversed in VL03N. It cannot happen, because the portal's row is not an answer to "did the goods arrive" — SAP is. The cost is that a POD is two writes to two systems with no distributed transaction, and the ordering is what makes that safe rather than a protocol: SAP first means the worst case is a receipt SAP holds and the portal's notes lost, which is recoverable and visible, instead of the reverse, which is a customer who believes they signed for goods SAP still shows in transit. The dispatched quantity is duplicated onto the evidence row deliberately — VLPOD overwrites LIPS-LFIMG with what was received, so a discrepancy record that read the quantity back from SAP would, a moment later, show no discrepancy at all.
+
+**Also decided here:** Confirm Receipt and Report Discrepancy are one call, not two. Doc 05 §7.5 draws two buttons, but which one _happened_ is a property of the quantities, not of the click — a customer who edits a line to 9 of 12 and presses Confirm Receipt has reported a discrepancy. `podDiscrepancy` in `@cc/domain` decides, the screen labels its button from that same function, and the service records what is true. A trusted button would let the client choose which outcome the back office sees.
+
+---
+
+## ADR-025: A delivery carries its own sold-to account, because a boundary check that needs a second read is not a boundary
+
+**Context:** The `Delivery` shape from Phase 0 had `salesOrder` (LIKP-VGBEL) but no KUNNR — deliveries were only ever reached through an order whose ownership had already been checked. A2 makes them a module of their own with `/deliveries` and `/deliveries/[vbeln]`, so a delivery number now arrives straight off a URL and something has to answer "is this yours?". The available option without touching the type was to read the delivery, then read its sales order, then compare _that_ document's KUNNR to the session's.
+
+**Decision:** `Delivery` grows `kunnr` (LIKP-KUNAG, the sold-to party — a real field on the delivery header, not an invention), the mock driver seeds it, and the check is a direct field comparison in `readOwnedDelivery`, which every entry point in the module funnels through.
+
+**Consequence:** The ownership check is one comparison against data the portal already has, so it cannot be skipped, cannot be slow, and — the reason this is an ADR — cannot **fail open**. A check that depends on a second SAP call has to decide what to do when that call fails, and every answer is bad: denying access turns a SAP blip into "your deliveries don't exist", while allowing it converts an outage into an authorisation bypass. Neither trade-off should exist for a security control, and pulling KUNNR onto the document removes it. The cost is that the ecc/s4 drivers must populate KUNAG in Phase 7 — which is a field selection, and is now a contract obligation rather than an implementation detail someone might optimise away.
+
+---
+
+## ADR-024: The boundary rules are verified by a negative control, not by a green CI run
+
+**Context:** CLAUDE.md rule 1 has said since Phase 0 that the dependency graph is "enforced by `eslint-plugin-boundaries`", and lint had been green for five phases. While adding the `workers` edge (ADR-022) the obvious sanity check — temporarily forbid something that is definitely imported and watch the error appear — produced nothing. Two independent misconfigurations were suppressing every check: the settings key was `boundaries/root` where the plugin reads **`boundaries/root-path`**, so it fell back to `process.cwd()` and, because each package runs `eslint .` from its own directory, no file's path ever matched `packages/services/**`; and the resolver returned pnpm's **symlink** path (`packages/services/payment/node_modules/@cc/db/...`) for every workspace import, which matches no element pattern either. The plugin says nothing about a file or a dependency it cannot classify. So the rule was not failing — it was silent, which looks identical from CI.
+
+**Decision:** Fix both (`boundaries/root-path`, and an `import/resolver` with `preserveSymlinks: false` plus TypeScript extensions), and then add **`boundaries/no-unknown-files`** as a permanent rule. That is the part worth recording: an unclassifiable file is now an error in its own right, so the failure mode that hid this — a rule going quiet rather than red — becomes loud the next time the settings drift. `.storybook/**` joins the ignore list, since tooling config takes part in no layer (and a glob's `**` does not cross a dot-directory, so it could not be classified anyway).
+
+**Consequence:** The architecture turned out to be intact — with enforcement genuinely on, the repo has zero violations, so five phases of hand-maintained discipline held. But that was luck, not a control, and every ADR that leans on the boundaries (ADR-004, ADR-011, ADR-022) was resting on a rule that had never once fired. The general lesson is the reason this is an ADR and not a commit message: **a passing test that has never been observed to fail is not evidence.** Any future rule whose job is to forbid something should be checked the same way — break it deliberately, watch it complain, put it back.
+
+---
+
+## ADR-023: Every cross-module effect goes through the outbox, written in the same transaction as the fact that caused it
+
+**Context:** docs/07 A1 asks for an outbox table and a BullMQ relay, but leaves open how much may bypass it. From A2 onwards, modules need to cause effects in each other — a POD discrepancy raises a support ticket, a posted payment sends an email, an SLA timer breaches. The two obvious shortcuts are for a service to call another service directly (already forbidden: CLAUDE.md, ADR-011) or for a route handler to enqueue to BullMQ itself after its database write commits.
+
+**Decision:** The queue is never written to from application code. A service records its effect by writing an `OutboxEvent` row **inside the same Prisma transaction as the state change that justifies it**, and the only process that publishes to BullMQ is the relay in `@cc/workers`. The event's name and payload shape come from the `DOMAIN_EVENTS` registry in `@cc/domain`, so an event is a declared contract with a Zod schema rather than a string and a `Json` blob. The relay is deliberately **at-least-once**: it claims a batch, publishes, then marks the rows published, and a crash between publish and mark republishes. Handlers are therefore required to be idempotent, and the queue job id is the outbox row id so BullMQ collapses the obvious duplicates on its own.
+
+**Consequence:** The failure mode that makes async systems untrustworthy — the row committed but the event lost, or the event fired for a transaction that then rolled back — is structurally impossible, because there is exactly one commit. The price is latency (an event waits for the next relay tick, not the response) and the standing obligation that every handler be idempotent, which is the same discipline ADR-021 already imposes on payments and is enforced by the dedupe key rather than remembered. Choosing at-least-once over at-most-once is the deliberate half of that trade: a duplicated notification is an annoyance, a dropped dispatch event is a customer who was never told their goods shipped.
+
+**Also decided here:** the dedupe key. `OutboxEvent` carries `@@unique([tenantId, dedupeKey])`, so a producer that runs twice (a retried webhook, a re-processed job) writes the same key and the second write is a no-op rather than a second event. It is the producer's key, not the consumer's — consumers still dedupe on their own terms.
+
+---
+
+## ADR-022: Workers are a new layer with their own edge, not code hidden inside a service
+
+**Context:** docs/07 A1 introduces a background process and names the edge `workers -> services, adapters, db, domain, config`. That edge is unlike any existing one: `services` may not import `services` (ADR-011), yet a worker's whole job is to sequence work across modules — relay an event a delivery service wrote into a ticket the support service creates. Putting the worker inside a service package would have let it borrow that service's identity and quietly acquire an import it isn't allowed.
+
+**Decision:** `packages/workers` (`@cc/workers`) becomes a seventh element type in `packages/config/eslint/base.js` with exactly that allow-list, and **nothing may import from `workers`** — the same rule `apps` has. Its handlers are the one place in the codebase permitted to touch two services in a single file, which is the worker equivalent of the role docs/DECISIONS ADR-011 gives to a route handler: the sequencer sits above the services, passes adapters in, and owns the ordering.
+
+**Consequence:** The cross-module sequencing the remaining Track A phases need has a legal home, and it is a home the linter can see. Because nothing imports `workers`, the process can be deployed separately (its own container, its own scaling) without any package following it, and a route handler cannot start reaching into worker internals to "just run it inline" — which would put queue work back on the request path. The cost is one more layer to keep honest in the boundary rules, and the fact that `apps -> workers` being disallowed means the web app can never enqueue directly; it writes to the outbox, which is what ADR-023 wanted anyway.
+
+---
+
+## ADR-021: A payment's idempotency is enforced in three places, because one is not enough
+
+**Context:** Doc 02 §6 asks for an "idempotent webhook design". Gateways deliver at least once, and the obvious reading is a single deduplication check — remember which event ids have been seen and drop repeats. The trouble is that a payment can be duplicated at three different moments by three different actors: the customer double-clicking Pay, the gateway redelivering a webhook, and the reconciliation job retrying a posting that timed out somewhere inside SAP.
+
+**Decision:** Each moment gets its own key, all three enforced structurally rather than by a check the caller must remember. **Creating** the attempt is idempotent on the portal's payment id, which is passed to the gateway as its reference — a second `createOrder` for the same payment returns the first attempt. **Applying** a webhook is idempotent on the gateway's event id, held as a `UNIQUE (tenantId, lastEventId)` in Postgres, so a replay is recognised even if two workers race. **Posting** to SAP is idempotent on the gateway reference (BSEG-KIDNO), which `postIncomingPayment` already keys on, so a retried posting returns the original FI document rather than clearing the items twice.
+
+**Consequence:** Every one of the three duplications a real gateway produces is a no-op instead of a second charge or a double clearing, and the integration suite exercises all three. The cost is three unique constraints and a slightly wordier service, which is a trivial price for the failure being prevented — a customer charged twice is the one defect in this module that cannot be fixed by re-reading SAP. It also means the webhook handler can safely answer 200 to a duplicate rather than erroring, which is what stops a gateway retry storm.
+
+---
+
+## ADR-020: Credit and debit notes are billing documents on the same type, shown on their own screen
+
+**Context:** Doc 03 Screen 6.2 lists credit/debit notes with their own columns (FKART G2/L2, reason MGAGR, original invoice), and doc 05 §7.6 gives them a tab. In SAP they are VBRK rows like any invoice. So the portal had two choices: a separate `CreditDebitNote` entity with its own adapter method, or the existing `Invoice` type carrying the distinction.
+
+**Decision:** They stay on `Invoice`, which grows `billingType` (FKART) and `reasonCode` (MGAGR), and `billingKind()` in `@cc/domain` classifies them. But they get their own _screen_ (`/invoices/notes`), and `listInvoices` excludes them by default. `isPayable()` refuses them outright.
+
+**Consequence:** The adapter contract doesn't grow a method for something SAP returns from the read it already has, and one screen can render either kind — which is what the invoice detail page does for a note. Keeping them off the invoice list is the part that matters to a customer: a credit note has a negative amount, and a row of "-14,325.20" in a table of bills invites both a misread row and a misread total. The risk of the shared type is a screen that forgets to check the kind, which is why the check lives in three named domain functions rather than in an `if` per screen. An unknown FKART (a tenant's ZF2) classifies as an invoice rather than being dropped — a document the portal can't categorise still belongs on the customer's list.
+
+---
+
+## ADR-019: Payments are stored; every other O2C document is not
+
+**Context:** ADR-016 established the rule for this whole phase of the build: SAP owns the document, so the portal does not mirror it — orders, deliveries and invoices are all re-read on every view and carry their freshness. Payments arrive looking like the same case. FI holds the posting; the statement can be re-read from BSID; storing a payment row invites exactly the stale mirror ADR-016 exists to prevent.
+
+**Decision:** Payments are stored anyway, in `payments` + `payment_allocations`. The reason is a window that no other document has: between the gateway capturing money and SAP clearing the open items, there is a real debit against a real customer that **no FI document accounts for**. There is nothing in SAP to re-read, because the thing that happened hasn't reached SAP. So the portal keeps its own record, with `captured` and `posted` as separate states, and the statement renders un-posted payments as `Pending sync` (docs/05 §7.7) rather than pretending the balance already moved.
+
+**Consequence:** A SAP outage between capture and posting costs the customer a delay, not their money: the payment sits `captured`, `listPendingSync` surfaces it, and reconciliation retries the posting (ADR-021 makes that safe). A payment is never rolled back from `captured` to `failed`, because that would tell a customer their money is safe when it isn't. The discipline ADR-016 asks for still holds everywhere it applies — the _statement_ is never read from these rows, only from BSID; the stored payment answers "what did we take?", never "what does the customer owe?". The two questions have different owners, and that is the whole distinction.
+
+---
+
+## ADR-018: AR arithmetic — aging, running balance, place of supply — is derived in the domain layer
+
+**Context:** Phase 5 introduces four screens that each need a number computed from the same FI data: the invoice list (aging chip per row), the statement (running Debit/Credit/Balance), the AR summary (four aging buckets), and the dashboard KPI (pending invoices). Each could reasonably have computed its own, and the statement's running balance in particular reads like presentation.
+
+**Decision:** All of it lives in `@cc/domain` (`entities/ar.ts`): `buildAging`, `buildStatement`, `invoiceTax`, and the due-date helpers. `AmountAging` in `@cc/ui` renders an `AgingSummary` and buckets nothing itself — the same rule `O2CTimeline` follows (ADR-015). Two judgements this forced into the open, where they can be tested: a filtered statement's **opening balance is the real balance carried into the range**, not zero, because a statement that starts from nothing is arithmetically tidy and financially wrong; and the aging bar covers the **whole ledger regardless of the date filter**, because a customer narrowing to last month is not asking for their account position to change.
+
+**Consequence:** Two screens cannot disagree about what a customer owes, which for money matters more than it did for statuses. It also keeps the one thing the portal must never do — computing GST — structurally impossible to do by accident: `invoiceTax` only _reads_ which KONV conditions SAP populated to decide intra- vs inter-state, and derives the displayed rate from the amounts rather than a rate table, so a line-level mix or a cess still reports honestly (docs/02 §5).
+
+---
+
+## ADR-017: Cancelling an order is a new adapter method, not a portal-side status change
+
+**Context:** Doc 05 §7.4 lists Cancel among an order's actions ("only while GBSTK=A, confirm dialog"), but the `SapAdapter` contract sketched in the TRD has no cancel operation — it covers create, simulate and read. The portal therefore had no way to express the action, and the tempting shortcut was to record the cancellation portal-side (a status column, a `cancelledAt`) and treat the SAP order as abandoned.
+
+**Decision:** `cancelSalesOrder(vbeln, reason?)` joins the contract, implemented by the mock as SAP's own VA02 rejection (VBAP-ABGRU on every item): the order goes to `Closed`, nothing stays confirmed, the credit exposure it consumed is released, and its PO reference is freed so the customer may legitimately re-raise it. The ecc/s4 skeletons inherit the `not_implemented` throw like every other method (ADR-006). The service re-reads the order's status from SAP before calling it, so a screen minutes out of date cannot cancel an order that has since shipped.
+
+**Consequence:** A cancelled order looks the same to the portal, to the tenant's back office and to SAP itself, because there is only one record of it. A portal-side flag would have produced an order that the customer believes is cancelled and that the warehouse still picks — the exact failure mode the mock-first contract exists to prevent. The cost is that Phase 7's ECC driver has one more BAPI to implement; that is a known, contract-tested cost rather than a hidden divergence.
+
+---
+
+## ADR-016: Submitted orders are never mirrored in the portal database; drafts are all that is stored
+
+**Context:** `packages/db` has carried `SalesOrder` / `SalesOrderLine` tables since Phase 0, and doc 03 Screen 4.1 offers "Save Draft" alongside Submit. Once orders could actually be created, the tables invited the obvious use: write every submitted order to them, so the list and detail screens read from Postgres instead of paying a SAP round trip per view.
+
+**Decision:** They are not. The tables hold **drafts** — half-filled forms with no VBELN, no ATP and no credit check, which SAP has no concept of — and, after submission, the row is kept solely as the record of which draft became which sales order. Every read of a submitted order (`listOrders`, `getOrder`) goes to `SapAdapter` and carries its freshness. The statuses stored on a submitted row are the ones SAP returned _at that moment_; nothing reads them back.
+
+**Consequence:** An order's status is exactly what a customer refreshes to check, and it changes in SAP through picking, credit release and billing — none of which the portal observes. A mirror would be wrong within minutes and, worse, would be wrong _silently_, since a cached row carries no freshness. This is doc 05 P1 applied literally ("SAP is the truth; the UI is honest about it"). The cost is a SAP read per view, which is what the cache-aside layer in docs/02 §4.3 is for when it becomes one — a cache reports `cached` and the screen says so, which a mirror never would. Drafts are keyed to the sold-to account rather than the user, for the same reason the cart is (ADR-014).
+
+---
+
+## ADR-015: The O2C timeline is derived in the domain layer, not assembled per screen
+
+**Context:** Doc 05 P4 makes the O2C chain "one continuous status timeline the user can traverse from any document", and §3.2 says `O2CTimeline` is "rendered on every document detail page". The component could reasonably have taken the raw documents (order, deliveries, invoices) and worked out the stages itself — it is the only thing that renders them.
+
+**Decision:** `buildO2CTimeline(...)` lives in `@cc/domain` (`entities/o2c.ts`) alongside the `O2C_STAGES` registry, and returns `O2CStage[]` — status, date, document links and note per stage. The component renders that and decides nothing. Deriving is where the judgements live: a stage no document has reached is `null` ("Not started") rather than `Open`; a part-shipped order is `PartiallyDelivered` even when one of its deliveries says `Delivered`; payment is read off the invoices, because until Phase 5 the billing document's status is the only honest answer.
+
+**Consequence:** The delivery and invoice detail screens in Phases 5–6 render the identical chain from the identical function, so two screens cannot disagree about whether an order shipped — which is precisely the failure a "spine" is supposed to prevent. It also makes the judgements testable without a DOM, and the Storybook stories build every state from real documents rather than from hand-written stage objects.
+
+---
+
 ## ADR-014: The cart belongs to a sold-to account, and is repriced on every read
 
 **Context:** Doc 05 §7.2 specifies a persistent cart drawer with line edit, MOQ/stock warnings and a split CTA, but says nothing about who owns a cart or how long a price in it survives. Both defaults are tempting and both are wrong: a per-user cart (the e-commerce norm) and a cart that stores the price the line was added at (the obvious way to avoid re-reading SAP).

@@ -19,6 +19,7 @@
     "test:isolation": "vitest run --config vitest.isolation.config.ts"
   },
   "dependencies": {
+    "@cc/domain": "workspace:*",
     "@prisma/client": "^6.1.0"
   },
   "devDependencies": {

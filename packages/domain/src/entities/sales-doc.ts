@@ -88,6 +88,8 @@ export interface OrderStatusView {
   currency: string;
   /** NAST/BA00 order-confirmation output, when generated. */
   confirmationPdfUrl?: string;
+  /** VBAP-ABGRU text, set when every item was rejected (a cancellation). */
+  rejectionReason?: string;
 }
 
 export interface Delivery {
@@ -95,6 +97,13 @@ export interface Delivery {
   vbeln: string;
   /** LIKP-VGBEL — the sales order it was created from. */
   salesOrder: string;
+  /**
+   * LIKP-KUNAG — the sold-to account. Carried on the delivery itself rather
+   * than resolved through `salesOrder`, because this is the field the
+   * ownership check compares against and a check that needs a second SAP
+   * read is a check that fails open when SAP is slow (ADR-025).
+   */
+  kunnr: string;
   /** Derived from VBUK-WBSTK */
   status: CanonicalStatus;
   /** LIKP-WADAT / WADAT_IST, ISO dates */
@@ -106,7 +115,36 @@ export interface Delivery {
   trackingNumber?: string;
   /** J_1IEXCHDR-J_1IEWB_NO — mandatory above Rs 50,000. */
   ewayBillNumber?: string;
+  /**
+   * LIKP-KOQUK — has the customer confirmed receipt (VLPOD)? SAP owns this
+   * flag, which is why the portal posts to it rather than keeping its own
+   * idea of whether the goods arrived (ADR-026).
+   */
+  podConfirmed?: boolean;
+  /** Date the customer says the goods arrived, once POD has been posted. */
+  podReceiptDate?: string;
   lines: SalesDocLine[];
+}
+
+/** A POD line as the customer submits it (LIPS-LFIMG, received vs dispatched). */
+export interface PodLineInput {
+  lineNo: number;
+  receivedQty: number;
+}
+
+/** VLPOD — what the portal posts to SAP when a customer confirms receipt. */
+export interface ConfirmPodInput {
+  deliveryVbeln: string;
+  /** ISO date the goods were received. */
+  receiptDate: string;
+  lines: PodLineInput[];
+}
+
+export interface ConfirmPodResult {
+  deliveryVbeln: string;
+  status: CanonicalStatus;
+  /** True when SAP recorded a quantity difference on at least one line. */
+  discrepancy: boolean;
 }
 
 export interface Invoice {
@@ -117,6 +155,14 @@ export interface Invoice {
   /** VBRP-VGBEL — preceding delivery/order */
   reference?: string;
   kunnr: string;
+  /**
+   * VBRK-FKART — F2 invoice / G2 credit note / L2 debit note. A note is a
+   * billing document like any other, so it travels on this type rather than
+   * a parallel one (ADR-020); `billingKind` in entities/ar.ts classifies it.
+   */
+  billingType?: string;
+  /** VBRP-MGAGR — why a credit/debit note was raised (docs/03 Screen 6.2). */
+  reasonCode?: string;
   /** VBRP-NETWR — taxable, ex-GST */
   taxableAmount: number;
   /** KONV-KBETR for JOCG / JOSG / JOIG. Intra-state fills cgst+sgst, inter-state igst. */

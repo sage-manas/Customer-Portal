@@ -92,6 +92,35 @@ export function mapOrderCmgstToStatus(code: "A" | "B" | "C"): CanonicalStatus {
   }
 }
 
+/**
+ * Module 5 — VBUK-WBSTK (overall goods-movement status): A not started /
+ * B partial / C complete.
+ *
+ * WBSTK alone cannot tell Picked from Packed from Shipped — it only knows
+ * whether goods issue has happened. Doc 05 §7.5 asks for the finer stepper
+ * ("WBSTK **+ PGI events**"), so a driver that has the picking/packing
+ * confirmations passes them and gets the precise stage; one that has only
+ * WBSTK gets the coarse answer rather than a guess.
+ */
+export function mapDeliveryWbstkToStatus(
+  code: "A" | "B" | "C",
+  events: { picked?: boolean; packed?: boolean; goodsIssued?: boolean } = {},
+): CanonicalStatus {
+  switch (code) {
+    case "C":
+      return "Delivered";
+    case "B":
+      return "PartiallyDelivered";
+    case "A":
+      // Nothing has been issued yet: how far along it is depends on the
+      // warehouse confirmations, most-advanced first.
+      if (events.goodsIssued) return "InTransit";
+      if (events.packed) return "Packed";
+      if (events.picked) return "Picked";
+      return "Open";
+  }
+}
+
 /** Module 1 — portal-native onboarding application workflow state. */
 export type OnboardingApplicationStatus =
   "Draft" | "Submitted" | "PendingApproval" | "Approved" | "Rejected";

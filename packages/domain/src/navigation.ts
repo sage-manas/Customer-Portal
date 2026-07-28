@@ -104,7 +104,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Package",
     accent: "order",
     permission: "order:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "deliveries",
@@ -113,7 +113,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Truck",
     accent: "delivery",
     permission: "delivery:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "invoices",
@@ -122,7 +122,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Receipt",
     accent: "invoice",
     permission: "invoice:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "payments",
@@ -131,7 +131,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "CreditCard",
     accent: "payment",
     permission: "payment:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "support",

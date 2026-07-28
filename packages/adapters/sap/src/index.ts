@@ -5,7 +5,7 @@ export type {
   SapDriverName,
   SapRead,
 } from "./contract";
-export { sapRead } from "./contract";
+export { earliestSyncedAt, leastFresh, sapRead } from "./contract";
 
 export {
   SapError,
