@@ -5,3 +5,6 @@ export * from "./customer";
 export * from "./catalogue";
 export * from "./cart";
 export * from "./sales-doc";
+export * from "./ar";
+export * from "./payment";
+export * from "./o2c";

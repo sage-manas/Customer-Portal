@@ -85,6 +85,9 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   async createSalesOrder(_input: CreateSalesOrderInput): Promise<SalesOrderResult> {
     this.fail("createSalesOrder");
   }
+  async cancelSalesOrder(_vbeln: string, _reason?: string): Promise<SalesOrderResult> {
+    this.fail("cancelSalesOrder");
+  }
   async getOrderStatus(_vbeln: string): Promise<SapRead<OrderStatusView>> {
     this.fail("getOrderStatus");
   }

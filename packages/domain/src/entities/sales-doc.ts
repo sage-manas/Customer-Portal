@@ -88,6 +88,8 @@ export interface OrderStatusView {
   currency: string;
   /** NAST/BA00 order-confirmation output, when generated. */
   confirmationPdfUrl?: string;
+  /** VBAP-ABGRU text, set when every item was rejected (a cancellation). */
+  rejectionReason?: string;
 }
 
 export interface Delivery {
@@ -117,6 +119,14 @@ export interface Invoice {
   /** VBRP-VGBEL — preceding delivery/order */
   reference?: string;
   kunnr: string;
+  /**
+   * VBRK-FKART — F2 invoice / G2 credit note / L2 debit note. A note is a
+   * billing document like any other, so it travels on this type rather than
+   * a parallel one (ADR-020); `billingKind` in entities/ar.ts classifies it.
+   */
+  billingType?: string;
+  /** VBRP-MGAGR — why a credit/debit note was raised (docs/03 Screen 6.2). */
+  reasonCode?: string;
   /** VBRP-NETWR — taxable, ex-GST */
   taxableAmount: number;
   /** KONV-KBETR for JOCG / JOSG / JOIG. Intra-state fills cgst+sgst, inter-state igst. */

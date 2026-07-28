@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { orderMapping } from "../sap-mapping/order";
-import { findField } from "../sap-mapping/to-zod";
+import { sapStringSchema } from "../sap-mapping/to-zod";
 
 /**
  * Cart (docs/05-UI-UX-DESIGN.md §7.2: "Cart (persistent drawer): line edit,
@@ -15,26 +15,18 @@ import { findField } from "../sap-mapping/to-zod";
  * accepting into the cart (CLAUDE.md rule 3).
  */
 
-const materialField = findField(orderMapping, "material");
-
 /**
  * The cart line as the client sends it.
  *
  * `uom` is deliberately absent: it is a property of the material master
  * (MARA-MEINS), not a choice, so the service stamps it from the material
- * rather than trusting the client. The MATNR length still comes from the
- * registry — `buildZodSchema` isn't used here only because this schema
- * needs concrete inferred types for arithmetic downstream, not because the
- * constraint is hand-copied (CLAUDE.md rule 3).
+ * rather than trusting the client. The MATNR constraint still comes from the
+ * registry via `sapStringSchema` — `buildZodSchema` isn't used here only
+ * because this schema needs concrete inferred types for arithmetic
+ * downstream, not because the constraint is hand-copied (CLAUDE.md rule 3).
  */
 export const cartLineWriteSchema = z.object({
-  material: z
-    .string()
-    .min(1, "Material is required")
-    .max(
-      materialField?.length ?? 18,
-      `${materialField?.label ?? "Material"} must be at most ${materialField?.length ?? 18} characters`,
-    ),
+  material: sapStringSchema(orderMapping, "material", { required: true }),
   // The registry only knows QUAN is non-negative; a cart line of zero is a
   // removal, not a line, so the cart tightens it to positive.
   quantity: z.coerce.number().positive("Quantity must be greater than zero"),

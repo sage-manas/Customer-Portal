@@ -41,9 +41,18 @@ importers:
       '@cc/service-identity':
         specifier: workspace:*
         version: link:../../packages/services/identity
+      '@cc/service-invoice':
+        specifier: workspace:*
+        version: link:../../packages/services/invoice
       '@cc/service-onboarding':
         specifier: workspace:*
         version: link:../../packages/services/onboarding
+      '@cc/service-order':
+        specifier: workspace:*
+        version: link:../../packages/services/order
+      '@cc/service-payment':
+        specifier: workspace:*
+        version: link:../../packages/services/payment
       '@cc/service-sap':
         specifier: workspace:*
         version: link:../../packages/services/sap
@@ -106,6 +115,28 @@ importers:
         specifier: workspace:*
         version: link:../../domain
     devDependencies:
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/adapters/payment-gateway:
+    dependencies:
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)
@@ -288,6 +319,31 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/services/invoice:
+    dependencies:
+      '@cc/adapter-sap':
+        specifier: workspace:*
+        version: link:../../adapters/sap
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/services/onboarding:
     dependencies:
       '@cc/adapter-gstn':
@@ -299,6 +355,71 @@ importers:
       '@cc/adapter-storage':
         specifier: workspace:*
         version: link:../../adapters/storage
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/services/order:
+    dependencies:
+      '@cc/adapter-sap':
+        specifier: workspace:*
+        version: link:../../adapters/sap
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/services/payment:
+    dependencies:
+      '@cc/adapter-payment':
+        specifier: workspace:*
+        version: link:../../adapters/payment-gateway
+      '@cc/adapter-sap':
+        specifier: workspace:*
+        version: link:../../adapters/sap
       '@cc/config':
         specifier: workspace:*
         version: link:../../config

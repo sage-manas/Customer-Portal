@@ -10,6 +10,7 @@ import {
   formatDisplayDate,
 } from "@cc/ui";
 import { CreditCard, Headphones, Package, Receipt } from "lucide-react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/session";
@@ -73,18 +74,26 @@ export default async function DashboardPage() {
           role="alert"
           className="rounded-md border border-danger-border bg-danger-subtle px-4 py-2.5 text-[12.5px] text-danger"
         >
-          One or more of your orders is on credit hold. Our credit team is reviewing it — see your
-          credit position for details.
+          One or more of your orders is on credit hold. Our credit team is reviewing it.{" "}
+          <Link
+            href="/orders?filter=creditHold"
+            className="font-semibold underline underline-offset-2"
+          >
+            See which orders
+          </Link>
         </div>
       ) : null}
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {/* Doc 05 §7.0: each KPI clicks through to its module with the
+            filter pre-applied — now that Orders is built. */}
         <KpiCard
           label="Open Orders"
           value={String(kpis.openOrders.count)}
           subline={<Money value={kpis.openOrders.value} />}
           icon={Package}
           accent="order"
+          href="/orders?filter=open"
         />
         <KpiCard
           label="Pending Invoices"
@@ -92,6 +101,7 @@ export default async function DashboardPage() {
           subline={<Money value={kpis.pendingInvoices.value} />}
           icon={Receipt}
           accent="invoice"
+          href="/invoices?filter=open"
         />
         <KpiCard
           label="Available Credit"
@@ -99,6 +109,7 @@ export default async function DashboardPage() {
           subline={utilisation === null ? "No credit master" : `${utilisation}% of limit utilised`}
           icon={CreditCard}
           accent="payment"
+          href="/payments"
         />
         <KpiCard
           label="Open Tickets"

@@ -217,6 +217,52 @@ describe("order creation", () => {
   });
 });
 
+describe("order cancellation (VA02 rejection)", () => {
+  const input = {
+    kunnr: KUNNR,
+    customerPoRef: "PO-CANCEL-001",
+    requestedDeliveryDate: "2026-08-20",
+    shipTo: KUNNR,
+    lines: [{ material: "MAT-10003", quantity: 20, uom: "EA" }],
+  };
+
+  it("closes the order and gives back the credit exposure it consumed", async () => {
+    const sap = adapter();
+    const before = await sap.getCreditInfo(KUNNR);
+    const created = await sap.createSalesOrder(input);
+
+    const cancelled = await sap.cancelSalesOrder(created.vbeln, "Ordered in error");
+    expect(cancelled.orderStatus).toBe("Closed");
+
+    const read = await sap.getOrderStatus(created.vbeln);
+    expect(read.data.rejectionReason).toBe("Ordered in error");
+    expect(read.data.lines.every((l) => l.confirmedQty === 0)).toBe(true);
+
+    const after = await sap.getCreditInfo(KUNNR);
+    expect(after.data.utilized).toBe(before.data.utilized);
+  });
+
+  it("releases the PO reference, so the same PO can be re-raised", async () => {
+    const sap = adapter();
+    const first = await sap.createSalesOrder(input);
+    await sap.cancelSalesOrder(first.vbeln);
+
+    const second = await sap.createSalesOrder(input);
+    expect(second.vbeln).not.toBe(first.vbeln);
+  });
+
+  it("refuses once the order is past fully-open — a delivery already references it", async () => {
+    // 0000004712 is the seeded part-delivered order.
+    const error = await expectSapError(() => adapter().cancelSalesOrder("0000004712"));
+    expect(error.kind).toBe("validation");
+  });
+
+  it("404s an unknown order rather than reporting success", async () => {
+    const error = await expectSapError(() => adapter().cancelSalesOrder("0000009999"));
+    expect(error.kind).toBe("not_found");
+  });
+});
+
 describe("customer creation", () => {
   const applicant = {
     legalEntityName: "Test Manufacturing Private Limited Extremely Long Trading Name",

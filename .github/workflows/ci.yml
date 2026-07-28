@@ -79,6 +79,20 @@ jobs:
       - name: Cart flow tests
         run: pnpm --filter @cc/service-catalogue test:integration
 
+      # Drafts are the only stored part of the order module. The suite also
+      # covers draft -> submit -> read-back-from-SAP, and the cross-account
+      # and cross-tenant 404 cases.
+      - name: Order flow tests
+        run: pnpm --filter @cc/service-order test:integration
+
+      # Payments are the only O2C document the portal stores (ADR-019), so
+      # unlike invoices this module needs a database. The suite walks
+      # initiate -> signed webhook -> F-28 posting and clearing, and covers
+      # webhook replay, partial payment, a SAP posting failure leaving the
+      # money accounted for, and the cross-account/cross-tenant 404 cases.
+      - name: Payment flow tests
+        run: pnpm --filter @cc/service-payment test:integration
+
       # Proves the seed still matches the schema and the tenant-scoped
       # writes it performs — it is the fixture every future e2e run needs.
       - name: Seed development data
@@ -90,8 +104,8 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --filter web exec playwright install --with-deps chromium
 
-      # Module happy path against the mock adapters (docs/06 definition of
-      # done). Phase 2's flow is the onboarding wizard through to the
-      # back-office approval.
+      # Module happy paths against the mock adapters (docs/06 definition of
+      # done): the onboarding wizard through to back-office approval, the
+      # catalogue and cart, and cart -> ATP -> sales order -> cancel.
       - name: E2E smoke tests
         run: pnpm --filter web test:e2e

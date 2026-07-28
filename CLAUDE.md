@@ -28,6 +28,8 @@ pnpm --filter @cc/db db:push          # sync Prisma schema to local Postgres
 pnpm --filter @cc/db test:isolation   # cross-tenant isolation tests (needs Postgres)
 pnpm --filter @cc/service-onboarding test:integration   # onboarding flow (needs Postgres)
 pnpm --filter @cc/service-catalogue test:integration    # cart flow (needs Postgres)
+pnpm --filter @cc/service-order test:integration        # draft -> order flow (needs Postgres)
+pnpm --filter @cc/service-payment test:integration      # pay -> webhook -> SAP posting (needs Postgres)
 pnpm --filter @cc/service-identity db:seed   # dev tenants + users (see its README)
 pnpm --filter @cc/ui storybook        # component development
 pnpm --filter web dev                 # run the Next.js app
@@ -38,7 +40,7 @@ turbo run typecheck lint test build   # whole-repo, from root
 
 Local sign-in: copy `apps/web/.env.example` to `apps/web/.env.local`, seed, then open `http://acme.localhost:3000/login` (the subdomain is what resolves the tenant) as `buyer@acme.example` / `portal-dev-password`.
 
-Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`, `@cc/adapter-gstn`, `@cc/adapter-storage`, `@cc/service-identity`, `@cc/service-sap`, `@cc/service-onboarding`, `@cc/service-catalogue`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
+Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`, `@cc/adapter-gstn`, `@cc/adapter-storage`, `@cc/adapter-payment`, `@cc/service-identity`, `@cc/service-sap`, `@cc/service-onboarding`, `@cc/service-catalogue`, `@cc/service-order`, `@cc/service-invoice`, `@cc/service-payment`, `web` (apps/web). The remaining `packages/services/*`, `packages/adapters/*` and `apps/ops` are stubs (README only, no `package.json`) until their phase begins — see each README for which phase adds them.
 
 ## Where the moving parts live
 
@@ -47,6 +49,9 @@ Package names: `@cc/config`, `@cc/domain`, `@cc/db`, `@cc/ui`, `@cc/adapter-sap`
 - **Shell:** `AppShell`/`TopBar`/`Sidebar` in `@cc/ui` render whatever nav items they're given; filter with `visibleNavItems(...)` on the server first.
 - **Onboarding:** `@cc/service-onboarding` owns the applicant flow and the approval queue. Applicants have no session — they hold a draft token (ADR-009), so `/api/onboarding/*` is public in `middleware.ts` while `/api/admin/onboarding/*` is not. The wizard's steps and sections are a registry (`ONBOARDING_STEPS` in `@cc/domain`), so no screen carries a field list.
 - **Catalogue & cart:** `@cc/service-catalogue` owns both. Catalogue reads store nothing — they compose `SapAdapter` reads and carry their freshness. The cart stores only material + quantity and is **repriced on every read**; it is keyed per KUNNR, not per user, and survives a SAP outage unpriced (ADR-014). Price/stock load lazily per card, one request each (ADR-013). `stockAvailability()` in `@cc/domain` is the only definition of "low stock".
+- **Sales orders:** `@cc/service-order`. SAP owns submitted orders, so **nothing about them is stored** — every read goes through the adapter and carries its freshness (ADR-016). Only _drafts_ are portal-owned. The sold-to account is the security boundary: `getOrder`/`cancelOrder` compare the document's KUNNR to the session's and answer **404**, because SAP reads a sales order by VBELN alone. A credit block is not an error — SAP creates the order and holds it, and so does the portal. The O2C timeline is derived by `buildO2CTimeline` in `@cc/domain` and merely rendered by `O2CTimeline` in `@cc/ui` (ADR-015).
+- **Invoices:** `@cc/service-invoice`. SAP owns billing documents, so **nothing is stored** and every read carries its freshness — ADR-016 applied to VBRK, and the reason the package has no `@cc/db` dependency. The KUNNR check is the boundary and answers 404, as with orders. The portal **never computes GST**: CGST/SGST/IGST come off KONV as SAP calculated them, and `invoiceTax()` in `@cc/domain` only reads _which_ conditions were populated to decide intra- vs inter-state (ADR-018). Credit/debit notes are `Invoice`s carrying `billingType` (FKART), excluded from the invoice list and given their own screen (ADR-020).
+- **Payments:** `@cc/service-payment` and `@cc/adapter-payment`. Payments are the **one O2C document the portal stores** (ADR-019) — between the gateway capturing money and SAP clearing the items, nothing in SAP accounts for the debit yet. `captured` and `posted` are separate states and a captured payment is never rolled back to `failed`. **The webhook is the truth, not the browser redirect:** `initiatePayment` charges nothing, and only a signature-verified callback advances a payment. Idempotency is enforced at three points with three keys (ADR-021). The statement and aging come from BSID on every read; the stored rows answer "what did we take?", never "what does the customer owe?".
 - **Cross-service work:** a service may not import another service. Where a flow spans two (approval = SAP create + credential issue), the route handler sequences them and passes adapters in — ADR-011.
 
 ## Conventions

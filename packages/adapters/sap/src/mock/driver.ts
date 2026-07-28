@@ -469,6 +469,46 @@ export class MockSapAdapter implements SapAdapter {
     });
   }
 
+  /**
+   * VA02 rejection. SAP would set VBAP-ABGRU on every item and re-run the
+   * status determination; the mock does the equivalent — the order goes to
+   * `Closed` with nothing confirmed, and any credit exposure it consumed is
+   * given back. An order that is not fully open cannot be withdrawn this
+   * way, because by then a delivery document references it.
+   */
+  async cancelSalesOrder(vbeln: string, reason?: string): Promise<SalesOrderResult> {
+    return this.call(() => {
+      const order = this.store.orders.find((o) => o.vbeln === vbeln);
+      if (!order) throw sapNotFound("Sales order", vbeln);
+
+      if (order.orderStatus !== "Open") {
+        throw sapValidation(
+          `Sales order ${vbeln} can no longer be cancelled — it is already in processing`,
+          "vbeln",
+          "V4/219",
+        );
+      }
+
+      const credit = this.store.credit.find((c) => c.kunnr === order.kunnr);
+      if (credit && order.creditStatus !== "CreditHold") {
+        credit.utilized = round2(credit.utilized - order.netValue);
+        credit.available = round2(credit.creditLimit - credit.utilized);
+      }
+
+      order.orderStatus = "Closed";
+      order.rejectionReason = reason;
+      for (const line of order.lines) line.confirmedQty = 0;
+
+      // The PO reference is released with the order: the customer may
+      // legitimately re-raise the same PO after cancelling it.
+      if (order.customerPoRef) {
+        this.store.orderIdempotency.delete(this.idempotencyKey(order.kunnr, order.customerPoRef));
+      }
+
+      return this.toOrderResult(order);
+    });
+  }
+
   private toOrderResult(order: OrderStatusView): SalesOrderResult {
     return {
       vbeln: order.vbeln,

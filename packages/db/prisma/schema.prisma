@@ -27,6 +27,24 @@ enum GstnDriver {
   api
 }
 
+enum PaymentGatewayDriver {
+  mock
+  razorpay
+}
+
+/// Portal-side payment state (@cc/domain entities/payment.ts). Deliberately
+/// not a CanonicalStatus: those describe SAP documents, and a payment only
+/// becomes one at `posted`. `captured` vs `posted` is the window where money
+/// has been taken but SAP hasn't cleared the items yet — the reason payments
+/// are stored at all when orders and invoices are not (ADR-019).
+enum PaymentState {
+  initiated
+  captured
+  posted
+  failed
+  cancelled
+}
+
 model Tenant {
   id           String   @id @default(cuid())
   slug         String   @unique
@@ -36,6 +54,9 @@ model Tenant {
   /// GSTIN verification driver (docs/03 Screen 1.2); mock until a tenant
   /// has real GSTN API credentials.
   gstnDriver   GstnDriver @default(mock)
+  /// Payment gateway (docs/03 Screen 7.2); mock until a tenant has real
+  /// gateway credentials.
+  paymentGateway PaymentGatewayDriver @default(mock)
   /// Branding (docs/05 P6): tenants change logo + primary color, not layout.
   logoUrl      String?
   primaryColor String?
@@ -48,6 +69,7 @@ model Tenant {
   users               User[]
   onboardingApps      OnboardingApplication[]
   salesOrders         SalesOrder[]
+  payments            Payment[]
   auditLogs           AuditLog[]
 
   @@map("tenants")
@@ -226,6 +248,11 @@ model CartLine {
   @@map("cart_lines")
 }
 
+/// Portal-owned order drafts, and the submission record of what each one
+/// became. SAP owns submitted sales orders, so nothing here is read back as
+/// an order's current state — `getOrder` in @cc/service-order always asks
+/// SAP (docs/05 P1). Keyed to the sold-to account rather than the user, like
+/// the cart (ADR-014): a buyer stages, a colleague submits.
 model SalesOrder {
   id            String   @id @default(cuid())
   tenantId      String
@@ -233,6 +260,8 @@ model SalesOrder {
   customerKunnr String
   /// SAP VBAK-VBELN once created; null while portal-only draft
   soNumber      String?
+  /// "Draft" until submitted, then "Submitted". The statuses SAP returned at
+  /// submission time, kept as a record of the submission — never as a cache.
   orderStatus   String
   creditStatus  String
   /// Shape validated against orderHeaderWriteSchema (@cc/domain)
@@ -244,6 +273,8 @@ model SalesOrder {
 
   @@unique([tenantId, soNumber])
   @@index([tenantId])
+  /// The drafts list and the account's submission history both read on this.
+  @@index([tenantId, customerKunnr, orderStatus])
   @@map("sales_orders")
 }
 
@@ -251,7 +282,7 @@ model SalesOrderLine {
   id       String     @id @default(cuid())
   tenantId String
   orderId  String
-  order    SalesOrder @relation(fields: [orderId], references: [id])
+  order    SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   lineNo   Int
   material String
   quantity Decimal
@@ -261,6 +292,75 @@ model SalesOrderLine {
 
   @@index([tenantId])
   @@map("sales_order_lines")
+}
+
+/// A customer payment against open invoices (docs/03 Screen 7.2, docs/02 §6).
+///
+/// This is the one O2C document the portal genuinely owns, and the exception
+/// to ADR-016's "SAP owns it, so don't mirror it": between the gateway
+/// capturing money and SAP clearing the items there is a real debit against
+/// a real customer that no FI document yet accounts for. Losing that window
+/// means losing the only record that the money was taken (ADR-019).
+///
+/// Once `posted`, the SAP fields below are the *record of the posting*, not a
+/// cache: the statement is always re-read from BSID, never from here.
+model Payment {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  /// Sold-to account the payment is for — the security boundary, like the
+  /// cart and drafts (ADR-014).
+  customerKunnr String
+  /// Who pressed Pay. Kept for the audit trail; the payment belongs to the
+  /// account, so a colleague can see it on the statement.
+  initiatedByUserId String?
+  amount        Decimal
+  currency      String   @default("INR")
+  /// UPI / NEFT / Card / NetBanking (@cc/domain PAYMENT_MODES).
+  mode          String
+  state         PaymentState @default(initiated)
+  /// BSEG-KIDNO — the gateway's reference. Unique per tenant: it is the
+  /// idempotency key that stops a replayed webhook posting twice.
+  gatewayReference String?
+  /// FI document from the F-28 equivalent posting, once cleared in SAP.
+  fiDocumentNumber String?
+  /// Gateway's own failure text. Logged and shown to the back office; the
+  /// customer reads the translated copy instead (docs/05 §11).
+  failureReason String?
+  /// Last webhook event applied, so an at-least-once redelivery of the same
+  /// event is recognised and ignored (docs/02 §6: idempotent webhooks).
+  lastEventId   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  postedAt      DateTime?
+
+  allocations PaymentAllocation[]
+
+  @@unique([tenantId, gatewayReference])
+  /// A webhook may only ever be applied once, however many times it arrives.
+  @@unique([tenantId, lastEventId])
+  @@index([tenantId])
+  @@index([tenantId, customerKunnr, state])
+  @@map("payments")
+}
+
+/// How a payment was split across open items (BSID-BELNR). Partial payments
+/// are supported, so the allocated amount may be less than the item's
+/// balance — SAP then leaves a residual open item (docs/02 §6).
+model PaymentAllocation {
+  id             String  @id @default(cuid())
+  tenantId       String
+  paymentId      String
+  payment        Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  /// BSID-BELNR of the invoice being settled.
+  documentNumber String
+  amount         Decimal
+  /// Set once SAP confirms: was this item fully cleared, or left residual?
+  cleared        Boolean @default(false)
+
+  @@unique([tenantId, paymentId, documentNumber])
+  @@index([tenantId])
+  @@map("payment_allocations")
 }
 
 model AuditLog {

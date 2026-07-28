@@ -4,6 +4,76 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-021: A payment's idempotency is enforced in three places, because one is not enough
+
+**Context:** Doc 02 §6 asks for an "idempotent webhook design". Gateways deliver at least once, and the obvious reading is a single deduplication check — remember which event ids have been seen and drop repeats. The trouble is that a payment can be duplicated at three different moments by three different actors: the customer double-clicking Pay, the gateway redelivering a webhook, and the reconciliation job retrying a posting that timed out somewhere inside SAP.
+
+**Decision:** Each moment gets its own key, all three enforced structurally rather than by a check the caller must remember. **Creating** the attempt is idempotent on the portal's payment id, which is passed to the gateway as its reference — a second `createOrder` for the same payment returns the first attempt. **Applying** a webhook is idempotent on the gateway's event id, held as a `UNIQUE (tenantId, lastEventId)` in Postgres, so a replay is recognised even if two workers race. **Posting** to SAP is idempotent on the gateway reference (BSEG-KIDNO), which `postIncomingPayment` already keys on, so a retried posting returns the original FI document rather than clearing the items twice.
+
+**Consequence:** Every one of the three duplications a real gateway produces is a no-op instead of a second charge or a double clearing, and the integration suite exercises all three. The cost is three unique constraints and a slightly wordier service, which is a trivial price for the failure being prevented — a customer charged twice is the one defect in this module that cannot be fixed by re-reading SAP. It also means the webhook handler can safely answer 200 to a duplicate rather than erroring, which is what stops a gateway retry storm.
+
+---
+
+## ADR-020: Credit and debit notes are billing documents on the same type, shown on their own screen
+
+**Context:** Doc 03 Screen 6.2 lists credit/debit notes with their own columns (FKART G2/L2, reason MGAGR, original invoice), and doc 05 §7.6 gives them a tab. In SAP they are VBRK rows like any invoice. So the portal had two choices: a separate `CreditDebitNote` entity with its own adapter method, or the existing `Invoice` type carrying the distinction.
+
+**Decision:** They stay on `Invoice`, which grows `billingType` (FKART) and `reasonCode` (MGAGR), and `billingKind()` in `@cc/domain` classifies them. But they get their own _screen_ (`/invoices/notes`), and `listInvoices` excludes them by default. `isPayable()` refuses them outright.
+
+**Consequence:** The adapter contract doesn't grow a method for something SAP returns from the read it already has, and one screen can render either kind — which is what the invoice detail page does for a note. Keeping them off the invoice list is the part that matters to a customer: a credit note has a negative amount, and a row of "-14,325.20" in a table of bills invites both a misread row and a misread total. The risk of the shared type is a screen that forgets to check the kind, which is why the check lives in three named domain functions rather than in an `if` per screen. An unknown FKART (a tenant's ZF2) classifies as an invoice rather than being dropped — a document the portal can't categorise still belongs on the customer's list.
+
+---
+
+## ADR-019: Payments are stored; every other O2C document is not
+
+**Context:** ADR-016 established the rule for this whole phase of the build: SAP owns the document, so the portal does not mirror it — orders, deliveries and invoices are all re-read on every view and carry their freshness. Payments arrive looking like the same case. FI holds the posting; the statement can be re-read from BSID; storing a payment row invites exactly the stale mirror ADR-016 exists to prevent.
+
+**Decision:** Payments are stored anyway, in `payments` + `payment_allocations`. The reason is a window that no other document has: between the gateway capturing money and SAP clearing the open items, there is a real debit against a real customer that **no FI document accounts for**. There is nothing in SAP to re-read, because the thing that happened hasn't reached SAP. So the portal keeps its own record, with `captured` and `posted` as separate states, and the statement renders un-posted payments as `Pending sync` (docs/05 §7.7) rather than pretending the balance already moved.
+
+**Consequence:** A SAP outage between capture and posting costs the customer a delay, not their money: the payment sits `captured`, `listPendingSync` surfaces it, and reconciliation retries the posting (ADR-021 makes that safe). A payment is never rolled back from `captured` to `failed`, because that would tell a customer their money is safe when it isn't. The discipline ADR-016 asks for still holds everywhere it applies — the _statement_ is never read from these rows, only from BSID; the stored payment answers "what did we take?", never "what does the customer owe?". The two questions have different owners, and that is the whole distinction.
+
+---
+
+## ADR-018: AR arithmetic — aging, running balance, place of supply — is derived in the domain layer
+
+**Context:** Phase 5 introduces four screens that each need a number computed from the same FI data: the invoice list (aging chip per row), the statement (running Debit/Credit/Balance), the AR summary (four aging buckets), and the dashboard KPI (pending invoices). Each could reasonably have computed its own, and the statement's running balance in particular reads like presentation.
+
+**Decision:** All of it lives in `@cc/domain` (`entities/ar.ts`): `buildAging`, `buildStatement`, `invoiceTax`, and the due-date helpers. `AmountAging` in `@cc/ui` renders an `AgingSummary` and buckets nothing itself — the same rule `O2CTimeline` follows (ADR-015). Two judgements this forced into the open, where they can be tested: a filtered statement's **opening balance is the real balance carried into the range**, not zero, because a statement that starts from nothing is arithmetically tidy and financially wrong; and the aging bar covers the **whole ledger regardless of the date filter**, because a customer narrowing to last month is not asking for their account position to change.
+
+**Consequence:** Two screens cannot disagree about what a customer owes, which for money matters more than it did for statuses. It also keeps the one thing the portal must never do — computing GST — structurally impossible to do by accident: `invoiceTax` only _reads_ which KONV conditions SAP populated to decide intra- vs inter-state, and derives the displayed rate from the amounts rather than a rate table, so a line-level mix or a cess still reports honestly (docs/02 §5).
+
+---
+
+## ADR-017: Cancelling an order is a new adapter method, not a portal-side status change
+
+**Context:** Doc 05 §7.4 lists Cancel among an order's actions ("only while GBSTK=A, confirm dialog"), but the `SapAdapter` contract sketched in the TRD has no cancel operation — it covers create, simulate and read. The portal therefore had no way to express the action, and the tempting shortcut was to record the cancellation portal-side (a status column, a `cancelledAt`) and treat the SAP order as abandoned.
+
+**Decision:** `cancelSalesOrder(vbeln, reason?)` joins the contract, implemented by the mock as SAP's own VA02 rejection (VBAP-ABGRU on every item): the order goes to `Closed`, nothing stays confirmed, the credit exposure it consumed is released, and its PO reference is freed so the customer may legitimately re-raise it. The ecc/s4 skeletons inherit the `not_implemented` throw like every other method (ADR-006). The service re-reads the order's status from SAP before calling it, so a screen minutes out of date cannot cancel an order that has since shipped.
+
+**Consequence:** A cancelled order looks the same to the portal, to the tenant's back office and to SAP itself, because there is only one record of it. A portal-side flag would have produced an order that the customer believes is cancelled and that the warehouse still picks — the exact failure mode the mock-first contract exists to prevent. The cost is that Phase 7's ECC driver has one more BAPI to implement; that is a known, contract-tested cost rather than a hidden divergence.
+
+---
+
+## ADR-016: Submitted orders are never mirrored in the portal database; drafts are all that is stored
+
+**Context:** `packages/db` has carried `SalesOrder` / `SalesOrderLine` tables since Phase 0, and doc 03 Screen 4.1 offers "Save Draft" alongside Submit. Once orders could actually be created, the tables invited the obvious use: write every submitted order to them, so the list and detail screens read from Postgres instead of paying a SAP round trip per view.
+
+**Decision:** They are not. The tables hold **drafts** — half-filled forms with no VBELN, no ATP and no credit check, which SAP has no concept of — and, after submission, the row is kept solely as the record of which draft became which sales order. Every read of a submitted order (`listOrders`, `getOrder`) goes to `SapAdapter` and carries its freshness. The statuses stored on a submitted row are the ones SAP returned _at that moment_; nothing reads them back.
+
+**Consequence:** An order's status is exactly what a customer refreshes to check, and it changes in SAP through picking, credit release and billing — none of which the portal observes. A mirror would be wrong within minutes and, worse, would be wrong _silently_, since a cached row carries no freshness. This is doc 05 P1 applied literally ("SAP is the truth; the UI is honest about it"). The cost is a SAP read per view, which is what the cache-aside layer in docs/02 §4.3 is for when it becomes one — a cache reports `cached` and the screen says so, which a mirror never would. Drafts are keyed to the sold-to account rather than the user, for the same reason the cart is (ADR-014).
+
+---
+
+## ADR-015: The O2C timeline is derived in the domain layer, not assembled per screen
+
+**Context:** Doc 05 P4 makes the O2C chain "one continuous status timeline the user can traverse from any document", and §3.2 says `O2CTimeline` is "rendered on every document detail page". The component could reasonably have taken the raw documents (order, deliveries, invoices) and worked out the stages itself — it is the only thing that renders them.
+
+**Decision:** `buildO2CTimeline(...)` lives in `@cc/domain` (`entities/o2c.ts`) alongside the `O2C_STAGES` registry, and returns `O2CStage[]` — status, date, document links and note per stage. The component renders that and decides nothing. Deriving is where the judgements live: a stage no document has reached is `null` ("Not started") rather than `Open`; a part-shipped order is `PartiallyDelivered` even when one of its deliveries says `Delivered`; payment is read off the invoices, because until Phase 5 the billing document's status is the only honest answer.
+
+**Consequence:** The delivery and invoice detail screens in Phases 5–6 render the identical chain from the identical function, so two screens cannot disagree about whether an order shipped — which is precisely the failure a "spine" is supposed to prevent. It also makes the judgements testable without a DOM, and the Storybook stories build every state from real documents rather than from hand-written stage objects.
+
+---
+
 ## ADR-014: The cart belongs to a sold-to account, and is repriced on every read
 
 **Context:** Doc 05 §7.2 specifies a persistent cart drawer with line edit, MOQ/stock warnings and a split CTA, but says nothing about who owns a cart or how long a price in it survives. Both defaults are tempting and both are wrong: a per-user cart (the e-commerce norm) and a cart that stores the price the line was added at (the obvious way to avoid re-reading SAP).

@@ -9,6 +9,8 @@ const nextConfig = {
     "@cc/config",
     "@cc/service-identity",
     "@cc/service-onboarding",
+    "@cc/service-catalogue",
+    "@cc/service-order",
     "@cc/service-sap",
     "@cc/adapter-sap",
     "@cc/adapter-gstn",

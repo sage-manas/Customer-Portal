@@ -1,4 +1,10 @@
-import { isSapError, type FreshnessClass, type SapAdapter } from "@cc/adapter-sap";
+import {
+  earliestSyncedAt,
+  isSapError,
+  leastFresh,
+  type FreshnessClass,
+  type SapAdapter,
+} from "@cc/adapter-sap";
 import type {
   CustomerPrice,
   Material,
@@ -10,7 +16,6 @@ import type {
 import { stockAvailability, totalStock } from "@cc/domain";
 
 import { CatalogueError } from "./errors";
-import { earliestSyncedAt, leastFresh } from "./freshness";
 
 /**
  * Product catalogue reads (docs/03 Module 2, docs/05 §7.2).

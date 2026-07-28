@@ -8,7 +8,7 @@ Business logic per module, each exposing a typed service interface. Depends on `
 | [`sap/`](./sap) — `@cc/service-sap`                      | **Built (Phase 1).** Per-tenant adapter resolution + the dashboard summary read.                    |
 | [`onboarding/`](./onboarding) — `@cc/service-onboarding` | **Built (Phase 2).** The 4-step wizard, GSTIN verification, approval queue, BAPI customer creation. |
 | [`catalogue/`](./catalogue) — `@cc/service-catalogue`    | **Built (Phase 3).** Browse, product detail, customer price list, and the cart.                     |
-| `order/`                                                 | Phase 4                                                                                             |
+| [`order/`](./order) — `@cc/service-order`                | **Built (Phase 4).** Order list/detail, ATP simulate, credit-check gate, create, cancel, drafts.    |
 | `invoice/`, `payment/`                                   | Phase 5                                                                                             |
 | `delivery/`, `support/`, `loyalty/`, `reporting/`        | Phase 6                                                                                             |
 

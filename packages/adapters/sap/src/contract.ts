@@ -89,6 +89,12 @@ export interface SapAdapter {
   simulateOrder(input: CreateSalesOrderInput): Promise<OrderSimulation>;
   /** BAPI_SALESORDER_CREATEFROMDAT2 · API_SALES_ORDER_SRV. */
   createSalesOrder(input: CreateSalesOrderInput): Promise<SalesOrderResult>;
+  /**
+   * VA02 rejection (BAPI_SALESORDER_CHANGE with VBAP-ABGRU on every item).
+   * Only an order SAP still reports as fully open can be withdrawn — once a
+   * delivery exists the customer has to ask, not cancel (docs/05 §7.4).
+   */
+  cancelSalesOrder(vbeln: string, reason?: string): Promise<SalesOrderResult>;
   getOrderStatus(vbeln: string): Promise<SapRead<OrderStatusView>>;
   getOrders(kunnr: string): Promise<SapRead<Page<OrderStatusView>>>;
 
@@ -116,4 +122,23 @@ export function sapRead<T>(
   syncedAt: Date = new Date(),
 ): SapRead<T> {
   return { data, freshness, syncedAt: syncedAt.toISOString() };
+}
+
+/**
+ * A composed read is only as fresh as its least-fresh part (ADR-007). Every
+ * service that stitches several reads into one screen goes through here
+ * rather than picking one part's freshness and hoping — the rule belongs to
+ * the freshness contract, so it lives with it rather than once per service.
+ */
+export function leastFresh(
+  reads: ReadonlyArray<Pick<SapRead<unknown>, "freshness">>,
+): FreshnessClass {
+  if (reads.some((read) => read.freshness === "stale")) return "stale";
+  if (reads.some((read) => read.freshness === "cached")) return "cached";
+  return "live";
+}
+
+export function earliestSyncedAt(reads: ReadonlyArray<Pick<SapRead<unknown>, "syncedAt">>): string {
+  const stamps = reads.map((read) => read.syncedAt).sort();
+  return stamps[0] ?? new Date().toISOString();
 }

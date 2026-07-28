@@ -114,6 +114,14 @@ export function CartProvider({
     [mutate],
   );
 
+  const leaveTo = React.useCallback(
+    (href: string) => {
+      setIsOpen(false);
+      router.push(href);
+    },
+    [router],
+  );
+
   const value = React.useMemo<CartContextValue>(
     () => ({ cart, lineCount, open, loading, error, addLine, refresh }),
     [cart, lineCount, open, loading, error, addLine, refresh],
@@ -146,12 +154,20 @@ export function CartProvider({
         }
         onRemoveLine={(lineId) => mutate(`/api/cart/lines/${lineId}`, { method: "DELETE" }, lineId)}
         // Both CTAs are gated on the owning module being *built*, not just
-        // permitted — the layout passes `false` while Orders (Phase 4) and
-        // Inquiries (Phase 6) are still `planned` in the nav registry, so
-        // the drawer never links somewhere that 404s.
-        onCreateOrder={canCreateOrder ? () => router.push("/orders/new") : undefined}
-        onRequestQuote={canRequestQuote ? () => router.push("/inquiries/new") : undefined}
-        ctaNote="Ordering and quotations arrive in a later phase. Your cart is saved — items and your prices will be waiting."
+        // permitted — the layout passes `false` while Inquiries (Phase 6) is
+        // still `planned` in the nav registry, so the drawer never links
+        // somewhere that 404s.
+        //
+        // `?from=cart` is what makes the order form seed itself from these
+        // lines — and what tells the submit handler to empty the cart once
+        // SAP has accepted the order.
+        //
+        // Both close the drawer on the way out. "Persistent" means it
+        // outlives navigation, not that it stays *open* over the screen it
+        // just sent the customer to — its overlay would cover the form.
+        onCreateOrder={canCreateOrder ? () => leaveTo("/orders/new?from=cart") : undefined}
+        onRequestQuote={canRequestQuote ? () => leaveTo("/inquiries/new") : undefined}
+        ctaNote="Quotations arrive in a later phase. Your cart is saved — items and your prices will be waiting."
       />
     </CartContext.Provider>
   );
