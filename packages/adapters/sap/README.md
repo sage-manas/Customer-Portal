@@ -21,7 +21,7 @@ const { data, freshness, syncedAt } = await sap.getOrders(kunnr);
 
 ## The mock driver
 
-`src/mock/seed.ts` holds a realistic seeded landscape, not canned responses: 12 materials across 5 material groups, per-plant stock (including zero-stock and low-stock rows), customer-specific pricing conditions, three sold-to customers in three states (so intra-state CGST+SGST _and_ inter-state IGST both occur), a closed order, a part-delivered order, an order on credit hold, deliveries with e-way bills, and open/overdue/cleared AR items.
+`src/mock/seed.ts` holds a realistic seeded landscape, not canned responses: 12 materials across 5 material groups, per-plant stock (including zero-stock and low-stock rows), customer-specific pricing conditions, three sold-to customers in three states (so intra-state CGST+SGST _and_ inter-state IGST both occur), a closed order, a part-delivered order, an order on credit hold, three deliveries covering every POD state (one already signed for, one in transit, one still being packed), e-way bills, and open/overdue/cleared AR items.
 
 `src/mock/driver.ts` computes over that data rather than returning it verbatim:
 
@@ -29,6 +29,7 @@ const { data, freshness, syncedAt } = await sap.getOrders(kunnr);
 - **Credit** is checked against seeded KNKK exposure; an order over the limit comes back `CreditHold` with nothing confirmed, and a released order consumes exposure.
 - **MOQ**, missing price conditions, unknown ship-to and duplicate GSTIN all fail as SAP would, with the matching message id.
 - **Idempotency** holds for both writes: the same customer PO reference never creates two orders, and the same gateway reference never posts two payments.
+- **POD** (`confirmPod` / VLPOD) sets LIKP-KOQUK, overwrites the received quantities and completes the delivery. A short receipt is _accepted_ and reported as a discrepancy — it is a fact, not an invalid input — while a second POD, or one against a delivery that has not been despatched, is refused the way SAP refuses it.
 - **Cross-customer reads** fail as `not_found`, never `forbidden` — the portal must not confirm another customer's document exists.
 
 Tunable per instance via `MockSapOptions`: `unavailable` (outage simulation for the stale-banner path), `latencyMs` (so loading states are real), `today` (deterministic ATP/aging), `creditToleranceRatio`.

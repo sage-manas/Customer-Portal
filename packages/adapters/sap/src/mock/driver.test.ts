@@ -396,9 +396,83 @@ describe("billing and AR", () => {
 
 describe("delivery", () => {
   it("links deliveries to their sales order (LIKP-VGBEL)", async () => {
-    const deliveries = await adapter().getDeliveries("0000004712");
-    expect(deliveries.data).toHaveLength(1);
-    expect(deliveries.data[0]).toMatchObject({ status: "InTransit", carrier: "VRL" });
-    expect(deliveries.data[0]?.ewayBillNumber).toBeDefined();
+    const deliveries = await adapter().getDeliveriesForOrder("0000004712");
+    expect(deliveries.data).toHaveLength(2);
+    expect(deliveries.data.map((d) => d.status).sort()).toEqual(["InTransit", "Packed"]);
+    expect(deliveries.data.find((d) => d.status === "InTransit")?.ewayBillNumber).toBeDefined();
+  });
+
+  it("lists a customer's deliveries by KUNNR, newest dispatch first", async () => {
+    const deliveries = await adapter().getDeliveries("0010001001");
+
+    expect(deliveries.data.total).toBe(3);
+    expect(deliveries.data.items.every((d) => d.kunnr === "0010001001")).toBe(true);
+  });
+
+  it("does not return another customer's deliveries", async () => {
+    const deliveries = await adapter().getDeliveries("0010001002");
+    expect(deliveries.data.items).toHaveLength(0);
+  });
+
+  describe("confirmPod (VLPOD)", () => {
+    it("records the receipt and completes the delivery", async () => {
+      const sap = adapter();
+      const result = await sap.confirmPod({
+        deliveryVbeln: "0080001947",
+        receiptDate: SEED_TODAY,
+        lines: [{ lineNo: 10, receivedQty: 150 }],
+      });
+
+      expect(result).toMatchObject({ status: "Delivered", discrepancy: false });
+
+      const after = await sap.getDelivery("0080001947");
+      expect(after.data.podConfirmed).toBe(true);
+      expect(after.data.podReceiptDate).toBe(SEED_TODAY);
+    });
+
+    it("accepts a short receipt and reports it as a discrepancy", async () => {
+      // A shortfall is a fact to be reported, not an invalid input: SAP takes
+      // the POD and the difference is what raises the ticket.
+      const result = await adapter().confirmPod({
+        deliveryVbeln: "0080001947",
+        receiptDate: SEED_TODAY,
+        lines: [{ lineNo: 10, receivedQty: 140 }],
+      });
+
+      expect(result.discrepancy).toBe(true);
+    });
+
+    it("refuses a second POD on the same delivery", async () => {
+      const error = await expectSapError(() =>
+        adapter().confirmPod({
+          deliveryVbeln: "0080001901",
+          receiptDate: SEED_TODAY,
+          lines: [{ lineNo: 10, receivedQty: 12 }],
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("refuses a delivery that has not been despatched", async () => {
+      const error = await expectSapError(() =>
+        adapter().confirmPod({
+          deliveryVbeln: "0080001960",
+          receiptDate: SEED_TODAY,
+          lines: [{ lineNo: 10, receivedQty: 50 }],
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("404s an unknown delivery", async () => {
+      const error = await expectSapError(() =>
+        adapter().confirmPod({
+          deliveryVbeln: "0080009999",
+          receiptDate: SEED_TODAY,
+          lines: [{ lineNo: 10, receivedQty: 1 }],
+        }),
+      );
+      expect(error.kind).toBe("not_found");
+    });
   });
 });

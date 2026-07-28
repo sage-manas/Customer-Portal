@@ -1,5 +1,7 @@
 import type {
   CanonicalCustomer,
+  ConfirmPodInput,
+  ConfirmPodResult,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -98,6 +100,9 @@ function truncateToSapLength(portalField: string, value: string): string {
 }
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+/** Quantities are QUAN(13,3) in SAP — compare them at that precision. */
+const round3 = (value: number): number => Math.round(value * 1000) / 1000;
 
 export class MockSapAdapter implements SapAdapter {
   readonly driver = "mock" as const;
@@ -540,18 +545,85 @@ export class MockSapAdapter implements SapAdapter {
 
   // ---- delivery ---------------------------------------------------------
 
-  async getDeliveries(vbeln: string): Promise<SapRead<Delivery[]>> {
+  async getDeliveries(kunnr: string): Promise<SapRead<Page<Delivery>>> {
+    return this.call(() => {
+      this.requireCustomer(kunnr);
+      const items = this.store.deliveries
+        .filter((d) => d.kunnr === kunnr)
+        .sort((a, b) =>
+          (b.actualGoodsIssue ?? b.plannedGoodsIssue ?? "").localeCompare(
+            a.actualGoodsIssue ?? a.plannedGoodsIssue ?? "",
+          ),
+        );
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
+  async getDeliveriesForOrder(vbeln: string): Promise<SapRead<Delivery[]>> {
     return this.call(() => {
       const deliveries = this.store.deliveries.filter((d) => d.salesOrder === vbeln);
       return this.read(clone(deliveries));
     });
   }
 
-  async getDeliveryDetail(deliveryVbeln: string): Promise<SapRead<Delivery>> {
+  async getDelivery(deliveryVbeln: string): Promise<SapRead<Delivery>> {
     return this.call(() => {
       const delivery = this.store.deliveries.find((d) => d.vbeln === deliveryVbeln);
       if (!delivery) throw sapNotFound("Delivery", deliveryVbeln);
       return this.read(clone(delivery));
+    });
+  }
+
+  /**
+   * VLPOD. SAP's own behaviour, simulated: the receipt sets LIKP-KOQUK and
+   * moves WBSTK to complete, and a quantity difference is recorded on the
+   * line rather than rejected — a short delivery is a fact to be reported,
+   * not an invalid input.
+   *
+   * Re-confirming is refused, because SAP refuses it: once a POD exists the
+   * document is closed, and a portal that let the customer resubmit would be
+   * offering a button the real driver will reject in Phase 7.
+   */
+  async confirmPod(input: ConfirmPodInput): Promise<ConfirmPodResult> {
+    return this.call(() => {
+      const delivery = this.store.deliveries.find((d) => d.vbeln === input.deliveryVbeln);
+      if (!delivery) throw sapNotFound("Delivery", input.deliveryVbeln);
+
+      if (delivery.podConfirmed) {
+        throw sapValidation(
+          `Delivery ${input.deliveryVbeln} already has a proof of delivery`,
+          "deliveryVbeln",
+          "VL/431",
+        );
+      }
+      if (!delivery.actualGoodsIssue) {
+        throw sapValidation(
+          `Delivery ${input.deliveryVbeln} has not been despatched yet`,
+          "deliveryVbeln",
+          "VL/307",
+        );
+      }
+
+      let discrepancy = false;
+      for (const line of input.lines) {
+        const item = delivery.lines.find((l) => l.lineNo === line.lineNo);
+        if (!item) throw sapNotFound("Delivery item", String(line.lineNo));
+        // LIPS-LFIMG is overwritten with what was actually received, which is
+        // what VLPOD does — the dispatched quantity survives on the billing
+        // document, not here.
+        if (round3(line.receivedQty) !== round3(item.quantity)) discrepancy = true;
+        item.confirmedQty = round3(line.receivedQty);
+      }
+
+      delivery.podConfirmed = true;
+      delivery.podReceiptDate = input.receiptDate;
+      delivery.status = "Delivered";
+
+      return {
+        deliveryVbeln: delivery.vbeln,
+        status: delivery.status,
+        discrepancy,
+      };
     });
   }
 

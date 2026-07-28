@@ -404,16 +404,27 @@ export const SEED_ORDERS: OrderStatusView[] = [
   },
 ];
 
+/**
+ * LIKP/LIPS, linked to the seeded sales orders above. Between them the three
+ * rows cover every state the delivery screens have to render: one signed for
+ * (POD already posted), one in transit (the POD happy path), and one still in
+ * the warehouse, which is the case where the portal must *not* offer a
+ * Confirm Receipt button.
+ */
 export const SEED_DELIVERIES: Delivery[] = [
   {
     vbeln: "0080001901",
     salesOrder: "0000004711",
+    kunnr: "0010001001",
     status: "Delivered",
     plannedGoodsIssue: shiftDays(SEED_TODAY, -14),
     actualGoodsIssue: shiftDays(SEED_TODAY, -14),
     carrier: "BLUEDART",
     trackingNumber: "BD48291733IN",
     ewayBillNumber: "291004718822",
+    // The customer signed for this one, which is what let VF01 bill it.
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -13),
     lines: [
       {
         lineNo: 10,
@@ -436,6 +447,7 @@ export const SEED_DELIVERIES: Delivery[] = [
   {
     vbeln: "0080001947",
     salesOrder: "0000004712",
+    kunnr: "0010001001",
     status: "InTransit",
     plannedGoodsIssue: shiftDays(SEED_TODAY, -2),
     actualGoodsIssue: shiftDays(SEED_TODAY, -2),
@@ -450,6 +462,26 @@ export const SEED_DELIVERIES: Delivery[] = [
         uom: "M",
         netPrice: 1085.6,
         netValue: 162840,
+      },
+    ],
+  },
+  {
+    // The balance of order 4712 (200 M ordered, 150 shipped above). Picked and
+    // packed but not yet issued, so it has no AWB, no e-way bill and — the
+    // point of seeding it — nothing a customer may sign for yet.
+    vbeln: "0080001960",
+    salesOrder: "0000004712",
+    kunnr: "0010001001",
+    status: "Packed",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, 3),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        quantity: 50,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 54280,
       },
     ],
   },

@@ -1,5 +1,7 @@
 import type {
   CanonicalCustomer,
+  ConfirmPodInput,
+  ConfirmPodResult,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -99,8 +101,23 @@ export interface SapAdapter {
   getOrders(kunnr: string): Promise<SapRead<Page<OrderStatusView>>>;
 
   // ---- Delivery ---------------------------------------------------------
-  getDeliveries(vbeln: string): Promise<SapRead<Delivery[]>>;
-  getDeliveryDetail(deliveryVbeln: string): Promise<SapRead<Delivery>>;
+  /**
+   * LIKP/LIPS for one sold-to account (docs/03 Module 5). Keyed by KUNNR,
+   * which is also the ownership boundary — the delivery module's list is a
+   * customer's shipments, not one order's.
+   */
+  getDeliveries(kunnr: string): Promise<SapRead<Page<Delivery>>>;
+  /** The deliveries created from one sales order (LIKP-VGBEL). */
+  getDeliveriesForOrder(vbeln: string): Promise<SapRead<Delivery[]>>;
+  /** LIKP/LIPS + VBUK-WBSTK for one delivery note. */
+  getDelivery(deliveryVbeln: string): Promise<SapRead<Delivery>>;
+  /**
+   * VLPOD — the customer's proof of delivery (LIKP-KOQUK + LIPS-LFIMG
+   * differences). A write, so it carries no freshness (ADR-007); SAP owns
+   * the receipt itself, while the portal keeps the evidence around it
+   * (ADR-026).
+   */
+  confirmPod(input: ConfirmPodInput): Promise<ConfirmPodResult>;
 
   // ---- Billing ----------------------------------------------------------
   getInvoices(kunnr: string): Promise<SapRead<Page<Invoice>>>;
