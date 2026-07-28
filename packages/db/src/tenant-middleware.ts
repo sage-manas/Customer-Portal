@@ -17,6 +17,8 @@ const TENANT_SCOPED_MODELS = new Set([
   "CartLine",
   "SalesOrder",
   "SalesOrderLine",
+  "PodConfirmation",
+  "PodConfirmationLine",
   "Payment",
   "PaymentAllocation",
   "OutboxEvent",

@@ -34,6 +34,8 @@ describe("tenant isolation", () => {
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
       await db.outboxEvent.deleteMany();
+      await db.podConfirmationLine.deleteMany();
+      await db.podConfirmation.deleteMany();
       await db.cartLine.deleteMany();
       await db.cart.deleteMany();
       await db.onboardingEvent.deleteMany();
@@ -155,6 +157,50 @@ describe("tenant isolation", () => {
     // must still be unreachable from the other.
     expect(cartForTenantB).toBeNull();
     expect(linesForTenantB).toEqual([]);
+  });
+
+  it("scopes the Phase 6 proof-of-delivery models too", async () => {
+    const confirmation = await runWithTenant(tenantA.id, () =>
+      db.podConfirmation.create({
+        data: {
+          tenantId: tenantA.id,
+          customerKunnr: "0010001001",
+          deliveryVbeln: `008000${runId.slice(0, 4)}`,
+          salesOrder: "0000004712",
+          outcome: "discrepancy",
+          receiptDate: new Date(),
+          lines: {
+            create: [
+              {
+                tenantId: tenantA.id,
+                lineNo: 10,
+                material: "MAT-20002",
+                dispatchedQty: 150,
+                receivedQty: 140,
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.podConfirmation.findUnique({ where: { id: confirmation.id } }),
+    );
+    const linesForTenantB = await runWithTenant(tenantB.id, () =>
+      db.podConfirmationLine.findMany({ where: { confirmationId: confirmation.id } }),
+    );
+
+    // Two tenants may legitimately hold the same LIKP-VBELN — SAP document
+    // numbers are only unique within one SAP system, and each tenant has its
+    // own. So the delivery number alone must never reach another tenant's row.
+    const byDeliveryForTenantB = await runWithTenant(tenantB.id, () =>
+      db.podConfirmation.findMany({ where: { deliveryVbeln: confirmation.deliveryVbeln } }),
+    );
+
+    expect(asSeenByTenantB).toBeNull();
+    expect(linesForTenantB).toEqual([]);
+    expect(byDeliveryForTenantB).toEqual([]);
   });
 
   it("scopes the outbox, including its dedupe key (ADR-023)", async () => {
