@@ -18,7 +18,8 @@ Version 1.0 · 2026-07-26 · Companion to docs 00–06. Assumes the state audite
 | UI package + Storybook (SapField, DataTable, O2CTimeline, …)                                       | ✅ Done                                                         |
 | Web app routes: auth, register, admin onboarding, dashboard, catalogue, orders, invoices, payments | ✅ Done                                                         |
 | ECC / S4 real drivers                                                                              | ⬜ Skeletons throwing `not_implemented` (planned Phase 7)       |
-| Delivery & POD · Inquiry/Quotation · Support · Loyalty · Reports                                   | ⬜ Stubs (README only)                                          |
+| Delivery & POD (`@cc/service-delivery`)                                                            | ✅ Done (A2: tracking, POD, discrepancy events)                 |
+| Inquiry/Quotation · Support · Loyalty · Reports                                                    | ⬜ Stubs (README only)                                          |
 | adapters: einvoice, eway, notifications                                                            | ⬜ Not created                                                  |
 | Queue/worker/outbox                                                                                | ✅ Done (A1: `@cc/workers`, transactional outbox, BullMQ relay) |
 | Notification engine                                                                                | ⬜ Missing (A7)                                                 |
@@ -39,13 +40,14 @@ Sequenced; each phase ends with passing `turbo run typecheck lint test build` + 
 - Pattern: services write domain events to outbox inside the same transaction; worker relays to queues. This is ADR-021-consistent (idempotency keys).
 - **As built:** `OutboxEvent` model + `writeOutboxEvent` in `@cc/db`; `DOMAIN_EVENTS` registry in `@cc/domain` (event → queue → Zod payload); `@cc/workers` with the at-least-once relay, handler registry, BullMQ consumers and `src/bin/worker.ts`. Boundary edge added to `packages/config/eslint/base.js`. Recorded as ADR-022 (the layer) and ADR-023 (the outbox contract). First producer and consumer are wired end to end: `@cc/service-payment` emits `payment.captured`/`payment.posted` in the transactions that make them true, and the `payment.captured` handler retries a SAP posting that the inline attempt lost to an outage — the gap ADR-019 names and nothing previously closed.
 
-### A2. Delivery & Tracking + POD (`@cc/service-delivery`)
+### A2. Delivery & Tracking + POD (`@cc/service-delivery`) — ✅ **Done**
 
 - SAP contract additions: `getDeliveries(kunnr)`, `getDelivery(vbeln)` (LIKP/LIPS + WBSTK), `confirmPod(...)` — mock driver first, seed data linked to existing mock orders.
 - ADR-016 applies: SAP owns deliveries — store nothing except POD confirmations/discrepancies (portal-owned, tenant-scoped). KUNNR check → 404, same as orders/invoices.
 - E-way bill number surfaces read-only from mock SAP (`ComplianceBadge`); real generation is Track C.
 - POD discrepancy auto-creates a support ticket → depends on A3 interface only; until A3 lands, write the event to outbox.
 - UI per docs/05 §7.5: `/deliveries`, `/deliveries/[vbeln]`, `/deliveries/[vbeln]/pod`; extend `O2CTimeline` wiring from orders/invoices.
+- **As built:** contract grew `getDeliveries(kunnr)`, `getDeliveriesForOrder(vbeln)` (the old order-keyed `getDeliveries`), `getDelivery(vbeln)` and `confirmPod` (VLPOD); `Delivery` grew `kunnr` (LIKP-KUNAG) so the ownership check is a field comparison rather than a second SAP read that could fail open — ADR-025. `@cc/service-delivery` stores only the POD _evidence_ (`PodConfirmation` + lines, tenant-scoped, one per delivery), posting the receipt to SAP first and writing the row plus its outbox event in one transaction — ADR-026. `delivery.discrepancy.reported` gained the payload A3 needs (sales order, per-line differences, notes) and `delivery.receipt.confirmed` joined the registry; neither has a handler yet, which is the legitimate no-op ADR-023 describes. Domain gained `entities/delivery.ts` (stage registry, `podDiscrepancy`, `isPodConfirmable`, `podConfirmSchema`) and `mapDeliveryWbstkToStatus`; UI gained `DeliveryTracker`. Signed-POD scans go to `@cc/adapter-storage` before the receipt is submitted, so an upload failure can't strand a customer SAP has already accepted.
 
 ### A3. Service & Support (`@cc/service-support`)
 

@@ -113,7 +113,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Truck",
     accent: "delivery",
     permission: "delivery:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "invoices",
