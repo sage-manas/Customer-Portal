@@ -96,12 +96,41 @@ export const DOMAIN_EVENTS = {
       creditBlocked: z.boolean().default(false),
     }),
   },
+  "delivery.receipt.confirmed": {
+    queue: "notifications",
+    description: "The customer signed for the goods (VLPOD posted); billing may proceed.",
+    schema: sapDocumentEvent.extend({
+      salesOrder: z.string().min(1),
+      receiptDate: z.string().min(1),
+      confirmedByUserId: z.string().optional(),
+    }),
+  },
   "delivery.discrepancy.reported": {
     queue: "workflow",
     description: "POD came back short or damaged; A3 turns this into a support ticket.",
     schema: sapDocumentEvent.extend({
       reason: z.string().min(1),
       reportedByUserId: z.string().optional(),
+      /**
+       * Carried so A3 can raise the ticket against the right order without a
+       * second SAP read from inside a worker — a handler that has to re-read
+       * SAP to understand its own event fails when SAP is the thing that is
+       * down.
+       */
+      salesOrder: z.string().min(1).optional(),
+      /** The per-line differences, as the POD screen computed them. */
+      lines: z
+        .array(
+          z.object({
+            lineNo: z.number().int().positive(),
+            material: z.string().min(1),
+            dispatchedQty: z.number(),
+            receivedQty: z.number(),
+          }),
+        )
+        .default([]),
+      /** The customer's own words, when they left any. */
+      notes: z.string().optional(),
     }),
   },
 } as const satisfies Record<string, EventDefinition>;

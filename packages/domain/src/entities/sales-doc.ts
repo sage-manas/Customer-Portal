@@ -97,6 +97,13 @@ export interface Delivery {
   vbeln: string;
   /** LIKP-VGBEL — the sales order it was created from. */
   salesOrder: string;
+  /**
+   * LIKP-KUNAG — the sold-to account. Carried on the delivery itself rather
+   * than resolved through `salesOrder`, because this is the field the
+   * ownership check compares against and a check that needs a second SAP
+   * read is a check that fails open when SAP is slow (ADR-025).
+   */
+  kunnr: string;
   /** Derived from VBUK-WBSTK */
   status: CanonicalStatus;
   /** LIKP-WADAT / WADAT_IST, ISO dates */
@@ -108,7 +115,36 @@ export interface Delivery {
   trackingNumber?: string;
   /** J_1IEXCHDR-J_1IEWB_NO — mandatory above Rs 50,000. */
   ewayBillNumber?: string;
+  /**
+   * LIKP-KOQUK — has the customer confirmed receipt (VLPOD)? SAP owns this
+   * flag, which is why the portal posts to it rather than keeping its own
+   * idea of whether the goods arrived (ADR-026).
+   */
+  podConfirmed?: boolean;
+  /** Date the customer says the goods arrived, once POD has been posted. */
+  podReceiptDate?: string;
   lines: SalesDocLine[];
+}
+
+/** A POD line as the customer submits it (LIPS-LFIMG, received vs dispatched). */
+export interface PodLineInput {
+  lineNo: number;
+  receivedQty: number;
+}
+
+/** VLPOD — what the portal posts to SAP when a customer confirms receipt. */
+export interface ConfirmPodInput {
+  deliveryVbeln: string;
+  /** ISO date the goods were received. */
+  receiptDate: string;
+  lines: PodLineInput[];
+}
+
+export interface ConfirmPodResult {
+  deliveryVbeln: string;
+  status: CanonicalStatus;
+  /** True when SAP recorded a quantity difference on at least one line. */
+  discrepancy: boolean;
 }
 
 export interface Invoice {
