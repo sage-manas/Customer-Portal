@@ -258,8 +258,10 @@ describe("outbox relay", () => {
     const publisher = fakePublisher();
     const result = await relayTenant(tenantA.id, {
       publisher,
-      // Pretend the claim is old enough to be presumed dead.
-      reclaimAfterMs: -1,
+      // Move the relay's clock forward rather than shrinking the window: the
+      // row's `updatedAt` comes from Postgres, so a threshold a millisecond
+      // either side of "now" races the database's own clock.
+      now: () => new Date(Date.now() + 60 * 60 * 1000),
     });
 
     // At-least-once by design: the event is republished rather than stranded,
