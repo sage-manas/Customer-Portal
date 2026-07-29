@@ -29,6 +29,7 @@ export * from "./components/O2CTimeline";
 export * from "./components/DeliveryTracker";
 export * from "./components/AmountAging";
 export * from "./components/SlaChip";
+export * from "./components/ValidityChip";
 export * from "./components/TicketTimeline";
 export * from "./components/CommentThread";
 
