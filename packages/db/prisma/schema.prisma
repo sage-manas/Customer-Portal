@@ -69,6 +69,7 @@ model Tenant {
   users               User[]
   onboardingApps      OnboardingApplication[]
   salesOrders         SalesOrder[]
+  inquiryDrafts       InquiryDraft[]
   podConfirmations    PodConfirmation[]
   payments            Payment[]
   supportTickets      SupportTicket[]
@@ -296,6 +297,52 @@ model SalesOrderLine {
 
   @@index([tenantId])
   @@map("sales_order_lines")
+}
+
+/// Inquiry drafts — "Draft/Submit" on docs/05 §7.3.
+///
+/// The whole of the portal's storage for Module 3, and for the reason ADR-016
+/// gives: SAP owns the inquiry (VBAK AUART=IN) and the quotation (AUART=AG),
+/// so neither is mirrored here. A draft has no VBELN, no ATP and no price —
+/// SAP has no concept of it — and once submitted the row is kept solely as
+/// the record of which draft became which inquiry.
+///
+/// Keyed to the sold-to account rather than the user, like the cart and the
+/// order draft (ADR-014): a buyer stages the requirement, a colleague sends it.
+model InquiryDraft {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  customerKunnr String
+  /// VBAK-VBELN once raised in SAP; null while the draft is portal-only.
+  inquiryNumber String?
+  /// Shape validated against inquiryHeaderWriteSchema (@cc/domain), partial
+  /// while the customer is still filling it in.
+  header        Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines InquiryDraftLine[]
+
+  @@unique([tenantId, inquiryNumber])
+  @@index([tenantId])
+  @@index([tenantId, customerKunnr])
+  @@map("inquiry_drafts")
+}
+
+model InquiryDraftLine {
+  id       String       @id @default(cuid())
+  tenantId String
+  draftId  String
+  draft    InquiryDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  lineNo   Int
+  material String
+  quantity Decimal
+  uom      String
+
+  @@unique([tenantId, draftId, lineNo])
+  @@index([tenantId])
+  @@map("inquiry_draft_lines")
 }
 
 /// What the customer said when they signed for a delivery.

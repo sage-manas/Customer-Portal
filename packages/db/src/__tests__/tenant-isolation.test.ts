@@ -40,6 +40,8 @@ describe("tenant isolation", () => {
       await db.ticketCounter.deleteMany();
       await db.podConfirmationLine.deleteMany();
       await db.podConfirmation.deleteMany();
+      await db.inquiryDraftLine.deleteMany();
+      await db.inquiryDraft.deleteMany();
       await db.cartLine.deleteMany();
       await db.cart.deleteMany();
       await db.onboardingEvent.deleteMany();
@@ -161,6 +163,33 @@ describe("tenant isolation", () => {
     // Two customers may share a KUNNR string across tenants; the cart of one
     // must still be unreachable from the other.
     expect(cartForTenantB).toBeNull();
+    expect(linesForTenantB).toEqual([]);
+  });
+
+  it("scopes the Phase A4 inquiry-draft models too", async () => {
+    const draft = await runWithTenant(tenantA.id, () =>
+      db.inquiryDraft.create({
+        data: {
+          tenantId: tenantA.id,
+          customerKunnr: "0010001001",
+          header: { requiredDeliveryDate: "2026-08-20" },
+          lines: {
+            create: [
+              { tenantId: tenantA.id, lineNo: 10, material: "MAT-10001", quantity: 6, uom: "EA" },
+            ],
+          },
+        },
+      }),
+    );
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.inquiryDraft.findUnique({ where: { id: draft.id } }),
+    );
+    const linesForTenantB = await runWithTenant(tenantB.id, () =>
+      db.inquiryDraftLine.findMany({ where: { draftId: draft.id } }),
+    );
+
+    expect(asSeenByTenantB).toBeNull();
     expect(linesForTenantB).toEqual([]);
   });
 
