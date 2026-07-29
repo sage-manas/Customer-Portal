@@ -5,10 +5,16 @@ import type { CreditInfo, Invoice, OrderStatusView } from "@cc/domain";
  * Customer dashboard summary (docs/05-UI-UX-DESIGN.md §7.0: KPI row +
  * recent orders + recent invoices).
  *
- * Lives here in Phase 1 because the dashboard is the first screen that
- * needs composed SAP reads; it moves to `packages/services/reporting` when
- * that module is built (Phase 6) — the return shape is the contract, so
- * moving it won't touch the page.
+ * It lived in `@cc/service-sap` from Phase 1, because the dashboard was the
+ * first screen that needed composed SAP reads and the reporting module did
+ * not exist. A6 built that module and this moved here, which is what the
+ * comment in the old location promised: the return shape was the contract,
+ * so the move is an import line on one page and nothing else.
+ *
+ * It is deliberately **not** cached, unlike the two reports next to it. The
+ * dashboard is the landing screen a customer opens to see whether anything
+ * changed since they last looked, and answering that from a fifteen-minute
+ * cache is answering a different question. ADR-037's TTLs are for trends.
  *
  * Degradation is deliberate (docs/05 P7): if SAP is unreachable the call
  * returns an empty-but-valid summary flagged `stale` rather than throwing,
