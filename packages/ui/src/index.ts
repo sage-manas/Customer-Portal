@@ -32,6 +32,8 @@ export * from "./components/SlaChip";
 export * from "./components/ValidityChip";
 export * from "./components/TicketTimeline";
 export * from "./components/CommentThread";
+export * from "./components/CreditGauge";
+export * from "./components/TierProgress";
 
 export * from "./layout/AppShell";
 export * from "./layout/TopBar";
