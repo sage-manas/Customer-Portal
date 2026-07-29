@@ -1,5 +1,6 @@
 import type { Permission, SessionClaims } from "@cc/domain";
 import { AuthError, requirePermission } from "@cc/service-identity";
+import { isInquiryError } from "@cc/service-inquiry";
 import { isOnboardingError } from "@cc/service-onboarding";
 import { isSupportError } from "@cc/service-support";
 import { NextResponse } from "next/server";
@@ -22,6 +23,20 @@ export async function requireBackOffice(permission: Permission): Promise<Session
 export function toAdminErrorResponse(error: unknown): NextResponse {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  if (isInquiryError(error)) {
+    // `upstreamMessage` is included for the same reason onboarding's is: the
+    // audience here is a sales user, who needs SAP's own words to act on a
+    // rejected quotation. Customer-plane responses never carry it.
+    return NextResponse.json(
+      {
+        error: error.message,
+        issues: error.issues,
+        code: error.code,
+        upstreamMessage: error.upstreamMessage,
+      },
+      { status: error.status },
+    );
   }
   if (isSupportError(error)) {
     // No `upstreamMessage`: a ticket is portal-owned, so there is no SAP text

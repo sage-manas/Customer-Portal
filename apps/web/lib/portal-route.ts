@@ -2,6 +2,7 @@ import type { Permission, SessionClaims } from "@cc/domain";
 import { isCatalogueError } from "@cc/service-catalogue";
 import { isDeliveryError } from "@cc/service-delivery";
 import { AuthError, requirePermission } from "@cc/service-identity";
+import { isInquiryError } from "@cc/service-inquiry";
 import { isInvoiceError } from "@cc/service-invoice";
 import { isOrderError } from "@cc/service-order";
 import { isPaymentError } from "@cc/service-payment";
@@ -30,6 +31,7 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
     isCatalogueError(error) ||
     isOrderError(error) ||
     isDeliveryError(error) ||
+    isInquiryError(error) ||
     isInvoiceError(error) ||
     isPaymentError(error) ||
     isSupportError(error)

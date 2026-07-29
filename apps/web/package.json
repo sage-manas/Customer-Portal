@@ -18,6 +18,7 @@
     "@cc/service-catalogue": "workspace:*",
     "@cc/service-delivery": "workspace:*",
     "@cc/service-identity": "workspace:*",
+    "@cc/service-inquiry": "workspace:*",
     "@cc/service-invoice": "workspace:*",
     "@cc/service-onboarding": "workspace:*",
     "@cc/service-order": "workspace:*",
