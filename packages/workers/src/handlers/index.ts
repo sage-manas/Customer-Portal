@@ -7,6 +7,7 @@
  * discrepancies, A7 consumes everything on the `notifications` queue.
  */
 import "./payment-posting";
+import "./support-auto-ticket";
 
 export {
   dispatchEvent,

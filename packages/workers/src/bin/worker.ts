@@ -9,14 +9,21 @@ import { env } from "../env";
 import { registeredQueues } from "../handlers";
 import { createBullPublisher, createRedisConnection } from "../publisher";
 import { startRelayLoop, type RelayLoop } from "../relay";
+import { startSlaSweepLoop, type SlaSweepLoop } from "../sla-sweep";
 
 /**
  * The worker process (docs/07 A1).
  *
- * One process runs both halves — the outbox relay and the queue consumers —
- * because at pilot scale two processes would be two things to deploy and
- * monitor for no benefit. They are separate modules precisely so that
- * splitting them later is a change to this file and nothing else.
+ * One process runs all three parts — the outbox relay, the queue consumers,
+ * and the SLA sweep — because at pilot scale separate processes would be
+ * separate things to deploy and monitor for no benefit. They are separate
+ * modules precisely so that splitting them later is a change to this file and
+ * nothing else.
+ *
+ * The relay and the sweep are different in kind, which is why the sweep is
+ * not just another handler: the relay publishes facts that services already
+ * wrote, while the sweep *discovers* a fact — a deadline passed and nothing
+ * happened — that no transaction could have written (ADR-029).
  *
  * Run with `pnpm --filter @cc/workers start` (needs DATABASE_URL and the
  * Redis from docker-compose.dev.yml).
@@ -37,6 +44,13 @@ async function main(): Promise<void> {
     },
   });
 
+  const slaSweep: SlaSweepLoop = startSlaSweepLoop({
+    intervalMs: env.SLA_SWEEP_INTERVAL_MS,
+    onError: (error) => {
+      console.error("[worker] SLA sweep failed", error);
+    },
+  });
+
   for (const worker of workers) {
     worker.on("failed", (job, error) => {
       console.error(`[worker] job ${job?.id ?? "?"} (${job?.name ?? "?"}) failed:`, error.message);
@@ -44,7 +58,9 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `[worker] relay every ${env.OUTBOX_POLL_INTERVAL_MS}ms; consuming ${
+    `[worker] relay every ${env.OUTBOX_POLL_INTERVAL_MS}ms; SLA sweep every ${
+      env.SLA_SWEEP_INTERVAL_MS
+    }ms; consuming ${
       queues.length > 0 ? queues.join(", ") : "(no queues — no handlers registered)"
     }`,
   );
@@ -59,6 +75,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     console.log(`[worker] ${signal} — shutting down`);
     await relay.stop();
+    await slaSweep.stop();
     await Promise.all(workers.map((worker) => worker.close()));
     await publisher.close();
     await connection.quit();

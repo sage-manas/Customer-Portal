@@ -23,6 +23,7 @@
     "@cc/domain": "workspace:*",
     "@cc/service-payment": "workspace:*",
     "@cc/service-sap": "workspace:*",
+    "@cc/service-support": "workspace:*",
     "bullmq": "^5.34.0",
     "dotenv": "^16.4.7",
     "ioredis": "^5.4.1",

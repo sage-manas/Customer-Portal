@@ -641,6 +641,9 @@ importers:
       '@cc/service-sap':
         specifier: workspace:*
         version: link:../services/sap
+      '@cc/service-support':
+        specifier: workspace:*
+        version: link:../services/support
       bullmq:
         specifier: ^5.34.0
         version: 5.81.2
