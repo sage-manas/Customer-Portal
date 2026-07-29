@@ -17,10 +17,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@cc/config": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cc/config": "workspace:*",
     "eslint": "^9.17.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

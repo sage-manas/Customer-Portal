@@ -34,6 +34,8 @@ describe("tenant isolation", () => {
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
       await db.outboxEvent.deleteMany();
+      await db.creditLimitRequest.deleteMany();
+      await db.loyaltyTierSetting.deleteMany();
       await db.ticketAttachment.deleteMany();
       await db.ticketComment.deleteMany();
       await db.supportTicket.deleteMany();
@@ -50,6 +52,8 @@ describe("tenant isolation", () => {
     });
     await runWithTenant(tenantB.id, async () => {
       await db.outboxEvent.deleteMany();
+      await db.creditLimitRequest.deleteMany();
+      await db.loyaltyTierSetting.deleteMany();
       await db.ticketCounter.deleteMany();
       await db.user.deleteMany();
     });
@@ -303,6 +307,53 @@ describe("tenant isolation", () => {
 
     expect(forA?.value).toBe(2);
     expect(forB.value).toBe(1);
+  });
+
+  it("scopes the Phase A5 loyalty and credit models too", async () => {
+    const request = await runWithTenant(tenantA.id, () =>
+      db.creditLimitRequest.create({
+        data: {
+          tenantId: tenantA.id,
+          customerKunnr: "0010001001",
+          requestedLimit: 7_500_000,
+          currentLimit: 5_000_000,
+          justification: "Second production line commissioning in October.",
+        },
+      }),
+    );
+
+    // Tier thresholds are a tenant's commercial policy — what this tenant
+    // considers a Gold customer is not something another tenant may read.
+    await runWithTenant(tenantA.id, () =>
+      db.loyaltyTierSetting.create({
+        data: { tenantId: tenantA.id, tier: "gold", thresholdAmount: 8_000_000 },
+      }),
+    );
+
+    const requestForB = await runWithTenant(tenantB.id, () =>
+      db.creditLimitRequest.findUnique({ where: { id: request.id } }),
+    );
+    const queueForB = await runWithTenant(tenantB.id, () =>
+      db.creditLimitRequest.findMany({ where: { state: "pending" } }),
+    );
+    const thresholdsForB = await runWithTenant(tenantB.id, () => db.loyaltyTierSetting.findMany());
+
+    expect(requestForB).toBeNull();
+    expect(queueForB).toEqual([]);
+    expect(thresholdsForB).toEqual([]);
+
+    // And tenant B may hold its own threshold for the same tier — the unique
+    // constraint is (tenantId, tier), not tier alone.
+    await runWithTenant(tenantB.id, () =>
+      db.loyaltyTierSetting.create({
+        data: { tenantId: tenantB.id, tier: "gold", thresholdAmount: 1_000_000 },
+      }),
+    );
+    const goldForA = await runWithTenant(tenantA.id, () =>
+      db.loyaltyTierSetting.findMany({ where: { tier: "gold" } }),
+    );
+    expect(goldForA).toHaveLength(1);
+    expect(Number(goldForA[0]?.thresholdAmount)).toBe(8_000_000);
   });
 
   it("scopes the outbox, including its dedupe key (ADR-023)", async () => {

@@ -149,7 +149,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Award",
     accent: "loyalty",
     permission: "account:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "reports",
@@ -192,12 +192,17 @@ export const ADMIN_NAV: readonly NavItem[] = [
   },
   {
     key: "admin-credit",
-    label: "Credit Release",
+    /** Doc 05 §8 calls this the "credit release queue". A5 builds the desk's
+     * other half — the credit-limit requests customers raise — so the label is
+     * the desk rather than one of its queues; the blocked-order release queue
+     * joins this screen when a tenant-wide read for it exists (see the
+     * @cc/service-loyalty README). */
+    label: "Credit Desk",
     href: "/admin/credit",
     icon: "ShieldCheck",
     accent: "payment",
-    permission: "credit:release",
-    status: "planned",
+    permission: "credit:decide-limit",
+    status: "live",
   },
   {
     key: "admin-tickets",

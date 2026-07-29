@@ -46,25 +46,25 @@ enum PaymentState {
 }
 
 model Tenant {
-  id           String   @id @default(cuid())
-  slug         String   @unique
-  name         String
-  customDomain String?  @unique
-  sapDriver    SapDriver @default(mock)
+  id             String               @id @default(cuid())
+  slug           String               @unique
+  name           String
+  customDomain   String?              @unique
+  sapDriver      SapDriver            @default(mock)
   /// GSTIN verification driver (docs/03 Screen 1.2); mock until a tenant
   /// has real GSTN API credentials.
-  gstnDriver   GstnDriver @default(mock)
+  gstnDriver     GstnDriver           @default(mock)
   /// Payment gateway (docs/03 Screen 7.2); mock until a tenant has real
   /// gateway credentials.
   paymentGateway PaymentGatewayDriver @default(mock)
   /// Branding (docs/05 P6): tenants change logo + primary color, not layout.
-  logoUrl      String?
-  primaryColor String?
+  logoUrl        String?
+  primaryColor   String?
   /// Module toggles keyed by NavItem.key (@cc/domain navigation registry).
   /// Absent key = enabled; tenants opt modules *out*.
-  moduleToggles Json    @default("{}")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  moduleToggles  Json                 @default("{}")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   users               User[]
   onboardingApps      OnboardingApplication[]
@@ -74,6 +74,8 @@ model Tenant {
   payments            Payment[]
   supportTickets      SupportTicket[]
   ticketCounter       TicketCounter?
+  loyaltyTierSettings LoyaltyTierSetting[]
+  creditLimitRequests CreditLimitRequest[]
   outboxEvents        OutboxEvent[]
   auditLogs           AuditLog[]
 
@@ -92,21 +94,21 @@ enum UserRole {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  email     String
+  id                 String     @id @default(cuid())
+  tenantId           String
+  tenant             Tenant     @relation(fields: [tenantId], references: [id])
+  email              String
   /// One user may hold several roles; the JWT carries them all as claims
   /// (docs/02 §3). Permissions are derived from roles in @cc/domain/auth.
-  roles     UserRole[]
+  roles              UserRole[]
   /// scrypt hash, format "scrypt$N$r$p$salt$hash" (see @cc/service-identity).
   /// Null for users provisioned before their credentials are issued.
-  passwordHash String?
-  isActive  Boolean  @default(true)
+  passwordHash       String?
+  isActive           Boolean    @default(true)
   /// docs/05 §8: first-login forced password change.
-  mustChangePassword Boolean @default(false)
-  lastLoginAt DateTime?
-  createdAt DateTime @default(now())
+  mustChangePassword Boolean    @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime   @default(now())
 
   accountLinks UserAccountLink[]
 
@@ -115,7 +117,9 @@ model User {
   @@map("users")
 }
 
-/** One user may act for multiple SAP sold-to accounts (KUNNR). */
+/**
+ * One user may act for multiple SAP sold-to accounts (KUNNR).
+ */
 model UserAccountLink {
   id       String @id @default(cuid())
   tenantId String
@@ -137,36 +141,36 @@ enum OnboardingStatus {
 }
 
 model OnboardingApplication {
-  id               String            @id @default(cuid())
-  tenantId         String
-  tenant           Tenant            @relation(fields: [tenantId], references: [id])
-  status           OnboardingStatus  @default(draft)
+  id                   String           @id @default(cuid())
+  tenantId             String
+  tenant               Tenant           @relation(fields: [tenantId], references: [id])
+  status               OnboardingStatus @default(draft)
   /// Shape validated against onboardingWriteSchema (@cc/domain). Partial
   /// while the wizard is in progress; complete from `submitted` onwards.
-  data             Json
+  data                 Json
   /// Unguessable bearer handle for the applicant, who has no session until
   /// their account is created at approval (docs/DECISIONS.md ADR-009).
-  draftToken       String
+  draftToken           String
   /// Denormalized out of `data` purely so they can be indexed: the dupe
   /// guard and the reviewer queue both search on them.
-  contactEmail     String?
-  gstin            String?
+  contactEmail         String?
+  gstin                String?
   /// GSTN verification evidence, captured at verify time (ADR-010).
   /// Shape: GstinVerification (@cc/domain).
-  gstinVerification Json?
+  gstinVerification    Json?
   /// Internal approval fields (docs/03 Screen 1.4), set by the reviewer.
-  salesOrg            String?
-  distributionChannel String?
+  salesOrg             String?
+  distributionChannel  String?
   creditApprovalStatus String?
-  sapCustomerCode  String?
-  rejectionReasons String[]
+  sapCustomerCode      String?
+  rejectionReasons     String[]
   /// Reviewer's note on a Request More Info / Reject decision.
-  reviewNote       String?
-  decidedByUserId  String?
-  submittedAt      DateTime?
-  decidedAt        DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  reviewNote           String?
+  decidedByUserId      String?
+  submittedAt          DateTime?
+  decidedAt            DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   documents OnboardingDocument[]
   events    OnboardingEvent[]
@@ -367,26 +371,26 @@ enum PodOutcome {
 /// them from there; these rows are evidence, not a second source of truth
 /// about whether the goods arrived.
 model PodConfirmation {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  id                String     @id @default(cuid())
+  tenantId          String
+  tenant            Tenant     @relation(fields: [tenantId], references: [id])
   /// Sold-to account — the security boundary, as on carts and payments.
-  customerKunnr String
+  customerKunnr     String
   /// LIKP-VBELN. One POD per delivery, enforced below: the portal must not
   /// be able to record a second signature for goods received once.
-  deliveryVbeln String
+  deliveryVbeln     String
   /// LIKP-VGBEL, denormalised so the support ticket A3 raises from a
   /// discrepancy can reference the order without a SAP read from a worker.
-  salesOrder    String
-  outcome       PodOutcome
+  salesOrder        String
+  outcome           PodOutcome
   /// ISO date the customer says the goods arrived (their answer, not ours).
-  receiptDate   DateTime
+  receiptDate       DateTime
   /// Portal-only field (docs/03 Screen 5.2 "Discrepancy notes").
-  notes         String?
+  notes             String?
   /// `@cc/adapter-storage` key for the signed POD scan, when one was uploaded.
-  signedPodKey  String?
+  signedPodKey      String?
   confirmedByUserId String?
-  createdAt     DateTime @default(now())
+  createdAt         DateTime   @default(now())
 
   lines PodConfirmationLine[]
 
@@ -403,16 +407,16 @@ model PodConfirmation {
 /// discrepancy is only meaningful line by line — "short by 3 of MAT-30001",
 /// never "short".
 model PodConfirmationLine {
-  id            String          @id @default(cuid())
-  tenantId      String
+  id             String          @id @default(cuid())
+  tenantId       String
   confirmationId String
-  confirmation  PodConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Cascade)
-  lineNo        Int
-  material      String
+  confirmation   PodConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Cascade)
+  lineNo         Int
+  material       String
   /// LIPS-LFIMG as dispatched, captured at signing time so the evidence still
   /// reads correctly after SAP's own quantity is overwritten by the POD.
-  dispatchedQty Decimal
-  receivedQty   Decimal
+  dispatchedQty  Decimal
+  receivedQty    Decimal
 
   @@unique([tenantId, confirmationId, lineNo])
   @@index([tenantId])
@@ -430,34 +434,34 @@ model PodConfirmationLine {
 /// Once `posted`, the SAP fields below are the *record of the posting*, not a
 /// cache: the statement is always re-read from BSID, never from here.
 model Payment {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  id                String       @id @default(cuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id])
   /// Sold-to account the payment is for — the security boundary, like the
   /// cart and drafts (ADR-014).
-  customerKunnr String
+  customerKunnr     String
   /// Who pressed Pay. Kept for the audit trail; the payment belongs to the
   /// account, so a colleague can see it on the statement.
   initiatedByUserId String?
-  amount        Decimal
-  currency      String   @default("INR")
+  amount            Decimal
+  currency          String       @default("INR")
   /// UPI / NEFT / Card / NetBanking (@cc/domain PAYMENT_MODES).
-  mode          String
-  state         PaymentState @default(initiated)
+  mode              String
+  state             PaymentState @default(initiated)
   /// BSEG-KIDNO — the gateway's reference. Unique per tenant: it is the
   /// idempotency key that stops a replayed webhook posting twice.
-  gatewayReference String?
+  gatewayReference  String?
   /// FI document from the F-28 equivalent posting, once cleared in SAP.
-  fiDocumentNumber String?
+  fiDocumentNumber  String?
   /// Gateway's own failure text. Logged and shown to the back office; the
   /// customer reads the translated copy instead (docs/05 §11).
-  failureReason String?
+  failureReason     String?
   /// Last webhook event applied, so an at-least-once redelivery of the same
   /// event is recognised and ignored (docs/02 §6: idempotent webhooks).
-  lastEventId   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  postedAt      DateTime?
+  lastEventId       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  postedAt          DateTime?
 
   allocations PaymentAllocation[]
 
@@ -511,32 +515,32 @@ enum OutboxState {
 /// registered `@cc/domain` shape and answers "what happened", never "what is
 /// true now". A handler that needs current state re-reads it (ADR-016).
 model OutboxEvent {
-  id        String      @id @default(cuid())
-  tenantId  String
-  tenant    Tenant      @relation(fields: [tenantId], references: [id])
+  id          String      @id @default(cuid())
+  tenantId    String
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
   /// A `DomainEventName` from the @cc/domain registry — never a free string.
-  eventName String
+  eventName   String
   /// Validated against the event's registered Zod schema before it is
   /// written, and again by the worker before a handler sees it.
-  payload   Json
+  payload     Json
   /// The BullMQ queue this routes to, denormalised from the registry so the
   /// relay can batch by queue without loading the domain package per row.
-  queue     String
+  queue       String
   /// Producer-side idempotency key (ADR-023): a producer that runs twice
   /// writes the same key and the second write is a no-op. Consumers dedupe
   /// on their own terms — this key is not theirs.
-  dedupeKey String
-  state     OutboxState @default(pending)
+  dedupeKey   String
+  state       OutboxState @default(pending)
   /// Relay attempts. Bounded by the worker; a row that exhausts them lands
   /// in `failed` for the exception tray rather than spinning forever.
-  attempts  Int         @default(0)
-  lastError String?
+  attempts    Int         @default(0)
+  lastError   String?
   /// When the *fact* occurred — not when it was relayed. An SLA timer must
   /// measure from here (see @cc/domain events.ts).
-  occurredAt  DateTime  @default(now())
+  occurredAt  DateTime    @default(now())
   publishedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   @@unique([tenantId, dedupeKey])
   /// The relay's only query: oldest pending rows first, per tenant.
@@ -606,24 +610,24 @@ enum TicketRelatedDocType {
 }
 
 model SupportTicket {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  id             String  @id @default(cuid())
+  tenantId       String
+  tenant         Tenant  @relation(fields: [tenantId], references: [id])
   /// Human-facing reference (docs/03 Screen 8.2 "Ticket No."), per-tenant
   /// sequential via TicketCounter. Never the key a URL or a lookup trusts —
   /// a sequential number leaks a tenant's ticket volume.
-  ticketNo  String
+  ticketNo       String
   /// Sold-to account — the security boundary, as on carts, payments and PODs.
   /// A ticket belongs to the *account*, so a colleague sees it too.
-  customerKunnr String
+  customerKunnr  String
   /// Null when the portal raised the ticket rather than a person: a POD
   /// discrepancy auto-ticket has a reporter in its event, but no session.
   raisedByUserId String?
 
-  category  TicketCategory
-  priority  TicketPriority
-  status    TicketStatus   @default(open)
-  subject   String
+  category    TicketCategory
+  priority    TicketPriority
+  status      TicketStatus   @default(open)
+  subject     String
   description String
 
   relatedDocType   TicketRelatedDocType?
@@ -679,21 +683,21 @@ model SupportTicket {
 /// Threaded comments (docs/05 §7.8). Flat by design — a support thread is
 /// read top to bottom, and nesting invites replies nobody sees.
 model TicketComment {
-  id       String        @id @default(cuid())
-  tenantId String
-  ticketId String
-  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  authorUserId String?
+  id            String        @id @default(cuid())
+  tenantId      String
+  ticketId      String
+  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorUserId  String?
   /// Whether the author acted as the customer or as the tenant's agent, so
   /// the thread renders sides correctly without re-deriving it from the
   /// author's current roles — which change.
-  authorIsAgent Boolean @default(false)
-  body     String
+  authorIsAgent Boolean       @default(false)
+  body          String
   /// An internal note is invisible to the customer. Enforced in the service
   /// (a customer session may never set it, and a customer read never selects
   /// it), never by the screen that draws the thread.
-  internal Boolean @default(false)
-  createdAt DateTime @default(now())
+  internal      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
 
   attachments TicketAttachment[]
 
@@ -706,24 +710,120 @@ model TicketComment {
 /// exactly like the signed-POD scan: the bytes never enter Postgres, only the
 /// key does.
 model TicketAttachment {
-  id       String        @id @default(cuid())
-  tenantId String
-  ticketId String
-  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  id               String         @id @default(cuid())
+  tenantId         String
+  ticketId         String
+  ticket           SupportTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   /// Null for a file attached when the ticket was raised.
-  commentId String?
-  comment   TicketComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  storageKey  String
-  fileName    String
-  contentType String
-  sizeBytes   Int
+  commentId        String?
+  comment          TicketComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  storageKey       String
+  fileName         String
+  contentType      String
+  sizeBytes        Int
   uploadedByUserId String?
-  createdAt   DateTime @default(now())
+  createdAt        DateTime       @default(now())
 
   @@unique([tenantId, storageKey])
   @@index([tenantId])
   @@index([tenantId, ticketId])
   @@map("ticket_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Loyalty & Credit (docs/03 Module 9, docs/05 §7.9, docs/07 A5)
+//
+// The module that stores least. SAP owns every number on both screens — KNKK
+// the limit and the exposure, VBRK the year's purchases, KONA the rebate — so
+// the credit position, the loyalty tier and DSO are derived on every read and
+// none of them appears below. What is here is the two things SAP has no answer
+// for: what *this tenant* considers a Gold customer, and a customer's request
+// for a larger limit, which is a portal workflow rather than a SAP document.
+// ---------------------------------------------------------------------------
+
+/// Mirrors LOYALTY_TIERS in the @cc/domain registry, which stays the authority
+/// for the ladder's order, labels and default thresholds.
+enum LoyaltyTierName {
+  bronze
+  silver
+  gold
+  platinum
+}
+
+/// A tenant's own tier threshold, overriding the registry default.
+///
+/// A row per tier rather than a JSON blob on Tenant: the settings screen edits
+/// one number at a time, and the ascending-ladder rule is validated in the
+/// domain (`tierThresholdOverridesSchema`) against whatever set of rows exists.
+/// An absent row means "use the registry default" — tenants override tiers,
+/// they don't restate them, the same opt-*out* convention `moduleToggles` uses.
+model LoyaltyTierSetting {
+  id              String          @id @default(cuid())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  tier            LoyaltyTierName
+  /// Fiscal-year purchase value (VBRK-NETWR) at which the tier is reached.
+  thresholdAmount Decimal
+  updatedByUserId String?
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([tenantId, tier])
+  @@index([tenantId])
+  @@map("loyalty_tier_settings")
+}
+
+/// Portal-side status of a credit-limit increase request. Deliberately not a
+/// CanonicalStatus: those describe SAP documents, and this is not one. The
+/// domain registry maps each value to the badge status the UI renders.
+enum CreditRequestState {
+  pending
+  approved
+  rejected
+  withdrawn
+}
+
+/// "Request Credit Limit Increase" (docs/03 Screen 9.1, docs/05 §7.9).
+///
+/// The one stored document in Module 9, and it is a *request*, never an
+/// instruction. Approving it records that the tenant's credit desk agreed;
+/// KNKK-KLIMK moves when somebody maintains it in FD32, and the portal has no
+/// adapter method that writes it (ADR-035). Nothing here may therefore be read
+/// as the customer's limit — `getCreditInfo` is the only answer to that, on
+/// every read, like every other SAP-owned number in this module.
+model CreditLimitRequest {
+  id                String  @id @default(cuid())
+  tenantId          String
+  tenant            Tenant  @relation(fields: [tenantId], references: [id])
+  /// Sold-to account the request is for — the security boundary, as on carts,
+  /// payments, PODs and tickets.
+  customerKunnr     String
+  requestedByUserId String?
+
+  requestedLimit Decimal
+  /// KNKK-KLIMK as it stood when the request was raised, captured for the same
+  /// reason the POD stores the dispatched quantity (ADR-026): the desk needs to
+  /// see what was asked *for*, and re-reading the limit later would silently
+  /// rewrite the question once it changes.
+  currentLimit   Decimal
+  justification  String
+
+  state           CreditRequestState @default(pending)
+  /// What the desk actually agreed to, which need not be what was asked — a
+  /// counter-offer is the usual answer to a credit request.
+  approvedLimit   Decimal?
+  decisionNote    String?
+  decidedByUserId String?
+  decidedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  /// The customer's own history, and the "do you already have one open?" check.
+  @@index([tenantId, customerKunnr, state])
+  /// The credit desk's queue: pending work, oldest first.
+  @@index([tenantId, state, createdAt])
+  @@map("credit_limit_requests")
 }
 
 /// Per-tenant ticket sequence.

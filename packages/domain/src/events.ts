@@ -175,6 +175,31 @@ export const DOMAIN_EVENTS = {
       requestedByUserId: z.string().optional(),
     }),
   },
+  "credit.increase.requested": {
+    queue: "notifications",
+    description: "A customer asked for a larger credit limit; the credit desk owes them an answer.",
+    schema: eventBase.extend({
+      requestId: z.string().min(1),
+      kunnr: z.string().min(1),
+      requestedLimit: z.number().positive(),
+      /** KNKK-KLIMK as it stood when they asked — the desk needs the delta. */
+      currentLimit: z.number().nonnegative(),
+      requestedByUserId: z.string().optional(),
+    }),
+  },
+  "credit.increase.decided": {
+    queue: "notifications",
+    description:
+      "The credit desk answered. Note this says nothing about KNKK — the limit moves in FD32 (ADR-035).",
+    schema: eventBase.extend({
+      requestId: z.string().min(1),
+      kunnr: z.string().min(1),
+      decision: z.enum(["approved", "rejected"]),
+      /** What was agreed, which may be less than was asked. Absent on a decline. */
+      approvedLimit: z.number().positive().optional(),
+      decidedByUserId: z.string().optional(),
+    }),
+  },
   "support.ticket.created": {
     queue: "notifications",
     description: "A ticket exists — tell the customer, and tell the queue it routed to.",
