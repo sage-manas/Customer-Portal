@@ -21,6 +21,7 @@ import type {
   OrderStatusView,
   Page,
   Quotation,
+  RebateAgreement,
   SalesOrderResult,
   ShipToAddress,
   StockLevel,
@@ -77,6 +78,14 @@ export interface SapAdapter {
   getShipToAddresses(kunnr: string): Promise<SapRead<ShipToAddress[]>>;
   /** KNKK / credit management API. */
   getCreditInfo(kunnr: string): Promise<SapRead<CreditInfo>>;
+  /**
+   * KONA — the customer's rebate agreements and what has accrued under each
+   * (docs/03 Screen 9.2). A read only: agreements are created in VBO1 and
+   * settled in VBO2, and the accrual is SAP's own arithmetic over the billing
+   * documents. There is deliberately no portal-side equivalent, because a
+   * second computation of money owed to a customer is a second answer.
+   */
+  getRebateAgreements(kunnr: string): Promise<SapRead<RebateAgreement[]>>;
 
   // ---- Master data: catalogue ------------------------------------------
   /** MARA/MAKT reads · API_PRODUCT_SRV. */

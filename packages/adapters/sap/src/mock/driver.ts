@@ -21,6 +21,7 @@ import type {
   OrderStatusView,
   Page,
   Quotation,
+  RebateAgreement,
   SalesDocLine,
   SalesOrderResult,
   ShipToAddress,
@@ -46,6 +47,7 @@ import {
   SEED_ORDERS,
   SEED_PRICE_VALIDITY,
   SEED_QUOTATIONS,
+  SEED_REBATES,
   SEED_SHIP_TOS,
   SEED_STOCK,
   SEED_TODAY,
@@ -93,6 +95,7 @@ interface MockStore {
   customers: CanonicalCustomer[];
   shipTos: ShipToAddress[];
   credit: CreditInfo[];
+  rebates: RebateAgreement[];
   materials: Material[];
   stock: StockLevel[];
   inquiries: Inquiry[];
@@ -148,6 +151,7 @@ export class MockSapAdapter implements SapAdapter {
       customers: clone(SEED_CUSTOMERS),
       shipTos: clone(SEED_SHIP_TOS),
       credit: clone(SEED_CREDIT),
+      rebates: clone(SEED_REBATES),
       materials: clone(SEED_MATERIALS),
       stock: clone(SEED_STOCK),
       inquiries: clone(SEED_INQUIRIES),
@@ -265,6 +269,15 @@ export class MockSapAdapter implements SapAdapter {
       if (!credit) throw sapNotFound("Credit master", kunnr);
       // `available` is derived, never trusted from the source row.
       return this.read({ ...clone(credit), available: credit.creditLimit - credit.utilized });
+    });
+  }
+
+  async getRebateAgreements(kunnr: string): Promise<SapRead<RebateAgreement[]>> {
+    return this.call(() => {
+      this.requireCustomer(kunnr);
+      // An account with no agreement is not an error — most accounts have
+      // none, and a 404 here would make the loyalty screen fail for them.
+      return this.read(clone(this.store.rebates.filter((r) => r.kunnr === kunnr)));
     });
   }
 

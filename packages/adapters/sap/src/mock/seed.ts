@@ -9,6 +9,7 @@ import type {
   OpenItem,
   OrderStatusView,
   Quotation,
+  RebateAgreement,
   ShipToAddress,
   StockLevel,
 } from "@cc/domain";
@@ -736,6 +737,62 @@ export const SEED_INVOICES: Invoice[] = [
     pdfUrl: "/mock/sap/billing/0090002140.pdf",
   },
   /**
+   * Three settled invoices earlier in the same fiscal year (FY 2026-27 starts
+   * 1 April). They exist for Module 9: a loyalty tier is computed from VBRK
+   * over the fiscal year, and an account whose whole seeded history is the
+   * last two months sits at the entry tier forever, which makes the tier card
+   * and its progress bar untestable in a fresh demo. They are all cleared, so
+   * nothing about aging, the open-item list or the payable set changes.
+   */
+  {
+    vbeln: "0090002085",
+    billingDate: shiftDays(SEED_TODAY, -106),
+    reference: "0080001702",
+    kunnr: "0010001001",
+    billingType: "F2",
+    taxableAmount: 2480000,
+    cgst: 223200,
+    sgst: 223200,
+    igst: 0,
+    grossAmount: 2926400,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -76),
+    status: "Paid",
+    pdfUrl: "/mock/sap/billing/0090002085.pdf",
+  },
+  {
+    vbeln: "0090002110",
+    billingDate: shiftDays(SEED_TODAY, -81),
+    reference: "0080001744",
+    kunnr: "0010001001",
+    billingType: "F2",
+    taxableAmount: 1860000,
+    cgst: 167400,
+    sgst: 167400,
+    igst: 0,
+    grossAmount: 2194800,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -51),
+    status: "Paid",
+    pdfUrl: "/mock/sap/billing/0090002110.pdf",
+  },
+  {
+    vbeln: "0090002165",
+    billingDate: shiftDays(SEED_TODAY, -42),
+    reference: "0080001821",
+    kunnr: "0010001001",
+    billingType: "F2",
+    taxableAmount: 1795000,
+    cgst: 161550,
+    sgst: 161550,
+    igst: 0,
+    grossAmount: 2118100,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -12),
+    status: "Paid",
+    pdfUrl: "/mock/sap/billing/0090002165.pdf",
+  },
+  /**
    * A credit note (VBRK-FKART G2) against the overdue invoice above — short
    * delivery, reason code 003. Screen 6.2 has a tab for these, and without a
    * seeded one the whole tab would be permanently empty in every demo. It
@@ -804,6 +861,40 @@ export const SEED_OPEN_ITEMS: OpenItem[] = [
     status: "Cleared",
     clearingDocument: "1400000921",
   },
+  /** The FI side of the three settled invoices above — cleared, nothing open. */
+  {
+    documentNumber: "0090002085",
+    documentType: "RV",
+    postingDate: shiftDays(SEED_TODAY, -106),
+    dueDate: shiftDays(SEED_TODAY, -76),
+    amount: 2926400,
+    openAmount: 0,
+    currency: "INR",
+    status: "Cleared",
+    clearingDocument: "1400000904",
+  },
+  {
+    documentNumber: "0090002110",
+    documentType: "RV",
+    postingDate: shiftDays(SEED_TODAY, -81),
+    dueDate: shiftDays(SEED_TODAY, -51),
+    amount: 2194800,
+    openAmount: 0,
+    currency: "INR",
+    status: "Cleared",
+    clearingDocument: "1400000911",
+  },
+  {
+    documentNumber: "0090002165",
+    documentType: "RV",
+    postingDate: shiftDays(SEED_TODAY, -42),
+    dueDate: shiftDays(SEED_TODAY, -12),
+    amount: 2118100,
+    openAmount: 0,
+    currency: "INR",
+    status: "Cleared",
+    clearingDocument: "1400000918",
+  },
   /**
    * The credit note's FI side: a negative posting (BSEG posting key 15) that
    * reduces what the customer owes. It is left open rather than cleared, so
@@ -828,7 +919,59 @@ export const SEED_OPEN_ITEM_OWNER: Record<string, string> = {
   "0090002190": "0010001001",
   "0090002140": "0010001001",
   "0090002250": "0010001001",
+  "0090002085": "0010001001",
+  "0090002110": "0010001001",
+  "0090002165": "0010001001",
   "0090002205": "0010001002",
 };
+
+/**
+ * KONA rebate agreements (docs/03 Screen 9.2).
+ *
+ * One live agreement for the demo account, so the rebate card has something to
+ * render, and one that lapsed at the end of the previous fiscal year — the
+ * screen shows only the live ones, and an "expired" row nobody filtered would
+ * otherwise be indistinguishable in a demo from a filter that doesn't work.
+ * 0010001002 has none, which is the empty state.
+ */
+export const SEED_REBATES: RebateAgreement[] = [
+  {
+    agreementNumber: "0000801234",
+    kunnr: "0010001001",
+    agreementType: "0002",
+    description: "Annual volume rebate — MRO consumables",
+    validFrom: "2026-04-01",
+    validTo: "2027-03-31",
+    // KAWRT: what SAP has accrued so far this year. Not derived from the
+    // seeded invoices on purpose — the accrual is a settlement-run figure,
+    // and a mock that recomputed it would teach the portal a habit it must
+    // not have.
+    accruedAmount: 138034,
+    settlementStatus: "B",
+    currency: "INR",
+  },
+  {
+    agreementNumber: "0000800987",
+    kunnr: "0010001001",
+    agreementType: "0002",
+    description: "Annual volume rebate — MRO consumables (FY 2025-26)",
+    validFrom: "2025-04-01",
+    validTo: "2026-03-31",
+    accruedAmount: 96500,
+    settlementStatus: "D",
+    currency: "INR",
+  },
+  {
+    agreementNumber: "0000801301",
+    kunnr: "0010001003",
+    agreementType: "0003",
+    description: "Growth rebate — structural steel",
+    validFrom: "2026-04-01",
+    validTo: "2027-03-31",
+    accruedAmount: 0,
+    settlementStatus: "B",
+    currency: "INR",
+  },
+];
 
 export { shiftDays };

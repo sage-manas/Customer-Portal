@@ -21,6 +21,7 @@ import type {
   OrderStatusView,
   Page,
   Quotation,
+  RebateAgreement,
   SalesOrderResult,
   ShipToAddress,
   StockLevel,
@@ -69,6 +70,9 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   }
   async getCreditInfo(_kunnr: string): Promise<SapRead<CreditInfo>> {
     this.fail("getCreditInfo");
+  }
+  async getRebateAgreements(_kunnr: string): Promise<SapRead<RebateAgreement[]>> {
+    this.fail("getRebateAgreements");
   }
   async getMaterials(_query?: MaterialQuery): Promise<SapRead<Page<Material>>> {
     this.fail("getMaterials");

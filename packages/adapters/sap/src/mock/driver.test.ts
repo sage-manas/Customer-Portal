@@ -102,6 +102,28 @@ describe("credit", () => {
   });
 });
 
+describe("rebate agreements (KONA)", () => {
+  it("returns the account's agreements, live and lapsed alike", async () => {
+    const read = await adapter().getRebateAgreements(KUNNR);
+    expect(read.data.length).toBeGreaterThan(1);
+    expect(read.data.every((agreement) => agreement.kunnr === KUNNR)).toBe(true);
+    // Filtering by validity is the portal's job, not the driver's — KONA
+    // holds both and the screen decides which it is showing.
+    expect(read.data.some((agreement) => agreement.validTo < "2026-07-26")).toBe(true);
+  });
+
+  it("answers empty for an account with none, rather than not-found", async () => {
+    const read = await adapter().getRebateAgreements(TIGHT_CREDIT_KUNNR);
+    expect(read.data).toEqual([]);
+  });
+
+  it("still refuses a customer that doesn't exist", async () => {
+    await expect(adapter().getRebateAgreements("0009999999")).rejects.toMatchObject({
+      kind: "not_found",
+    });
+  });
+});
+
 describe("ATP simulation", () => {
   it("confirms in full on the requested date when stock covers the line", async () => {
     const simulation = await adapter().simulateOrder({
