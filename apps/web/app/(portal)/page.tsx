@@ -1,4 +1,5 @@
-import { getDashboardSummary, getSapAdapterForTenant } from "@cc/service-sap";
+import { getDashboardSummary } from "@cc/service-reporting";
+import { getSapAdapterForTenant } from "@cc/service-sap";
 import {
   DocumentNumber,
   KpiCard,

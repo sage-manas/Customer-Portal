@@ -158,7 +158,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "TrendingUp",
     accent: "report",
     permission: "report:view",
-    status: "planned",
+    status: "live",
   },
 ] as const;
 

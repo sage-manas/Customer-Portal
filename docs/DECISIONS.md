@@ -4,6 +4,50 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-038: On-time delivery reports what it could not measure, rather than scoring it
+
+**Context:** docs/03 Module 10 asks for "On-time delivery % (LIKP WADAT vs WADAT_IST)" and stops there. The seeded landscape immediately produces three populations the formula does not cover: a delivery that has not been goods-issued yet, a delivery that was issued with no planned date on the header at all, and — once A6 added a year of shipping history — enough of both that the choice moves the headline number by tens of percent. The obvious implementations all fold them in somewhere: count an unshipped delivery as late, or count a delivery with no WADAT as on time, or quietly drop both and report a percentage over a denominator nobody can see.
+
+**Decision:** `onTimeDelivery` in `@cc/domain` returns five numbers, not one. `shipped` is the denominator and covers only deliveries that were goods-issued **and** had a planned date to be judged against; `onTime` and `late` split it. The other two populations are returned in their own fields: `pending` for what has not shipped, `unmeasured` for what shipped with no WADAT. `ratePercent` is `null` when nothing measurable shipped, rather than 0 or 100. The reports screen prints the count of `unmeasured` under the KPI tile in words.
+
+**Consequence:** The two exclusions are the point, and they fail in opposite directions if you get them wrong. Counting an in-flight shipment as late means the KPI drops every time the warehouse is busy, which makes it useless exactly when someone would look at it. Counting a shipment with no planned date as on time is worse, because it is **gameable in the direction of looking good**: a tenant whose scheduling discipline collapses stops populating WADAT, and their on-time percentage rises. A metric that improves when the process it measures degrades is not a metric.
+
+Reporting `null` rather than 100 for "nothing measurable shipped" is the same instinct as ADR-007's freshness: a screen may say it does not know, and that is a different answer from a perfect score. The cost is that the KPI tile has a state — `—` — that a naive `${rate}%` would not have needed, and the surrounding copy has to explain what the rate covers. That copy is the honest part.
+
+---
+
+## ADR-037: Reports are aggregated on every read and cached; there is no reporting table
+
+**Context:** docs/07 A6 says "read-only aggregation over SAP adapter reads + portal data; cache aggressively (Redis, per-tenant keys, data-as-of timestamps)". Reporting is the module where every previous ADR's reasoning points somewhere uncomfortable. ADR-016 forbids mirroring what SAP owns, and a report is nothing _but_ a derived mirror; ADR-033 accepted three SAP reads per page load for a credit position, but a twelve-month sales chart is a year of orders, a year of invoices and a year of deliveries, aggregated, on every page view. The standard answer in every reporting system ever built is a projection table refreshed by a job.
+
+**Decision:** No table. `@cc/service-reporting` composes the same KUNNR-scoped adapter reads the orders, invoices and deliveries screens already use, hands the arrays to pure functions in `@cc/domain/entities/reporting`, and caches the **result** through `@cc/adapter-cache` (ADR-036). The package has no `@cc/db` dependency at all. The cache is the concession ADR-016 and ADR-033 both explicitly named — "the answer when that becomes a problem is docs/02 §4.3's cache, which reports `cached` and makes the screen say so" — and this is the phase that collects on it. A read that came back from SAP already `stale` is never written to the cache.
+
+**Consequence:** The distinction between a cache and a projection is the whole ADR, and it is not a matter of degree. Both hold a copy of derived data; only one of them **knows how old it is and says so**. A cached report carries the `syncedAt` of the SAP read that filled it, expires on its own, and renders through `SapSyncIndicator` as `cached` — so a customer looking at a nine-minute-old chart is told it is nine minutes old. A projection table refreshed nightly renders identically to a live read, and the screen has no way to say otherwise. That is the silent-mirror failure ADR-016 was written about, and a report is the worst place for it because a report is what somebody makes a decision from.
+
+The cost is real and should be stated: a cold cache costs three SAP reads and a year of arithmetic per page view, and the arithmetic is O(documents), not O(months). If a design-partner tenant turns out to have accounts with tens of thousands of orders, this is the decision that has to be revisited — and the revision is a narrower adapter read (aggregate in SAP, return months), not a table in Postgres. Refusing to store is what keeps that option open, because a projection table becomes the thing everything else is built on within a phase.
+
+Not caching the customer dashboard is part of the same decision. It is the screen someone opens to see whether anything changed since they last looked, and a fifteen-minute cache answers a different question than the one being asked.
+
+---
+
+## ADR-036: The cache is an adapter with a non-Redis driver first, and a cached read says it is cached
+
+**Context:** A6 needs the cache-aside layer docs/02 §4.3 has specified since Phase 0 and nothing has built. The path of least resistance is an `ioredis` client inside `@cc/service-reporting` — Redis is already running for BullMQ (ADR-022), the connection URL is already in the environment, and the whole thing is thirty lines. The second question is subtler: what does a cache hit report as its freshness? `SapRead` has carried a `cached` value since Phase 1 and nothing has ever produced one.
+
+**Decision:** Redis is an external system, so it gets exactly what SAP, GSTN, object storage and the payment gateway got (CLAUDE.md rule 2): `@cc/adapter-cache`, a `CacheStore` contract, a `memory` driver built first and used by default, a `redis` driver behind a factory. Three properties are contract-level rather than driver-level:
+
+1. **A cache hit is labelled `cached`, never `live`**, and it carries the `syncedAt` from the SAP read that filled the entry — not the moment the cache answered.
+2. **A cache never fails a request.** Every method is fail-open: a backend that is down, slow or holding a payload from an older deploy produces a miss. Failures leave through an `onError` callback, never a throw.
+3. **A key cannot be built without a tenant.** `cacheKey()` is the only way to make one and refuses an empty `tenantId`, so the failure mode of a caller who forgets is a throw at the call site.
+
+**Consequence:** The first property is what makes ADR-037 defensible, and it is worth being precise about why. A cache and a projection table hold the same derived bytes; the difference is entirely in what they will admit to. Because the freshness travels with the entry, `SapSyncIndicator` prints a real "synced 9 minutes ago" on a report page and the reader knows what they are looking at — the same guarantee ADR-007 gave for adapter reads, extended to a layer above them. Had the cache been an `ioredis` call inside the service, this would have been a convention that the next service to add caching would have had a fresh chance to get wrong.
+
+The third property is CLAUDE.md rule 4 moved one layer sideways. `runWithTenant` makes an unscoped Postgres query throw before it reaches the database; `cacheKey` makes an unscoped cache key throw before it reaches Redis. Both exist because the alternative — remembering to include the tenant — is a convention, and a cross-tenant cache hit is indistinguishable from a correct one at runtime. The KUNNR is a required part of the key for the same reason ADR-032 gave for adapter methods, one layer further out: two customers on one tenant must not be able to collide on an entry.
+
+The cost is a package for something that could have been a function, plus the `version` segment every key carries — which exists because a deploy that changes a report's _shape_ would otherwise read yesterday's shape back out of Redis and render `undefined` into a KPI tile. Bumping one constant makes every stale entry unreachable, which is cheaper than a migration and much cheaper than the bug.
+
+---
+
 ## ADR-035: Approving a credit-limit request records a decision; it does not raise the limit
 
 **Context:** docs/03 Screen 9.1 gives the customer a "Request Credit Limit Increase (workflow)" and docs/05 §7.9 an "approval-tracked request". Neither says what happens when the tenant approves one, and the obvious reading is the generous one: the desk clicks Approve, the portal writes KNKK-KLIMK through a new adapter method, and the customer's gauge moves. ADR-011's approval flow is the precedent — onboarding approval really does create the customer in SAP.
