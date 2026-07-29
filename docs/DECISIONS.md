@@ -4,6 +4,40 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-032: The back office gets its own adapter method, not the customer's with the KUNNR left off
+
+**Context:** A4's workbench needs every unanswered inquiry in the tenant, across accounts. Every read on the contract so far is keyed by KUNNR because every read so far has been a customer's, and the cheap way to serve the workbench was to relax one: `getInquiries(kunnr?: string)`, returning everything when the argument is omitted.
+
+**Decision:** `getInquiries(kunnr: string)` keeps its required argument and `getInquiryQueue()` joins the contract beside it. The service layer mirrors the split — `inquiry-service.ts` / `quotation-service.ts` for the customer, `workbench-service.ts` for the sales desk — and the routes mirror it again, `/api/inquiries` guarded by `inquiry:view` against `/api/admin/quotations` guarded by `quotation:issue`.
+
+**Consequence:** The customer-plane read cannot become a tenant-wide read by omission. That is the whole point, and it is ADR-025's argument moved from a write to a read: a boundary that depends on a caller remembering to pass something is not a boundary, because the failure mode is a missing argument rather than a wrong one — invisible in a diff, silent at runtime, and indistinguishable from a legitimate call. It is also ADR-028's separate-planes rule applied one layer down: that ADR made the wider _service_ a different function, and this one makes the wider _adapter read_ a different method, so a customer-plane file cannot reach it even by accident. The cost is one more contract method for the ecc/s4 drivers in Phase 7, which is a select without a KUNNR predicate.
+
+---
+
+## ADR-031: A quotation's expiry is derived from BNDDT on every read, never stored and never a status
+
+**Context:** Doc 05 §7.3 wants a "Valid Until with countdown chip amber <72h", actions disabled on an expired quote, and a "Request revalidation" path in its place. The obvious implementations are a status — `Expired` alongside `Open` and `Closed` — or a boolean the portal sets when it notices. Both were available: doc 05 §6.5 fixes a canonical status vocabulary, and A3 had just added a `slaBreachedAt` column for a structurally identical problem.
+
+**Decision:** Neither. `quotationValidity(validUntil, now)` in `@cc/domain` compares VBAK-BNDDT to the clock and returns `valid` · `expiring` · `expired`; `quotationAcceptBlock` turns that plus the document's own state into the reason acceptance is refused. Nothing is stored, nothing is written, and no `CanonicalStatus` is added — the twenty-one in docs/05 §6.5 stay as the doc enumerates them, and `mapPresalesGbstkToStatus` maps GBSTK for inquiries and quotations without ever consulting a date.
+
+**Consequence:** A quotation moves from `expiring` to `expired` between two page loads with nothing having happened to it anywhere, which is exactly what is true — SAP leaves a lapsed quotation GBSTK=A forever, because nobody closes it. A stored flag would have needed something to set it, and the only candidates are a sweep (ADR-029's machinery for a fact that needs discovering) or a lazy write on read, which is a write on a read path in a module that stores nothing. Both would eventually contradict the date on the customer's own screen. The contrast with `slaBreachedAt` is the part worth keeping: that column exists because an SLA breach must be _announced once_, and "have we told anyone?" is genuine state. Nobody needs to be told a quotation lapsed at the moment it lapses, so there is nothing to remember.
+
+**Also decided here:** BNDDT is treated as **inclusive** — a quotation valid until the 31st is acceptable all day on the 31st. Rounding to midnight-at-the-start would expire every quotation a day before the date printed on it, and the customer would be right to complain.
+
+---
+
+## ADR-030: A module that stores nothing has no transaction to write its events in, so it writes them after the fact
+
+**Context:** ADR-023 requires every cross-module effect to be written to the outbox _inside the transaction that made the fact true_, and ADR-026 showed the pattern working where the portal has a row of its own: post to SAP first, then write the evidence and the event together. Module 3 has neither half. SAP owns the inquiry and the quotation (ADR-016), the portal stores only drafts, and A7 still needs `inquiry.created`, `quotation.issued`, `quotation.accepted` and `quotation.revision.requested` for the bell inbox doc 05 §6.4 specifies.
+
+**Decision:** SAP first, then the event in its own transaction (`recordEvent`), and **a failure to write the event never fails the caller**. The write is wrapped and swallowed; the customer's inquiry, or the sales desk's quotation, stands on SAP's answer alone.
+
+**Consequence:** This is a genuine weakening of ADR-023's guarantee, and it should be named rather than glossed: between SAP accepting and the outbox row committing there is a window in which a crash loses the event. What it buys is the right failure. The alternatives are worse in both directions — writing the event first announces documents that may never have been created, and failing the request when the outbox write fails tells a customer their inquiry failed while SAP is holding it, which invites them to raise it twice. A lost notification costs a delayed email; a duplicate inquiry costs the sales desk a real mistake. The events are also all _reconstructible_ from SAP, since each carries only a document number and fields off that document, so B4's reconciliation work can find and replay them; a payment event, which is about money the portal alone knows it took, could not be treated this way, and ADR-019's reasoning is why payments keep the strict version.
+
+**Also decided here:** the dedupe key for `quotation.revision.requested` includes the number of requests on the document, not just the VBELN. A customer may legitimately chase twice, and a key that collapsed the second ask would silence a real follow-up — the opposite of what a dedupe key is for.
+
+---
+
 ## ADR-029: An SLA breach is swept, not emitted, because nothing happening is not a transaction
 
 **Context:** ADR-023 established that every cross-module effect is written to the outbox inside the transaction that made it true, and that nothing outside the relay publishes to BullMQ. A3 then needs `support.sla.breached` — docs/03 Module 8's "SLA breach → escalate". It does not fit. A breach is a **deadline passing with nothing happening**: there is no state change at the moment it becomes true, so there is no transaction to attach the row to, and the producer that ADR-023 assumes simply does not exist. The obvious alternatives are a delayed BullMQ job scheduled at ticket creation, or a stored `slaDeadline` column with a query over it.
