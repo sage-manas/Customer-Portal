@@ -105,8 +105,16 @@ test.describe("reports", () => {
     await expect(aging).toBeVisible();
 
     await aging.getByText("0–30 days").first().click();
-    const drilldown = page.getByRole("table").first();
+
+    // By caption, not `.first()`: `AmountAging` renders its own bucket table,
+    // so the first table on the page is the bar's, not the drill-down's.
+    const drilldown = page.getByRole("table", { name: /Open documents in/ });
     await expect(drilldown).toBeVisible();
+    // Not an exact row count: the seed is anchored to a fixed date and this
+    // suite runs on the real one, so which bucket a document sits in drifts
+    // by the day — which is the correct behaviour, and asserting a number
+    // would make the spec fail for being run on a Tuesday.
+    await expect(drilldown.locator("tbody tr").first()).toBeVisible();
     // The drill-down deep-links to the invoice it came from.
     await expect(drilldown.getByRole("link").first()).toHaveAttribute("href", /\/invoices\//);
   });
