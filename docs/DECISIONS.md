@@ -4,6 +4,50 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-035: Approving a credit-limit request records a decision; it does not raise the limit
+
+**Context:** docs/03 Screen 9.1 gives the customer a "Request Credit Limit Increase (workflow)" and docs/05 §7.9 an "approval-tracked request". Neither says what happens when the tenant approves one, and the obvious reading is the generous one: the desk clicks Approve, the portal writes KNKK-KLIMK through a new adapter method, and the customer's gauge moves. ADR-011's approval flow is the precedent — onboarding approval really does create the customer in SAP.
+
+**Decision:** It does not. `decideCreditRequest` writes one Postgres row and one outbox event, and the `SapAdapter` contract gains **no** method that writes a credit limit. The limit moves when somebody in the tenant maintains it in FD32, and `getCreditInfo` — still the only answer anywhere in the portal to "what is my limit?" — keeps returning the old figure until they do. Both screens and the event's own description say this in as many words: the desk's screen carries "it does not change KNKK", and the customer's row reads "takes effect once our credit team applies it".
+
+**Consequence:** The obvious objection is that this leaves a workflow half-finished, and the answer is that the missing half is not the portal's to complete. A credit limit is the output of a credit assessment that reads the customer's exposure across every sales area, their payment history, an external bureau score and often an insurer's cover — none of which is in the portal, and all of which FD32 exists to hold together. A portal that wrote KLIMK would be automating the _recording_ of a decision whose _making_ happens elsewhere, and the failure mode is specific and bad: a desk user approving on a portal screen would raise a real exposure limit without the credit master's own checks ever running.
+
+What it costs is a gap the customer can see — approved on Tuesday, effective when somebody gets to it — and that gap is why the copy is so insistent. The alternative failure is worse in exactly the way ADR-017 describes for a portal-side cancellation: a customer who believes they have headroom, orders against it, and meets a credit block. Telling them the truth about a two-day delay is cheaper than that.
+
+**Also decided here:** the decision carries an `approvedLimit` that may be _less_ than what was asked. A workflow with only yes and no forces a desk that half agrees to decline outright, and a counter-offer is the ordinary answer to a credit request. The request also stores the limit **as it stood when the customer asked** rather than re-reading it at decision time — ADR-026's reasoning about the dispatched quantity, applied to a different number: re-reading would silently rewrite the question every time the limit moved, and the desk would be answering an ask nobody made.
+
+---
+
+## ADR-034: A tenant's tier thresholds override a domain registry row by row; the tier itself is never stored
+
+**Context:** docs/03 Screen 9.2 makes the loyalty tier "computed from YTD VBRK-NETWR: Bronze/Silver/Gold/Platinum, tenant-configurable thresholds". Two questions follow. Where do a tenant's numbers live — and, once they exist, is a customer's tier a thing the portal remembers?
+
+**Decision on the thresholds:** The registry in `@cc/domain` owns the ladder — the four tiers, their order, their labels and a default threshold each. A tenant's own numbers are rows in `LoyaltyTierSetting`, one per tier, and **an absent row means the default applies**. `resolveTierThresholds` merges them, and `tierThresholdOverridesSchema` validates the result as a _whole ladder_ rather than field by field, because the rule that matters is a relationship between tiers: Gold must sit above Silver.
+
+**Decision on the tier:** It is derived on every read and stored nowhere.
+
+**Consequence:** The second decision is the one with teeth. A stored tier and a threshold the tenant later edits disagree forever, and the stored one wins on the customer's screen while the tenant's own settings page says something else — the same trap ADR-031 avoided for quotation expiry and ADR-029's registry argument avoids for SLA hours. Deriving it means a tenant that lowers its Gold threshold re-tiers every customer on their next page load, with no migration and nothing to backfill.
+
+It also means a tier has **no moment of change**, and therefore no event. Nothing happens to an account when it crosses a threshold: an invoice was posted for its own reasons, or a setting was edited, and the standing simply reads differently afterwards. There is no transaction to attach an outbox row to (what ADR-023 requires) and sweeping for it would be inventing a fact rather than discovering one (what ADR-029 does legitimately, because an SLA breach _must_ be announced once). If A7 wants "you've reached Gold", the honest producer is the invoice event, comparing the standing either side of that document.
+
+**Also decided here:** the ascending check refuses a save outright rather than sorting the thresholds into order. A tenant that typed Gold below Silver has made a mistake about their own commercial policy, and quietly reordering it would hide the mistake while changing which of their customers get better terms.
+
+---
+
+## ADR-033: The credit position, DSO and the fiscal-year purchase total are composed per read and never stored
+
+**Context:** Module 9's two screens are, between them, six numbers: the approved limit, the exposure, the available balance, DSO, the year's purchases and the accrued rebate. Every one is expensive-looking — the limit and exposure are a KNKK read, DSO needs BSID plus VBRK over ninety days, the tier needs a year of billing — and all of them are the sort of figure a dashboard wants. The pull towards a nightly-computed `customer_credit_snapshot` table is strong, and docs/02 §4.3's cache-aside layer would make it defensible.
+
+**Decision:** Nothing is stored. `getCreditPosition` composes `getCreditInfo` + `getOpenItems` + `getInvoices` on every call and reports `leastFresh` of the three; `getLoyaltyPosition` composes `getInvoices` + `getRebateAgreements` the same way. The arithmetic on top — utilisation, band, DSO, fiscal-year total — lives in `@cc/domain` and is recomputed each time.
+
+**Consequence:** This is ADR-016 reaching the last module it applies to, and the case for it is stronger here than for orders. An order's status changes a handful of times over its life; a credit position changes with _every order the customer places and every payment they make_, none of which the portal observes. A snapshot would be wrong within minutes, and — the part that matters — wrong **silently**, because a stored figure carries no freshness while a composed read carries `SapRead`'s. The customer is being told how much they can spend; that is not a number to be approximately right about.
+
+The cost is three SAP reads per page load, and the answer when that becomes a problem is docs/02 §4.3's cache — which reports `cached` and makes the screen say so, exactly as ADR-016 already argued for orders. What is _not_ an acceptable answer is a projection table, because it would report nothing.
+
+**Also decided here, and worth its own line:** the best-effort split. The KNKK read _is_ the credit screen, so a failure there fails the call; the AR and billing reads behind DSO are wrapped and degrade to `dso: null`, which the gauge renders as "—". `computeDso` likewise returns `null` rather than `0` for an account with no billing in the window, because zero days is a statement about how fast a customer pays and an account that bought nothing gives no evidence for it. The same instinct runs through `utilizationRatio`, where a zero limit is 0% utilised rather than 100%: an account on prepayment terms is not in trouble, and a gauge that said otherwise would warn every one of them that their orders may be blocked.
+
+---
+
 ## ADR-032: The back office gets its own adapter method, not the customer's with the KUNNR left off
 
 **Context:** A4's workbench needs every unanswered inquiry in the tenant, across accounts. Every read on the contract so far is keyed by KUNNR because every read so far has been a customer's, and the cheap way to serve the workbench was to relax one: `getInquiries(kunnr?: string)`, returning everything when the argument is omitted.
