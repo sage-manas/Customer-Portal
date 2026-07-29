@@ -4,6 +4,7 @@ import { isDeliveryError } from "@cc/service-delivery";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInquiryError } from "@cc/service-inquiry";
 import { isInvoiceError } from "@cc/service-invoice";
+import { isLoyaltyError } from "@cc/service-loyalty";
 import { isOrderError } from "@cc/service-order";
 import { isPaymentError } from "@cc/service-payment";
 import { isSupportError } from "@cc/service-support";
@@ -33,6 +34,7 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
     isDeliveryError(error) ||
     isInquiryError(error) ||
     isInvoiceError(error) ||
+    isLoyaltyError(error) ||
     isPaymentError(error) ||
     isSupportError(error)
   ) {

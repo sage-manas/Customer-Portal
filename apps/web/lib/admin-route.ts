@@ -1,6 +1,7 @@
 import type { Permission, SessionClaims } from "@cc/domain";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInquiryError } from "@cc/service-inquiry";
+import { isLoyaltyError } from "@cc/service-loyalty";
 import { isOnboardingError } from "@cc/service-onboarding";
 import { isSupportError } from "@cc/service-support";
 import { NextResponse } from "next/server";
@@ -35,6 +36,15 @@ export function toAdminErrorResponse(error: unknown): NextResponse {
         code: error.code,
         upstreamMessage: error.upstreamMessage,
       },
+      { status: error.status },
+    );
+  }
+  if (isLoyaltyError(error)) {
+    // No `upstreamMessage`: a credit-limit request is portal-owned, and the
+    // one SAP read behind it (the current limit) fails as an outage, not as a
+    // business answer with SAP text worth passing on.
+    return NextResponse.json(
+      { error: error.message, issues: error.issues, code: error.code },
       { status: error.status },
     );
   }
