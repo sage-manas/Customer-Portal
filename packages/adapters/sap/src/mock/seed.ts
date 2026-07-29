@@ -479,6 +479,261 @@ export const SEED_QUOTATIONS: Quotation[] = [
   },
 ];
 
+/**
+ * A year of closed trading history for 0010001001 — Module 10's reason for
+ * existing. Doc 05 §7.10 asks for a twelve-month bar chart, a top-products
+ * ranking and an AOV trend, and the orders above span sixty days: every one
+ * of those charts would be one bar and a straight line in a fresh demo,
+ * which is exactly the shape that hides a bug in the bucketing.
+ *
+ * They are all `Closed` deliberately. The dashboard's open-order KPI, the
+ * credit exposure and the orders list's default view are all computed from
+ * this array, and a year of history that quietly trebled every one of them
+ * would be a seed change masquerading as a reporting change.
+ *
+ * The material mix is uneven on purpose: MAT-10001 dominates by value,
+ * MAT-20002 by quantity, and two materials appear once each. A "top
+ * products" chart ranked correctly and one ranked by row count look
+ * identical against a flat mix.
+ */
+const HISTORIC_ORDERS: OrderStatusView[] = [
+  {
+    vbeln: "0000004601",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -330),
+    customerPoRef: "PO-SH-8102",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 636562.5,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 15,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 636562.5,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004602",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -298),
+    customerPoRef: "PO-SH-8149",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 271400,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        description: "Seamless Steel Pipe 4in Sch40",
+        quantity: 250,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 271400,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004603",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -265),
+    customerPoRef: "PO-SH-8203",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 449142.5,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 9,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 381937.5,
+        plant: "1000",
+      },
+      {
+        lineNo: 20,
+        material: "MAT-30001",
+        description: "Nitrile Gasket Set 150mm",
+        quantity: 82,
+        uom: "SET",
+        netPrice: 818.8,
+        netValue: 67141.6,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004604",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -231),
+    customerPoRef: "PO-SH-8266",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 174640,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        description: "Pressure Gauge 0-16 bar",
+        quantity: 80,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 174640,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004605",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -196),
+    customerPoRef: "PO-SH-8321",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 848750,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 20,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 848750,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004606",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -164),
+    customerPoRef: "PO-SH-8390",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 217120,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        description: "Seamless Steel Pipe 4in Sch40",
+        quantity: 200,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 217120,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004607",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -128),
+    customerPoRef: "PO-SH-8452",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 594125,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 14,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 594125,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004608",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -96),
+    customerPoRef: "PO-SH-8517",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 103068,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-30001",
+        description: "Nitrile Gasket Set 150mm",
+        quantity: 126,
+        uom: "SET",
+        netPrice: 818.8,
+        netValue: 103168.8,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    // A cancelled order (ADR-017 leaves every item rejected). It is seeded so
+    // the charts have something to *exclude*: `isReportableOrder` drops it,
+    // and without one here a bug that counted cancellations would be
+    // invisible in every demo and every E2E run.
+    vbeln: "0000004609",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -150),
+    customerPoRef: "PO-SH-8377",
+    orderStatus: "Rejected",
+    creditStatus: "Confirmed",
+    netValue: 1500000,
+    currency: "INR",
+    rejectionReason: "Cancelled at customer request",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 35,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 1485312.5,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004650",
+    kunnr: "0010001002",
+    createdOn: shiftDays(SEED_TODAY, -210),
+    customerPoRef: "PO-NR-4402",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 482000,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        description: "Pressure Gauge 0-16 bar",
+        quantity: 221,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 482443,
+        plant: "1000",
+      },
+    ],
+  },
+];
+
 export const SEED_ORDERS: OrderStatusView[] = [
   {
     vbeln: "0000004711",
@@ -578,6 +833,7 @@ export const SEED_ORDERS: OrderStatusView[] = [
       },
     ],
   },
+  ...HISTORIC_ORDERS,
 ];
 
 /**
@@ -587,7 +843,164 @@ export const SEED_ORDERS: OrderStatusView[] = [
  * the warehouse, which is the case where the portal must *not* offer a
  * Confirm Receipt button.
  */
+/**
+ * Shipments for the closed orders above, for the same reason they exist:
+ * docs/03 Module 10 wants an on-time-delivery percentage, and three seeded
+ * deliveries — all of them shipped on their planned date — make that KPI
+ * read 100% forever, which is indistinguishable from a rate that is never
+ * computed at all.
+ *
+ * So two of these went out late (0080001760 by six days, 0080001812 by two)
+ * and one has no planned goods issue at all. The last is the interesting
+ * one: `onTimeDelivery` reports it as `unmeasured` rather than scoring it,
+ * because a delivery with no WADAT to judge against would otherwise let a
+ * tenant's OTD rise by not planning.
+ */
+const HISTORIC_DELIVERIES: Delivery[] = [
+  {
+    vbeln: "0080001702",
+    salesOrder: "0000004601",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -323),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -323),
+    carrier: "BLUEDART",
+    trackingNumber: "BD41120988IN",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -321),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 15,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 636562.5,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001744",
+    salesOrder: "0000004602",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -291),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -292),
+    carrier: "VRL",
+    trackingNumber: "VRL7612044",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -289),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        quantity: 250,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 271400,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001760",
+    salesOrder: "0000004603",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -258),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -252),
+    carrier: "GATI",
+    trackingNumber: "GT88120441",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -250),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 9,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 381937.5,
+      },
+      {
+        lineNo: 20,
+        material: "MAT-30001",
+        quantity: 82,
+        uom: "SET",
+        netPrice: 818.8,
+        netValue: 67141.6,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001790",
+    salesOrder: "0000004604",
+    kunnr: "0010001001",
+    status: "Delivered",
+    // No WADAT — a rush order despatched without a planned date.
+    actualGoodsIssue: shiftDays(SEED_TODAY, -226),
+    carrier: "BLUEDART",
+    trackingNumber: "BD44902117IN",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -224),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        quantity: 80,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 174640,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001812",
+    salesOrder: "0000004605",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -189),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -187),
+    carrier: "VRL",
+    trackingNumber: "VRL7690155",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -185),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 20,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 848750,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001855",
+    salesOrder: "0000004607",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -121),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -121),
+    carrier: "GATI",
+    trackingNumber: "GT88451209",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -119),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 14,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 594125,
+      },
+    ],
+  },
+];
+
 export const SEED_DELIVERIES: Delivery[] = [
+  ...HISTORIC_DELIVERIES,
   {
     vbeln: "0080001901",
     salesOrder: "0000004711",

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isSapError, type SapError } from "../errors";
 
 import { MockSapAdapter } from "./driver";
-import { SEED_TODAY } from "./seed";
+import { SEED_DELIVERIES, SEED_TODAY } from "./seed";
 
 const KUNNR = "0010001001";
 /** Deccan Fabricators — seeded at 98% credit utilisation. */
@@ -427,8 +427,14 @@ describe("delivery", () => {
   it("lists a customer's deliveries by KUNNR, newest dispatch first", async () => {
     const deliveries = await adapter().getDeliveries("0010001001");
 
-    expect(deliveries.data.total).toBe(3);
+    // Counted from the seed rather than written in: A6 added a year of
+    // shipping history for this account, and a literal here would have to be
+    // edited every time the landscape grows.
+    expect(deliveries.data.total).toBe(
+      SEED_DELIVERIES.filter((d) => d.kunnr === "0010001001").length,
+    );
     expect(deliveries.data.items.every((d) => d.kunnr === "0010001001")).toBe(true);
+    expect(deliveries.data.total).toBeGreaterThan(3);
   });
 
   it("does not return another customer's deliveries", async () => {
