@@ -12,7 +12,8 @@ Business logic per module, each exposing a typed service interface. Depends on `
 | `invoice/`, `payment/`                                   | Phase 5                                                                                                                |
 | [`delivery/`](./delivery) — `@cc/service-delivery`       | **Built (A2).** Shipment tracking and proof of delivery. SAP owns the delivery; only POD evidence is stored (ADR-026). |
 | [`support/`](./support) — `@cc/service-support`          | **Built (A3).** Tickets, SLA clock, back-office workbench. The portal owns the whole document (ADR-028).               |
-| `loyalty/`, `reporting/`                                 | A4–A6 (see docs/07)                                                                                                    |
+| [`loyalty/`](./loyalty) — `@cc/service-loyalty`          | **Built (A5).** Credit position, loyalty tiers, rebates, credit-limit requests. Nothing derived is stored (ADR-033).   |
+| `reporting/`                                             | A6 (see docs/07)                                                                                                       |
 
 Not-yet-built services have no `package.json` and are not workspace members.
 
