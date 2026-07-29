@@ -28,6 +28,9 @@ export * from "./components/CartDrawer";
 export * from "./components/O2CTimeline";
 export * from "./components/DeliveryTracker";
 export * from "./components/AmountAging";
+export * from "./components/SlaChip";
+export * from "./components/TicketTimeline";
+export * from "./components/CommentThread";
 
 export * from "./layout/AppShell";
 export * from "./layout/TopBar";
