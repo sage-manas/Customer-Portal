@@ -59,6 +59,9 @@ importers:
       '@cc/service-sap':
         specifier: workspace:*
         version: link:../../packages/services/sap
+      '@cc/service-support':
+        specifier: workspace:*
+        version: link:../../packages/services/support
       '@cc/ui':
         specifier: workspace:*
         version: link:../../packages/ui

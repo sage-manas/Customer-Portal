@@ -5,6 +5,7 @@ import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInvoiceError } from "@cc/service-invoice";
 import { isOrderError } from "@cc/service-order";
 import { isPaymentError } from "@cc/service-payment";
+import { isSupportError } from "@cc/service-support";
 import { NextResponse } from "next/server";
 
 import { getSession } from "./session";
@@ -30,7 +31,8 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
     isOrderError(error) ||
     isDeliveryError(error) ||
     isInvoiceError(error) ||
-    isPaymentError(error)
+    isPaymentError(error) ||
+    isSupportError(error)
   ) {
     return NextResponse.json(
       { error: error.message, issues: error.issues, code: error.code },

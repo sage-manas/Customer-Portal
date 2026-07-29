@@ -1,6 +1,7 @@
 import type { Permission, SessionClaims } from "@cc/domain";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isOnboardingError } from "@cc/service-onboarding";
+import { isSupportError } from "@cc/service-support";
 import { NextResponse } from "next/server";
 
 import { getSession } from "./session";
@@ -21,6 +22,14 @@ export async function requireBackOffice(permission: Permission): Promise<Session
 export function toAdminErrorResponse(error: unknown): NextResponse {
   if (error instanceof AuthError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
+  }
+  if (isSupportError(error)) {
+    // No `upstreamMessage`: a ticket is portal-owned, so there is no SAP text
+    // behind its errors to pass on.
+    return NextResponse.json(
+      { error: error.message, issues: error.issues, code: error.code },
+      { status: error.status },
+    );
   }
   if (isOnboardingError(error)) {
     // `upstreamMessage` (raw SAP/GSTN text) is included here and only here:

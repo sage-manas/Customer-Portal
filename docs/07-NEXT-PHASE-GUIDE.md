@@ -19,7 +19,8 @@ Version 1.0 · 2026-07-26 · Companion to docs 00–06. Assumes the state audite
 | Web app routes: auth, register, admin onboarding, dashboard, catalogue, orders, invoices, payments | ✅ Done                                                         |
 | ECC / S4 real drivers                                                                              | ⬜ Skeletons throwing `not_implemented` (planned Phase 7)       |
 | Delivery & POD (`@cc/service-delivery`)                                                            | ✅ Done (A2: tracking, POD, discrepancy events)                 |
-| Inquiry/Quotation · Support · Loyalty · Reports                                                    | ⬜ Stubs (README only)                                          |
+| Support & SLA (`@cc/service-support`)                                                              | ✅ Done (A3: tickets, SLA sweep, auto-ticket from POD)          |
+| Inquiry/Quotation · Loyalty · Reports                                                              | ⬜ Stubs (README only)                                          |
 | adapters: einvoice, eway, notifications                                                            | ⬜ Not created                                                  |
 | Queue/worker/outbox                                                                                | ✅ Done (A1: `@cc/workers`, transactional outbox, BullMQ relay) |
 | Notification engine                                                                                | ⬜ Missing (A7)                                                 |
@@ -49,11 +50,12 @@ Sequenced; each phase ends with passing `turbo run typecheck lint test build` + 
 - UI per docs/05 §7.5: `/deliveries`, `/deliveries/[vbeln]`, `/deliveries/[vbeln]/pod`; extend `O2CTimeline` wiring from orders/invoices.
 - **As built:** contract grew `getDeliveries(kunnr)`, `getDeliveriesForOrder(vbeln)` (the old order-keyed `getDeliveries`), `getDelivery(vbeln)` and `confirmPod` (VLPOD); `Delivery` grew `kunnr` (LIKP-KUNAG) so the ownership check is a field comparison rather than a second SAP read that could fail open — ADR-025. `@cc/service-delivery` stores only the POD _evidence_ (`PodConfirmation` + lines, tenant-scoped, one per delivery), posting the receipt to SAP first and writing the row plus its outbox event in one transaction — ADR-026. `delivery.discrepancy.reported` gained the payload A3 needs (sales order, per-line differences, notes) and `delivery.receipt.confirmed` joined the registry; neither has a handler yet, which is the legitimate no-op ADR-023 describes. Domain gained `entities/delivery.ts` (stage registry, `podDiscrepancy`, `isPodConfirmable`, `podConfirmSchema`) and `mapDeliveryWbstkToStatus`; UI gained `DeliveryTracker`. Signed-POD scans go to `@cc/adapter-storage` before the receipt is submitted, so an upload failure can't strand a customer SAP has already accepted.
 
-### A3. Service & Support (`@cc/service-support`)
+### A3. Service & Support (`@cc/service-support`) — ✅ **Done**
 
 - Portal-owned tickets (tenant + KUNNR scoped, Prisma), category/priority/SLA registry in `@cc/domain` (SLA hours per priority — registry, not switch statements).
 - SLA timers computed, breach events via outbox. Threaded comments, attachments via `@cc/adapter-storage`.
 - Routes `/support`, `/support/new`, `/support/[id]` + admin ticket workbench `/admin/tickets` (SLA-sorted).
+- **As built:** `entities/support.ts` in `@cc/domain` holds every rule a ticket obeys — category → routed role, priority → SLA hours, the transition table (which carries _who_ may make each move, so a customer cannot resolve their own ticket), the 7-day reopen window and the status timeline. The portal owns the whole document, which is not a break with ADR-016 but a case outside it — SAP owns nothing here while a tenant runs portal-native (ADR-028). Internal notes are excluded from a customer read **in the query**, and the customer and back-office planes are separate service files rather than one function with a visibility flag. `support.ticket.created` / `.resolved` are written in the transactions that make them true; `support.sla.breached` cannot be, because a deadline passing with nothing happening is not a transaction — it is swept by a loop in `@cc/workers` that writes to the outbox like any producer (ADR-029). A2's `delivery.discrepancy.reported` finally has its consumer: `handlers/support-auto-ticket.ts` raises the Delivery-category ticket through the same `insertTicket` the customer's form uses, idempotent on a unique `sourceKey`. UI gained `SlaChip`, `TicketTimeline` and `CommentThread`; nav flipped `support` and `admin-tickets` to live.
 
 ### A4. Inquiry & Quotation (`@cc/service-inquiry`)
 
