@@ -3,10 +3,12 @@ import type {
   CreditInfo,
   CustomerPrice,
   Delivery,
+  Inquiry,
   Invoice,
   Material,
   OpenItem,
   OrderStatusView,
+  Quotation,
   ShipToAddress,
   StockLevel,
 } from "@cc/domain";
@@ -38,6 +40,14 @@ function shiftDays(iso: string, days: number): string {
 }
 
 export const PLANTS = ["1000", "2000"] as const;
+
+/**
+ * T005S region of the supplying plants. Place of supply is decided against
+ * this (docs/03 Module 6): a customer in 27 gets CGST+SGST, everyone else
+ * IGST — which is how the seeded invoices below are already split, and how
+ * the mock prices a quotation's tax.
+ */
+export const SUPPLYING_REGION = "27";
 
 /** T005S region codes used below: 27 Maharashtra, 29 Karnataka, 07 Delhi. */
 export const SEED_MATERIALS: Material[] = [
@@ -300,6 +310,171 @@ export const SEED_CREDIT: CreditInfo[] = [
     available: -62000,
     blocked: true,
     currency: "INR",
+  },
+];
+
+/**
+ * VBAK AUART=IN. Two inquiries per the states Module 3 has to render: one
+ * still waiting on the sales desk (which is also what the admin workbench's
+ * queue is seeded from), and one that has already been answered, so the
+ * "Quotation received" list state exists in a fresh demo.
+ */
+export const SEED_INQUIRIES: Inquiry[] = [
+  {
+    vbeln: "0010000801",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -1),
+    requiredDeliveryDate: shiftDays(SEED_TODAY, 21),
+    validityDays: 30,
+    notes: "Please quote for the annual maintenance shutdown. Delivery to Chakan.",
+    status: "Open",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10003",
+        description: "Control Valve CV-50 Brass",
+        quantity: 40,
+        uom: "EA",
+        netPrice: 0,
+        netValue: 0,
+      },
+      {
+        lineNo: 20,
+        material: "MAT-30002",
+        description: "PTFE Gasket Set 200mm",
+        quantity: 60,
+        uom: "SET",
+        netPrice: 0,
+        netValue: 0,
+      },
+    ],
+  },
+  {
+    vbeln: "0010000795",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -9),
+    requiredDeliveryDate: shiftDays(SEED_TODAY, 14),
+    validityDays: 30,
+    status: "Closed",
+    quotation: "0020000901",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20001",
+        description: "Seamless Steel Pipe 2in Sch40",
+        quantity: 1200,
+        uom: "M",
+        netPrice: 0,
+        netValue: 0,
+      },
+    ],
+  },
+  {
+    // A second tenant customer's inquiry, so the workbench queue has more than
+    // one account in it and the cross-customer 404 has something to fail on.
+    vbeln: "0010000806",
+    kunnr: "0010001002",
+    createdOn: shiftDays(SEED_TODAY, -2),
+    requiredDeliveryDate: shiftDays(SEED_TODAY, 30),
+    status: "Open",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50002",
+        description: "Digital Flow Meter DN50",
+        quantity: 4,
+        uom: "EA",
+        netPrice: 0,
+        netValue: 0,
+      },
+    ],
+  },
+];
+
+/**
+ * VBAK AUART=AG, with tax as SAP would have calculated it (state 27 supplying
+ * plant to a state-27 customer -> CGST+SGST). Three of them, because the
+ * quotation screen's interesting states are all about *time*: one comfortably
+ * live, one inside the 72-hour warning window, and one that lapsed — which is
+ * the only way the "Request revalidation" path is reachable in a demo.
+ */
+export const SEED_QUOTATIONS: Quotation[] = [
+  {
+    vbeln: "0020000901",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -7),
+    validUntil: shiftDays(SEED_TODAY, 23),
+    inquiry: "0010000795",
+    status: "Open",
+    taxCode: "J1",
+    netValue: 745200,
+    cgst: 67068,
+    sgst: 67068,
+    igst: 0,
+    grossValue: 879336,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20001",
+        description: "Seamless Steel Pipe 2in Sch40",
+        quantity: 1200,
+        uom: "M",
+        netPrice: 621,
+        netValue: 745200,
+      },
+    ],
+  },
+  {
+    vbeln: "0020000884",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -25),
+    // Inside the 72-hour warning window: the countdown chip goes amber.
+    validUntil: shiftDays(SEED_TODAY, 1),
+    status: "Open",
+    taxCode: "J1",
+    netValue: 96052,
+    cgst: 8644.68,
+    sgst: 8644.68,
+    igst: 0,
+    grossValue: 113341.36,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        description: "Pressure Gauge 0-16 bar",
+        quantity: 44,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 96052,
+      },
+    ],
+  },
+  {
+    vbeln: "0020000860",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -60),
+    validUntil: shiftDays(SEED_TODAY, -12),
+    status: "Open",
+    taxCode: "J1",
+    netValue: 425000,
+    cgst: 38250,
+    sgst: 38250,
+    igst: 0,
+    grossValue: 501500,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 10,
+        uom: "EA",
+        netPrice: 42500,
+        netValue: 425000,
+      },
+    ],
   },
 ];
 

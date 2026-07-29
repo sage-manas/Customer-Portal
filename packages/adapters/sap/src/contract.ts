@@ -2,6 +2,9 @@ import type {
   CanonicalCustomer,
   ConfirmPodInput,
   ConfirmPodResult,
+  ConvertQuotationInput,
+  CreateInquiryInput,
+  CreateQuotationInput,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -9,6 +12,7 @@ import type {
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  Inquiry,
   Invoice,
   Material,
   MaterialQuery,
@@ -16,6 +20,7 @@ import type {
   OrderSimulation,
   OrderStatusView,
   Page,
+  Quotation,
   SalesOrderResult,
   ShipToAddress,
   StockLevel,
@@ -85,6 +90,40 @@ export interface SapAdapter {
     material: string,
     quantity: number,
   ): Promise<SapRead<CustomerPrice>>;
+
+  // ---- Pre-sales: inquiry & quotation -----------------------------------
+  /** VA11 · BAPI_INQUIRY_CREATEFROMDATA2 — the customer's question. */
+  createInquiry(input: CreateInquiryInput): Promise<Inquiry>;
+  /** The inquiries of one sold-to account (docs/03 Screen 3.1). */
+  getInquiries(kunnr: string): Promise<SapRead<Page<Inquiry>>>;
+  getInquiry(vbeln: string): Promise<SapRead<Inquiry>>;
+  /**
+   * Inquiries across the tenant that no quotation answers yet — the
+   * back-office workbench's queue (docs/05 §7.3).
+   *
+   * A separate method rather than an optional KUNNR on `getInquiries`,
+   * deliberately: the customer-plane read must not be one forgotten argument
+   * away from returning every customer's inquiries, and a boundary that
+   * depends on a caller passing a parameter is not a boundary (ADR-025's
+   * reasoning, applied to a read).
+   */
+  getInquiryQueue(): Promise<SapRead<Page<Inquiry>>>;
+  /** VA21 · BAPI_QUOTATION_CREATEFROMDATA2 — sales answering an inquiry. */
+  createQuotation(input: CreateQuotationInput): Promise<Quotation>;
+  getQuotations(kunnr: string): Promise<SapRead<Page<Quotation>>>;
+  getQuotation(vbeln: string): Promise<SapRead<Quotation>>;
+  /**
+   * The customer asking for the quotation to be reworked or revalidated
+   * (docs/05 §7.3). Recorded against the document as sales text — a message
+   * about a SAP document belongs on it, not in a portal table.
+   */
+  requestQuotationRevision(vbeln: string, comment: string): Promise<Quotation>;
+  /**
+   * VA01 with reference to the quotation (copy control). Returns the sales
+   * order exactly as `createSalesOrder` does, because that is what it is —
+   * the reference is how it was created, not a different kind of document.
+   */
+  convertQuoteToOrder(input: ConvertQuotationInput): Promise<SalesOrderResult>;
 
   // ---- Sales documents --------------------------------------------------
   /** BAPI_SALESORDER_CREATEFROMDAT2 in SIMULATE mode — ATP + credit preview. */

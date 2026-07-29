@@ -2,6 +2,9 @@ import type {
   CanonicalCustomer,
   ConfirmPodInput,
   ConfirmPodResult,
+  ConvertQuotationInput,
+  CreateInquiryInput,
+  CreateQuotationInput,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -9,6 +12,7 @@ import type {
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  Inquiry,
   Invoice,
   Material,
   MaterialQuery,
@@ -16,6 +20,7 @@ import type {
   OrderSimulation,
   OrderStatusView,
   Page,
+  Quotation,
   SalesDocLine,
   SalesOrderResult,
   ShipToAddress,
@@ -32,6 +37,7 @@ import {
   SEED_CUSTOMERS,
   SEED_DELIVERIES,
   SEED_DISCOUNTS,
+  SEED_INQUIRIES,
   SEED_INVOICES,
   SEED_LIST_PRICES,
   SEED_MATERIALS,
@@ -39,9 +45,11 @@ import {
   SEED_OPEN_ITEM_OWNER,
   SEED_ORDERS,
   SEED_PRICE_VALIDITY,
+  SEED_QUOTATIONS,
   SEED_SHIP_TOS,
   SEED_STOCK,
   SEED_TODAY,
+  SUPPLYING_REGION,
   shiftDays,
 } from "./seed";
 
@@ -69,6 +77,16 @@ export interface MockSapOptions {
   today?: string;
   /** Percentage credit headroom below which an order is blocked (CMGST=B). */
   creditToleranceRatio?: number;
+  /**
+   * How long the simulated sales desk takes to answer an inquiry (docs/07 A4:
+   * "sales-side auto-quotes after a delay to make the flow demoable"). The
+   * default leaves a real window in which the admin workbench can issue the
+   * quotation by hand — an inquiry answered the instant it is raised would
+   * make the back-office screen untestable. Tests set 0.
+   */
+  autoQuoteAfterMs?: number;
+  /** VBAK-BNDDT the auto-quote issues with, in days from `today`. */
+  quotationValidityDays?: number;
 }
 
 interface MockStore {
@@ -77,6 +95,10 @@ interface MockStore {
   credit: CreditInfo[];
   materials: Material[];
   stock: StockLevel[];
+  inquiries: Inquiry[];
+  quotations: Quotation[];
+  /** inquiry VBELN -> epoch ms at which the simulated sales desk answers. */
+  autoQuoteDue: Map<string, number>;
   orders: OrderStatusView[];
   deliveries: Delivery[];
   invoices: Invoice[];
@@ -87,6 +109,8 @@ interface MockStore {
   /** customerPoRef -> vbeln, for idempotent order creation (docs/02 §4.3). */
   orderIdempotency: Map<string, string>;
   nextOrderNumber: number;
+  nextInquiryNumber: number;
+  nextQuotationNumber: number;
   nextCustomerNumber: number;
   nextFiDocument: number;
 }
@@ -116,6 +140,8 @@ export class MockSapAdapter implements SapAdapter {
       unavailable: options.unavailable ?? false,
       today: options.today ?? SEED_TODAY,
       creditToleranceRatio: options.creditToleranceRatio ?? 1,
+      autoQuoteAfterMs: options.autoQuoteAfterMs ?? 90_000,
+      quotationValidityDays: options.quotationValidityDays ?? 30,
     };
 
     this.store = {
@@ -124,6 +150,9 @@ export class MockSapAdapter implements SapAdapter {
       credit: clone(SEED_CREDIT),
       materials: clone(SEED_MATERIALS),
       stock: clone(SEED_STOCK),
+      inquiries: clone(SEED_INQUIRIES),
+      quotations: clone(SEED_QUOTATIONS),
+      autoQuoteDue: new Map(),
       orders: clone(SEED_ORDERS),
       deliveries: clone(SEED_DELIVERIES),
       invoices: clone(SEED_INVOICES),
@@ -132,6 +161,8 @@ export class MockSapAdapter implements SapAdapter {
       postedPayments: new Map(),
       orderIdempotency: new Map(),
       nextOrderNumber: 4714,
+      nextInquiryNumber: 10000807,
+      nextQuotationNumber: 20000902,
       nextCustomerNumber: 1004,
       nextFiDocument: 1400000922,
     };
@@ -328,6 +359,300 @@ export class MockSapAdapter implements SapAdapter {
       conditionRecord: `00${material.material.replace(/\D/g, "").slice(0, 8)}`,
       ...SEED_PRICE_VALIDITY,
     };
+  }
+
+  // ---- inquiries & quotations -------------------------------------------
+
+  async createInquiry(input: CreateInquiryInput): Promise<Inquiry> {
+    return this.call(() => {
+      this.requireCustomer(input.kunnr);
+      if (input.lines.length === 0) {
+        throw sapValidation("An inquiry must contain at least one item", "lines", "V1/555");
+      }
+
+      const vbeln = String(this.store.nextInquiryNumber++).padStart(10, "0");
+      const inquiry: Inquiry = {
+        vbeln,
+        kunnr: input.kunnr,
+        createdOn: this.options.today,
+        requiredDeliveryDate: input.requiredDeliveryDate,
+        validityDays: input.validityDays,
+        notes: input.notes,
+        status: "Open",
+        lines: input.lines.map((line, index) => {
+          const material = this.requireMaterial(line.material);
+          if (line.quantity <= 0) {
+            throw sapValidation(
+              `Quantity must be greater than zero for ${line.material}`,
+              "quantity",
+              "V1/319",
+            );
+          }
+          return {
+            lineNo: (index + 1) * 10,
+            material: material.material,
+            description: material.description,
+            quantity: line.quantity,
+            uom: line.uom,
+            // An inquiry carries no price: that is the question it is asking.
+            netPrice: 0,
+            netValue: 0,
+          };
+        }),
+      };
+
+      this.store.inquiries.push(inquiry);
+      // The sales desk is given until this moment to answer by hand; past it
+      // the mock answers for them (see `autoQuote`).
+      this.store.autoQuoteDue.set(vbeln, Date.now() + this.options.autoQuoteAfterMs);
+
+      return clone(inquiry);
+    });
+  }
+
+  async getInquiries(kunnr: string): Promise<SapRead<Page<Inquiry>>> {
+    return this.call(() => {
+      this.requireCustomer(kunnr);
+      this.autoQuote();
+      const items = this.store.inquiries
+        .filter((i) => i.kunnr === kunnr)
+        .sort((a, b) => b.createdOn.localeCompare(a.createdOn));
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
+  async getInquiry(vbeln: string): Promise<SapRead<Inquiry>> {
+    return this.call(() => {
+      this.autoQuote();
+      const inquiry = this.store.inquiries.find((i) => i.vbeln === vbeln);
+      if (!inquiry) throw sapNotFound("Inquiry", vbeln);
+      return this.read(clone(inquiry));
+    });
+  }
+
+  async getInquiryQueue(): Promise<SapRead<Page<Inquiry>>> {
+    return this.call(() => {
+      // Deliberately *not* auto-quoted: this is the sales desk's own queue,
+      // and answering an inquiry the moment they look at it would leave the
+      // workbench permanently empty.
+      const items = this.store.inquiries
+        .filter((i) => !i.quotation)
+        .sort((a, b) => a.createdOn.localeCompare(b.createdOn));
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
+  /**
+   * The sales-side auto-quote docs/07 A4 asks for ("mock: sales-side
+   * auto-quotes after a delay to make the flow demoable").
+   *
+   * Lazily materialised on read rather than scheduled with a timer: a timer in
+   * an adapter fires in whatever process happened to construct it, survives no
+   * restart, and keeps a handle alive in every test that ever raised an
+   * inquiry. Asking "is it due?" when someone looks costs nothing and behaves
+   * identically from the customer's side.
+   */
+  private autoQuote(): void {
+    const now = Date.now();
+    for (const [inquiryVbeln, due] of this.store.autoQuoteDue) {
+      if (due > now) continue;
+      this.store.autoQuoteDue.delete(inquiryVbeln);
+
+      const inquiry = this.store.inquiries.find((i) => i.vbeln === inquiryVbeln);
+      // A sales user who got there first (VA21 through the workbench) wins:
+      // the auto-quote exists to keep a demo moving, not to overrule anybody.
+      if (!inquiry || inquiry.quotation) continue;
+
+      this.issueQuotation(inquiry, {
+        validUntil: shiftDays(this.options.today, this.options.quotationValidityDays),
+      });
+    }
+  }
+
+  async createQuotation(input: CreateQuotationInput): Promise<Quotation> {
+    return this.call(() => {
+      const inquiry = this.store.inquiries.find((i) => i.vbeln === input.inquiryVbeln);
+      if (!inquiry) throw sapNotFound("Inquiry", input.inquiryVbeln);
+      if (inquiry.quotation) {
+        // VA21 would create a second document; the portal refuses because a
+        // customer with two live quotations for one inquiry has no way to
+        // know which one the tenant means.
+        throw sapValidation(
+          `Inquiry ${inquiry.vbeln} has already been quoted (${inquiry.quotation})`,
+          "inquiryVbeln",
+          "V1/473",
+        );
+      }
+      if (input.validUntil < this.options.today) {
+        throw sapValidation(
+          "A quotation cannot be issued with a validity date in the past",
+          "validUntil",
+          "V1/213",
+        );
+      }
+
+      this.store.autoQuoteDue.delete(inquiry.vbeln);
+      return clone(this.issueQuotation(inquiry, input));
+    });
+  }
+
+  /**
+   * VA21 against an inquiry, shared by the workbench and the auto-quote so
+   * the two produce identical documents.
+   *
+   * Prices come from the customer's own condition records unless the sales
+   * user overrode a line, and the tax split follows the same rule the seeded
+   * invoices do — CGST+SGST when the customer's region matches the supplying
+   * plant's, IGST when it doesn't. The portal never computes GST (docs/02 §5);
+   * this is the mock standing in for SAP's pricing procedure.
+   */
+  private issueQuotation(inquiry: Inquiry, input: Omit<CreateQuotationInput, "inquiryVbeln">) {
+    const overrides = new Map((input.lines ?? []).map((line) => [line.lineNo, line.netPrice]));
+
+    let netValue = 0;
+    const lines: SalesDocLine[] = inquiry.lines.map((line) => {
+      const material = this.requireMaterial(line.material);
+      const netPrice =
+        overrides.get(line.lineNo) ??
+        this.priceFor(inquiry.kunnr, material, line.quantity).netPrice;
+      const lineValue = round2(netPrice * line.quantity);
+      netValue += lineValue;
+      return { ...clone(line), netPrice, netValue: lineValue };
+    });
+
+    netValue = round2(netValue);
+    const tax = this.taxFor(inquiry.kunnr, netValue);
+    const vbeln = String(this.store.nextQuotationNumber++).padStart(10, "0");
+
+    const quotation: Quotation = {
+      vbeln,
+      kunnr: inquiry.kunnr,
+      createdOn: this.options.today,
+      validUntil: input.validUntil,
+      inquiry: inquiry.vbeln,
+      status: "Open",
+      taxCode: "J1",
+      lines,
+      netValue,
+      ...tax,
+      grossValue: round2(netValue + tax.cgst + tax.sgst + tax.igst),
+      currency: "INR",
+    };
+
+    this.store.quotations.push(quotation);
+    // VBUK-GBSTK on the inquiry: fully referenced by the quotation.
+    inquiry.quotation = vbeln;
+    inquiry.status = "Closed";
+
+    return quotation;
+  }
+
+  /**
+   * The GST split, decided by place of supply (docs/03 Module 6): the seeded
+   * plants are in state 27, so a customer in 27 gets CGST+SGST and everyone
+   * else IGST. Rate is a flat 18% across the seeded material master.
+   */
+  private taxFor(kunnr: string, netValue: number): { cgst: number; sgst: number; igst: number } {
+    const customer = this.requireCustomer(kunnr);
+    const intraState = customer.address.region === SUPPLYING_REGION;
+    const total = round2(netValue * 0.18);
+
+    return intraState
+      ? { cgst: round2(total / 2), sgst: round2(total / 2), igst: 0 }
+      : { cgst: 0, sgst: 0, igst: total };
+  }
+
+  async getQuotations(kunnr: string): Promise<SapRead<Page<Quotation>>> {
+    return this.call(() => {
+      this.requireCustomer(kunnr);
+      this.autoQuote();
+      const items = this.store.quotations
+        .filter((q) => q.kunnr === kunnr)
+        .sort((a, b) => b.createdOn.localeCompare(a.createdOn));
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
+  async getQuotation(vbeln: string): Promise<SapRead<Quotation>> {
+    return this.call(() => this.read(clone(this.requireQuotation(vbeln))));
+  }
+
+  private requireQuotation(vbeln: string): Quotation {
+    const quotation = this.store.quotations.find((q) => q.vbeln === vbeln);
+    if (!quotation) throw sapNotFound("Quotation", vbeln);
+    return quotation;
+  }
+
+  async requestQuotationRevision(vbeln: string, comment: string): Promise<Quotation> {
+    return this.call(() => {
+      const quotation = this.requireQuotation(vbeln);
+      if (quotation.salesOrder) {
+        throw sapValidation(
+          `Quotation ${vbeln} has already been converted to order ${quotation.salesOrder}`,
+          "vbeln",
+          "V1/473",
+        );
+      }
+
+      quotation.revisionRequests = [
+        ...(quotation.revisionRequests ?? []),
+        { requestedOn: this.options.today, comment },
+      ];
+      return clone(quotation);
+    });
+  }
+
+  /**
+   * VA01 with reference (copy control). The order is created through the same
+   * path a direct order takes — same ATP, same credit run, same idempotency —
+   * with the quotation's prices carried onto the lines, which is what "copy
+   * control" means and why a converted order does not get re-priced.
+   */
+  async convertQuoteToOrder(input: ConvertQuotationInput): Promise<SalesOrderResult> {
+    const quotation = await this.call(() => {
+      const found = this.requireQuotation(input.quotationVbeln);
+      if (found.salesOrder) {
+        // Not an error the portal invents: SAP's copy control refuses a
+        // second full reference, and a customer who double-clicks Accept must
+        // get one order, not two.
+        throw sapValidation(
+          `Quotation ${found.vbeln} has already been converted to order ${found.salesOrder}`,
+          "quotationVbeln",
+          "V1/473",
+        );
+      }
+      if (found.validUntil < this.options.today) {
+        throw sapValidation(
+          `Quotation ${found.vbeln} expired on ${found.validUntil}`,
+          "quotationVbeln",
+          "V1/212",
+        );
+      }
+      return found;
+    });
+
+    const order = await this.createSalesOrder({
+      kunnr: quotation.kunnr,
+      customerPoRef: input.customerPoRef,
+      requestedDeliveryDate:
+        input.requestedDeliveryDate ??
+        this.store.inquiries.find((i) => i.vbeln === quotation.inquiry)?.requiredDeliveryDate ??
+        this.options.today,
+      shipTo: input.shipTo,
+      referenceQuotation: quotation.vbeln,
+      lines: quotation.lines.map((line) => ({
+        material: line.material,
+        quantity: line.quantity,
+        uom: line.uom,
+        netPrice: line.netPrice,
+      })),
+    });
+
+    quotation.salesOrder = order.vbeln;
+    // VBUK-GBSTK: fully referenced by the sales order.
+    quotation.status = "Closed";
+
+    return order;
   }
 
   // ---- sales orders -----------------------------------------------------
