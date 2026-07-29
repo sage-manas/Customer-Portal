@@ -34,6 +34,8 @@ export * from "./components/TicketTimeline";
 export * from "./components/CommentThread";
 export * from "./components/CreditGauge";
 export * from "./components/TierProgress";
+export * from "./components/ChartCard";
+export * from "./components/SalesCharts";
 
 export * from "./layout/AppShell";
 export * from "./layout/TopBar";
