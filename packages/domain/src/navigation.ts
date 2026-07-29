@@ -86,7 +86,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "FileText",
     accent: "inquiry",
     permission: "inquiry:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "quotations",
@@ -95,7 +95,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "FileSignature",
     accent: "inquiry",
     permission: "quotation:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "orders",
@@ -188,7 +188,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "FileSignature",
     accent: "inquiry",
     permission: "quotation:issue",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-credit",

@@ -93,6 +93,32 @@ export function mapOrderCmgstToStatus(code: "A" | "B" | "C"): CanonicalStatus {
 }
 
 /**
+ * Module 3 — VBUK-GBSTK on an inquiry or a quotation: A open / B partially
+ * referenced / C fully referenced.
+ *
+ * The same field as an order's, but it means something different on a
+ * pre-sales document, which is why it gets its own mapper rather than reusing
+ * `mapOrderGbstkToStatus`: B on an order is a part-delivered order, while B
+ * on a quotation is one a customer has ordered *some* of, and calling that
+ * "PartiallyDelivered" would put a shipping word on a document nothing has
+ * shipped against.
+ *
+ * Note what this does not return: expiry. A lapsed quotation is still GBSTK=A
+ * in SAP — nobody closes it — so validity is derived from BNDDT on every read
+ * (`quotationValidity`) and never encoded as a status (entities/inquiry.ts).
+ */
+export function mapPresalesGbstkToStatus(code: "A" | "B" | "C"): CanonicalStatus {
+  switch (code) {
+    case "A":
+      return "Open";
+    case "B":
+      return "InProcess";
+    case "C":
+      return "Closed";
+  }
+}
+
+/**
  * Module 5 — VBUK-WBSTK (overall goods-movement status): A not started /
  * B partial / C complete.
  *

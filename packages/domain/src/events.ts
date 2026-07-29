@@ -135,6 +135,46 @@ export const DOMAIN_EVENTS = {
       notes: z.string().optional(),
     }),
   },
+  "inquiry.created": {
+    queue: "notifications",
+    description: "A customer asked for a price; the sales desk owes them a quotation.",
+    schema: sapDocumentEvent.extend({
+      requiredDeliveryDate: z.string().min(1),
+      lineCount: z.number().int().nonnegative(),
+      raisedByUserId: z.string().optional(),
+    }),
+  },
+  "quotation.issued": {
+    queue: "notifications",
+    description: "Sales answered an inquiry — this is doc 05 §6.4's 'quote received' bell entry.",
+    schema: sapDocumentEvent.extend({
+      /** VBAK-VGBEL, when the quotation answers an inquiry rather than standing alone. */
+      inquiry: z.string().min(1).optional(),
+      /** VBAK-BNDDT: A7 warns before this lapses, so it travels with the event. */
+      validUntil: z.string().min(1),
+      grossValue: z.number(),
+      currency: z.string().min(1),
+      issuedByUserId: z.string().optional(),
+    }),
+  },
+  "quotation.accepted": {
+    queue: "notifications",
+    description: "The customer accepted; VA01-with-reference created the sales order.",
+    schema: sapDocumentEvent.extend({
+      salesOrder: z.string().min(1),
+      acceptedByUserId: z.string().optional(),
+    }),
+  },
+  "quotation.revision.requested": {
+    queue: "workflow",
+    description: "The customer wants the quotation reworked (or revalidated after expiry).",
+    schema: sapDocumentEvent.extend({
+      comment: z.string().min(1),
+      /** True when the quotation had already lapsed — doc 05's "Request revalidation". */
+      expired: z.boolean().default(false),
+      requestedByUserId: z.string().optional(),
+    }),
+  },
   "support.ticket.created": {
     queue: "notifications",
     description: "A ticket exists — tell the customer, and tell the queue it routed to.",
