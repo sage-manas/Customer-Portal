@@ -40,6 +40,10 @@ await runWithTenant(tenantId, () =>
 - `recordEvent(...)` is the shorthand for the no-transaction case.
 - Nothing here publishes. The relay in `@cc/workers` is the only thing that talks to BullMQ; this package never imports it (`db -> domain, config` only).
 
+## The bell inbox is stored; almost nothing else derived is (ADR-039)
+
+`Notification` is the one table in the repo that holds words rendered from a domain event. It is not the mirror ADR-016 forbids: "we told this user at 09:04 and they read it at 11:20" is derivable from nothing, and re-rendering it later from the current document would produce different words than the customer was actually shown. It keeps a relative `href` and deliberately nothing else about the document — clicking re-reads through the owning module, with that module's KUNNR check and its own freshness.
+
 ## Local development
 
 ```

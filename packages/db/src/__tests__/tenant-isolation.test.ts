@@ -33,6 +33,7 @@ describe("tenant isolation", () => {
 
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
+      await db.notification.deleteMany();
       await db.outboxEvent.deleteMany();
       await db.creditLimitRequest.deleteMany();
       await db.loyaltyTierSetting.deleteMany();
@@ -51,6 +52,7 @@ describe("tenant isolation", () => {
       await db.user.deleteMany();
     });
     await runWithTenant(tenantB.id, async () => {
+      await db.notification.deleteMany();
       await db.outboxEvent.deleteMany();
       await db.creditLimitRequest.deleteMany();
       await db.loyaltyTierSetting.deleteMany();
@@ -398,5 +400,56 @@ describe("tenant isolation", () => {
       db.outboxEvent.findUnique({ where: { id: forA! } }),
     );
     expect(asSeenByTenantB).toBeNull();
+  });
+
+  it("scopes the A7 bell inbox, and keeps one event's row per user per tenant", async () => {
+    const userA = await runWithTenant(tenantA.id, () =>
+      createUser(tenantA.id, `bell-a-${runId}@example.com`),
+    );
+    const userB = await runWithTenant(tenantB.id, () =>
+      createUser(tenantB.id, `bell-b-${runId}@example.com`),
+    );
+
+    const row = {
+      eventName: "order.created",
+      templateKey: "order.created.customer",
+      // Deliberately the *same* event id in both tenants. The relay's job ids
+      // are cuids and would not collide in practice, but the uniqueness that
+      // makes the fan-out idempotent must be per tenant — a global one would
+      // let tenant A's delivered notification suppress tenant B's.
+      eventId: `evt-shared-${runId}`,
+      title: "Order 0000004711 confirmed",
+      body: "Your order is with SAP.",
+      href: "/orders/0000004711",
+      customerKunnr: "0010001001",
+    };
+
+    const created = await runWithTenant(tenantA.id, () =>
+      db.notification.create({ data: { ...row, tenantId: tenantA.id, userId: userA.id } }),
+    );
+    await runWithTenant(tenantB.id, () =>
+      db.notification.create({ data: { ...row, tenantId: tenantB.id, userId: userB.id } }),
+    );
+
+    const forB = await runWithTenant(tenantB.id, () =>
+      db.notification.findUnique({ where: { id: created.id } }),
+    );
+    // A bell is read by user; the probe that matters is the unfiltered list a
+    // buggy inbox query would run.
+    const allForB = await runWithTenant(tenantB.id, () => db.notification.findMany());
+
+    expect(forB).toBeNull();
+    expect(allForB).toHaveLength(1);
+    expect(allForB[0]?.userId).toBe(userB.id);
+
+    // And the same event delivered twice writes one row, which is what makes
+    // the at-least-once relay (ADR-023) safe to fan out from.
+    const again = await runWithTenant(tenantA.id, () =>
+      db.notification.createMany({
+        data: [{ ...row, tenantId: tenantA.id, userId: userA.id }],
+        skipDuplicates: true,
+      }),
+    );
+    expect(again.count).toBe(0);
   });
 });

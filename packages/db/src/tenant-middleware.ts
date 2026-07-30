@@ -29,6 +29,7 @@ const TENANT_SCOPED_MODELS = new Set([
   "TicketCounter",
   "LoyaltyTierSetting",
   "CreditLimitRequest",
+  "Notification",
   "OutboxEvent",
   "AuditLog",
 ]);

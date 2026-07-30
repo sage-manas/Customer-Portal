@@ -77,6 +77,7 @@ model Tenant {
   loyaltyTierSettings LoyaltyTierSetting[]
   creditLimitRequests CreditLimitRequest[]
   outboxEvents        OutboxEvent[]
+  notifications       Notification[]
   auditLogs           AuditLog[]
 
   @@map("tenants")
@@ -110,7 +111,8 @@ model User {
   lastLoginAt        DateTime?
   createdAt          DateTime   @default(now())
 
-  accountLinks UserAccountLink[]
+  accountLinks  UserAccountLink[]
+  notifications Notification[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -838,4 +840,82 @@ model TicketCounter {
   value    Int    @default(0)
 
   @@map("ticket_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (docs/05 §6.4, docs/07 A7)
+// ---------------------------------------------------------------------------
+
+enum NotificationSeverity {
+  info
+  success
+  warning
+  critical
+}
+
+/// One bell-inbox row — a rendered notification addressed to one person.
+///
+/// This is the *only* thing A7 stores, and it is not a projection of anything:
+/// a notification is a message that was delivered to a named user at a named
+/// moment, and re-deriving it later would produce different words as soon as
+/// a template changed. The document it talks about is still SAP's or the
+/// support module's, and the row keeps a `href` rather than a copy of it —
+/// clicking re-reads through the normal service, with its normal KUNNR check
+/// and its normal freshness (ADR-016).
+///
+/// Addressed to a **user**, not to an account: the account decides who is
+/// eligible (`customerKunnr`, resolved at fan-out time from the event), but
+/// read/unread is a fact about a person, and two colleagues on one KUNNR
+/// clear their own bells.
+model Notification {
+  id            String  @id @default(cuid())
+  tenantId      String
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
+  /// The recipient. Rows are only ever read by this user.
+  userId        String
+  user          User    @relation(fields: [userId], references: [id])
+  /// The account the notification concerns — null for a back-office row,
+  /// which is about the tenant's work rather than one customer's account.
+  /// Kept so a user who switches accounts can be shown the right bell, and
+  /// so a link followed after a switch is explicable.
+  customerKunnr String?
+
+  /// `DomainEventName` and the template key that rendered this, both from the
+  /// @cc/domain registries. Stored so a copy change is traceable and so the
+  /// same event never renders twice for one user (see the unique below).
+  eventName   String
+  templateKey String
+  /// Outbox row id — the fan-out's idempotency key, and the reason an
+  /// at-least-once relay (ADR-023) cannot produce a second bell row.
+  eventId     String
+
+  severity NotificationSeverity @default(info)
+  title    String
+  body     String
+  /// In-portal deep link (docs/05 §6.4 "each deep-links"). Relative, and
+  /// re-authorised by the route it lands on.
+  href     String
+
+  readAt      DateTime?
+  /// When the email mirror went out, and whether it landed. Null `emailSentAt`
+  /// with a non-null `emailError` is a mirror worth retrying; both null means
+  /// the template never asked for one.
+  emailSentAt DateTime?
+  emailError  String?
+
+  /// The moment the *fact* happened (the event's `occurredAt`), not the moment
+  /// the worker wrote the row. A bell that ordered by relay time would reorder
+  /// itself after a queue backlog.
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  /// The fan-out is idempotent structurally rather than by convention: one
+  /// event renders one row per template per user, and a redelivered job is a
+  /// no-op instead of a second buzz.
+  @@unique([tenantId, userId, eventId, templateKey])
+  /// The bell's only queries: this user's newest, and their unread count.
+  @@index([tenantId, userId, occurredAt])
+  @@index([tenantId, userId, readAt])
+  @@index([tenantId])
+  @@map("notifications")
 }
