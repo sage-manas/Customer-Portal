@@ -36,6 +36,7 @@ export * from "./components/CreditGauge";
 export * from "./components/TierProgress";
 export * from "./components/ChartCard";
 export * from "./components/SalesCharts";
+export * from "./components/NotificationBell";
 
 export * from "./layout/AppShell";
 export * from "./layout/TopBar";
