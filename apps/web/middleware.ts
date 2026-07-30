@@ -1,4 +1,5 @@
 import { hasPermission, type SessionClaims } from "@cc/domain";
+import { createRateLimiter } from "@cc/observability/rate-limit";
 import { hostMatchesSession, resolveTenantFromHost, verifyToken } from "@cc/service-identity/edge";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -37,9 +38,15 @@ const PUBLIC_PATHS = [
   "/api/auth/logout",
   "/api/onboarding",
   "/api/webhooks",
+  "/api/health",
   "/403",
   "/404",
 ];
+
+// Never rate-limited: a health check is infra polling the process, not a
+// user or tenant making requests, and it needs to answer even when a tenant
+// (or an attacker pretending to be one) is being throttled.
+const UNTHROTTLED_PATHS = ["/api/health"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -55,18 +62,68 @@ function unauthorized(request: NextRequest): NextResponse {
   return NextResponse.redirect(loginUrl);
 }
 
+const REQUEST_ID_HEADER = "x-request-id";
+
+/**
+ * Per-tenant/per-IP rate limiting (docs/07 B3). `@cc/observability/rate-limit`
+ * is a separate subpath specifically so this import never drags `pino` or
+ * OpenTelemetry into the edge bundle — see that package's README.
+ *
+ * A module-level limiter, not one created per request: the edge runtime
+ * keeps an isolate warm across requests, and a fresh limiter per call would
+ * never accumulate a count. It is still only correct *within* one isolate —
+ * an accepted gap for this phase, not a silent one (see the package README).
+ */
+const rateLimiter = createRateLimiter();
+const PUBLIC_RATE_LIMIT = { limit: 60, windowMs: 60_000 }; // per IP, unauthenticated
+const TENANT_RATE_LIMIT = { limit: 600, windowMs: 60_000 }; // per tenant, authenticated
+
+function clientIp(request: NextRequest): string {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+}
+
+function tooManyRequests(resetAtMs: number): NextResponse {
+  return NextResponse.json(
+    { error: "Too many requests" },
+    { status: 429, headers: { "Retry-After": String(Math.ceil((resetAtMs - Date.now()) / 1000)) } },
+  );
+}
+
+function withRequestId(response: NextResponse, requestId: string): NextResponse {
+  response.headers.set(REQUEST_ID_HEADER, requestId);
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (isPublic(pathname)) return NextResponse.next();
+  const requestId = crypto.randomUUID();
+  // Forwarded to the route handler as a *request* header (not just on the
+  // response), so `apps/web/lib/*-route.ts` can read it via `next/headers`
+  // and correlate every log line for this request without regenerating one.
+  const forwardedHeaders = new Headers(request.headers);
+  forwardedHeaders.set(REQUEST_ID_HEADER, requestId);
+  const next = () => NextResponse.next({ request: { headers: forwardedHeaders } });
+
+  if (isPublic(pathname)) {
+    if (!UNTHROTTLED_PATHS.includes(pathname)) {
+      const result = await rateLimiter.consume(
+        `ip:${clientIp(request)}`,
+        PUBLIC_RATE_LIMIT.limit,
+        PUBLIC_RATE_LIMIT.windowMs,
+      );
+      if (!result.allowed) return withRequestId(tooManyRequests(result.resetAtMs), requestId);
+    }
+    return withRequestId(next(), requestId);
+  }
 
   const token = request.cookies.get("cc_access")?.value;
-  if (!token) return unauthorized(request);
+  if (!token) return withRequestId(unauthorized(request), requestId);
 
   let session: SessionClaims;
   try {
     session = await verifyToken(token, process.env.AUTH_SECRET ?? "");
   } catch {
-    return unauthorized(request);
+    return withRequestId(unauthorized(request), requestId);
   }
 
   // A token issued for tenant A must not work on tenant B's host, however
@@ -77,14 +134,27 @@ export async function middleware(request: NextRequest) {
     process.env.ROOT_DOMAIN ?? "localhost",
   );
   if (!hostMatchesSession(resolution, session)) {
-    return NextResponse.rewrite(new URL("/404", request.url), { status: 404 });
+    return withRequestId(
+      NextResponse.rewrite(new URL("/404", request.url), { status: 404 }),
+      requestId,
+    );
   }
 
   if (pathname.startsWith("/admin") && !hasPermission(session, "admin:view")) {
-    return NextResponse.rewrite(new URL("/403", request.url), { status: 403 });
+    return withRequestId(
+      NextResponse.rewrite(new URL("/403", request.url), { status: 403 }),
+      requestId,
+    );
   }
 
-  return NextResponse.next();
+  const result = await rateLimiter.consume(
+    `tenant:${session.tenantId}`,
+    TENANT_RATE_LIMIT.limit,
+    TENANT_RATE_LIMIT.windowMs,
+  );
+  if (!result.allowed) return withRequestId(tooManyRequests(result.resetAtMs), requestId);
+
+  return withRequestId(next(), requestId);
 }
 
 export const config = {

@@ -16,8 +16,10 @@
   "dependencies": {
     "@cc/config": "workspace:*",
     "@cc/domain": "workspace:*",
+    "@cc/observability": "workspace:*",
     "@cc/service-catalogue": "workspace:*",
     "@cc/service-delivery": "workspace:*",
+    "@cc/service-health": "workspace:*",
     "@cc/service-identity": "workspace:*",
     "@cc/service-inquiry": "workspace:*",
     "@cc/service-invoice": "workspace:*",

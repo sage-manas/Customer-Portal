@@ -1,5 +1,6 @@
 import { createSapAdapter, type SapAdapter } from "@cc/adapter-sap";
 import { db, getTenantCredential, runWithTenant } from "@cc/db";
+import { instrumentAdapter } from "@cc/observability";
 
 /**
  * Resolves a tenant's `SapAdapter` from its stored connection config.
@@ -33,7 +34,7 @@ export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapt
       ? null
       : await runWithTenant(tenantId, () => getTenantCredential(tenantId, "sap"));
 
-  return createSapAdapter({
+  const adapter = createSapAdapter({
     tenantId: tenant.id,
     driver: tenant.sapDriver,
     ecc:
@@ -52,4 +53,9 @@ export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapt
           }
         : undefined,
   });
+
+  // A span + a structured log per method call, for free, at the one place
+  // every caller of this resolver already passes through (docs/07 B3,
+  // `@cc/observability`'s `instrumentAdapter`).
+  return instrumentAdapter("sap", adapter, { tenantId: tenant.id, driver: tenant.sapDriver });
 }

@@ -1,12 +1,18 @@
 import type { Permission, SessionClaims } from "@cc/domain";
+import { captureException, getLogger, runWithContext, setContextTenant } from "@cc/observability";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInquiryError } from "@cc/service-inquiry";
 import { isLoyaltyError } from "@cc/service-loyalty";
 import { isOnboardingError } from "@cc/service-onboarding";
 import { isSupportError } from "@cc/service-support";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
+import "./observability-init";
+
 import { getSession } from "./session";
+
+const logger = getLogger("route.admin");
 
 /**
  * Guard + error mapping for back-office route handlers.
@@ -18,7 +24,9 @@ import { getSession } from "./session";
  * approve a customer just because it can see the shell.
  */
 export async function requireBackOffice(permission: Permission): Promise<SessionClaims> {
-  return requirePermission(await getSession(), permission);
+  const session = await requirePermission(await getSession(), permission);
+  setContextTenant(session.tenantId, session.userId);
+  return session;
 }
 
 export function toAdminErrorResponse(error: unknown): NextResponse {
@@ -73,10 +81,22 @@ export function toAdminErrorResponse(error: unknown): NextResponse {
   throw error;
 }
 
+/** The admin-plane mirror of `handlePortal` — see its comment (docs/07 B3). */
 export async function handleAdmin(fn: () => Promise<NextResponse>): Promise<NextResponse> {
-  try {
-    return await fn();
-  } catch (error) {
-    return toAdminErrorResponse(error);
-  }
+  const requestId = (await headers()).get("x-request-id") ?? crypto.randomUUID();
+  return runWithContext({ requestId }, async () => {
+    const startedAt = Date.now();
+    try {
+      const response = await fn();
+      logger.info(
+        { status: response.status, durationMs: Date.now() - startedAt },
+        "admin request handled",
+      );
+      return response;
+    } catch (error) {
+      logger.error({ err: error, durationMs: Date.now() - startedAt }, "admin request failed");
+      captureException(error);
+      return toAdminErrorResponse(error);
+    }
+  });
 }

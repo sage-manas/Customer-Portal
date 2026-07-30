@@ -1,6 +1,7 @@
 import { createGstnAdapter, type GstnAdapter } from "@cc/adapter-gstn";
 import { createObjectStorage, type ObjectStorage } from "@cc/adapter-storage";
 import { db, getTenantCredential, runWithTenant } from "@cc/db";
+import { instrumentAdapter } from "@cc/observability";
 
 /**
  * Adapter resolution for the onboarding module.
@@ -32,7 +33,7 @@ export async function getGstnAdapterForTenant(tenantId: string): Promise<GstnAda
       ? null
       : await runWithTenant(tenantId, () => getTenantCredential(tenantId, "gstn"));
 
-  return createGstnAdapter({
+  const adapter = createGstnAdapter({
     tenantId: tenant.id,
     driver: tenant.gstnDriver,
     api:
@@ -43,6 +44,8 @@ export async function getGstnAdapterForTenant(tenantId: string): Promise<GstnAda
           }
         : undefined,
   });
+
+  return instrumentAdapter("gstn", adapter, { tenantId: tenant.id, driver: tenant.gstnDriver });
 }
 
 export function getOnboardingStorage(): ObjectStorage {

@@ -98,9 +98,10 @@ Sequenced; each phase ends with passing `turbo run typecheck lint test build` + 
 
 - Implement `razorpay` driver behind the existing `PaymentGatewayAdapter` interface: order create, checkout, **signature-verified webhook** (ADR-021 idempotency preserved). Sandbox-keys config per tenant. The webhook route already exists — driver swap only.
 
-### B3. Observability & ops hygiene
+### B3. Observability & ops hygiene — ✅ **Done**
 
 - pino structured logs (tenantId/requestId correlation), OpenTelemetry traces around adapter calls, `/api/health` + readiness, Sentry (or equivalent) wiring, per-tenant rate limiting at middleware.
+- **As built:** `@cc/observability` — `getLogger`/`rootLogger` (pino, credential-shaped fields redacted), an `AsyncLocalStorage` request context (`runWithContext`/`setContextTenant`) whose fields every log line picks up via pino's `mixin`, `initTracing`/`tracer` (OpenTelemetry `NodeTracerProvider`, console spans by default and OTLP/HTTP once `OTEL_EXPORTER_OTLP_ENDPOINT` is set), `initErrorReporting`/`captureException` (Sentry, no-op without `SENTRY_DSN`), and `instrumentAdapter` — a `Proxy` wrapping a constructed adapter in a span + log per method call, applied once per adapter resolver rather than at every call site (ADR-043). A separate `@cc/observability/rate-limit` subpath carries a fixed-window `MemoryRateLimiter` with zero pino/OTel/Sentry imports, since it is the one piece `apps/web/middleware.ts` needs on the edge runtime. New `@cc/service-health` composes a real `SELECT 1` and a cache round-trip behind `GET /api/health`, since `apps` cannot reach `@cc/db`/`@cc/adapter-cache` directly. `middleware.ts` stamps every request with an `x-request-id`, rate-limits public paths by IP and authenticated paths by tenant, and 429s over the limit; `admin-route.ts`/`portal-route.ts`/`onboarding-route.ts` open the request context, log start/finish/duration, and report unmapped errors to Sentry. Tracing/error-reporting start from a module-level side effect in those three files rather than Next's `instrumentation.ts` hook, which does not survive bundling `@sentry/node`'s dependency graph (ADR-043's sharpest finding — worth reading before touching this again). `packages/workers/src/bin/worker.ts` swapped its `console.*` calls for the same logger.
 
 ### B4. Reconciliation & exception queues
 

@@ -1,5 +1,6 @@
 import { createPaymentGateway, type PaymentGateway } from "@cc/adapter-payment";
 import { db, getTenantCredential, runWithTenant } from "@cc/db";
+import { instrumentAdapter } from "@cc/observability";
 
 /**
  * Gateway resolution for the payments module.
@@ -28,7 +29,7 @@ export async function getPaymentGatewayForTenant(tenantId: string): Promise<Paym
       ? null
       : await runWithTenant(tenantId, () => getTenantCredential(tenantId, "payment_gateway"));
 
-  return createPaymentGateway({
+  const gateway = createPaymentGateway({
     tenantId: tenant.id,
     driver: tenant.paymentGateway,
     razorpay:
@@ -41,5 +42,10 @@ export async function getPaymentGatewayForTenant(tenantId: string): Promise<Paym
             },
           }
         : undefined,
+  });
+
+  return instrumentAdapter("payment_gateway", gateway, {
+    tenantId: tenant.id,
+    driver: tenant.paymentGateway,
   });
 }

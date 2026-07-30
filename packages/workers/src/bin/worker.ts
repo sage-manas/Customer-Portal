@@ -2,6 +2,7 @@
 // a bare Node process gets no .env loading for free.
 import "dotenv/config";
 
+import { captureException, getLogger, initErrorReporting, initTracing } from "@cc/observability";
 import type { Worker } from "bullmq";
 
 import { createQueueWorker } from "../consumer";
@@ -10,6 +11,8 @@ import { registeredQueues } from "../handlers";
 import { createBullPublisher, createRedisConnection } from "../publisher";
 import { startRelayLoop, type RelayLoop } from "../relay";
 import { startSlaSweepLoop, type SlaSweepLoop } from "../sla-sweep";
+
+const logger = getLogger("worker");
 
 /**
  * The worker process (docs/07 A1).
@@ -30,6 +33,9 @@ import { startSlaSweepLoop, type SlaSweepLoop } from "../sla-sweep";
  */
 
 async function main(): Promise<void> {
+  initTracing();
+  initErrorReporting();
+
   const connection = createRedisConnection();
   const publisher = createBullPublisher(connection);
 
@@ -40,29 +46,36 @@ async function main(): Promise<void> {
     publisher,
     intervalMs: env.OUTBOX_POLL_INTERVAL_MS,
     onError: (error) => {
-      console.error("[worker] outbox relay sweep failed", error);
+      logger.error({ err: error }, "outbox relay sweep failed");
+      captureException(error);
     },
   });
 
   const slaSweep: SlaSweepLoop = startSlaSweepLoop({
     intervalMs: env.SLA_SWEEP_INTERVAL_MS,
     onError: (error) => {
-      console.error("[worker] SLA sweep failed", error);
+      logger.error({ err: error }, "SLA sweep failed");
+      captureException(error);
     },
   });
 
   for (const worker of workers) {
     worker.on("failed", (job, error) => {
-      console.error(`[worker] job ${job?.id ?? "?"} (${job?.name ?? "?"}) failed:`, error.message);
+      logger.error(
+        { err: error, jobId: job?.id ?? "?", jobName: job?.name ?? "?" },
+        "queue job failed",
+      );
+      captureException(error, { jobId: job?.id, jobName: job?.name });
     });
   }
 
-  console.log(
-    `[worker] relay every ${env.OUTBOX_POLL_INTERVAL_MS}ms; SLA sweep every ${
-      env.SLA_SWEEP_INTERVAL_MS
-    }ms; consuming ${
-      queues.length > 0 ? queues.join(", ") : "(no queues — no handlers registered)"
-    }`,
+  logger.info(
+    {
+      outboxPollIntervalMs: env.OUTBOX_POLL_INTERVAL_MS,
+      slaSweepIntervalMs: env.SLA_SWEEP_INTERVAL_MS,
+      queues,
+    },
+    queues.length > 0 ? "worker started" : "worker started (no queues — no handlers registered)",
   );
 
   // Graceful shutdown: stop the relay first so nothing new is claimed, then
@@ -73,7 +86,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[worker] ${signal} — shutting down`);
+    logger.info({ signal }, "shutting down");
     await relay.stop();
     await slaSweep.stop();
     await Promise.all(workers.map((worker) => worker.close()));
@@ -87,6 +100,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error("[worker] failed to start", error);
+  logger.error({ err: error }, "worker failed to start");
+  captureException(error);
   process.exit(1);
 });

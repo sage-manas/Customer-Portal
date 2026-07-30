@@ -18,7 +18,8 @@
     "@cc/adapter-sap": "workspace:*",
     "@cc/config": "workspace:*",
     "@cc/db": "workspace:*",
-    "@cc/domain": "workspace:*"
+    "@cc/domain": "workspace:*",
+    "@cc/observability": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

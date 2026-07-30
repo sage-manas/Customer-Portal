@@ -1,5 +1,5 @@
 {
-  "name": "@cc/service-payment",
+  "name": "@cc/service-health",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,17 +12,14 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@cc/adapter-payment": "workspace:*",
-    "@cc/adapter-sap": "workspace:*",
+    "@cc/adapter-cache": "workspace:*",
     "@cc/config": "workspace:*",
     "@cc/db": "workspace:*",
     "@cc/domain": "workspace:*",
-    "@cc/observability": "workspace:*",
-    "zod": "^3.24.1"
+    "@cc/observability": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
