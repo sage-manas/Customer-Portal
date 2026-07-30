@@ -21,6 +21,7 @@
     "@cc/config": "workspace:*",
     "@cc/db": "workspace:*",
     "@cc/domain": "workspace:*",
+    "@cc/service-notification": "workspace:*",
     "@cc/service-payment": "workspace:*",
     "@cc/service-sap": "workspace:*",
     "@cc/service-support": "workspace:*",

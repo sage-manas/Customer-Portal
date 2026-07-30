@@ -50,6 +50,8 @@ Tenancy: the relay never queries the outbox unscoped. It lists tenants (`Tenant`
 
 An event with no handler is a deliberate no-op, not an error: the phase that emits an event lands before the phase that consumes it. A2 emitted the POD discrepancy with nothing listening; `handlers/support-auto-ticket.ts` is A3 closing that loop.
 
+`handlers/notification-fanout.ts` is the exception to step 2, and deliberately so: it registers itself for **every event the `@cc/domain` notification registry has a template for**, in a loop. Eleven near-identical `registerHandler` calls would mean the twelfth template ships unwired, and the failure mode would be silence — no error, no job, no notification. Driving subscription from the registry makes "declared" and "delivered" the same fact (ADR-040). What a notification _is_ still belongs to `@cc/service-notification`; the handler only routes.
+
 ## The SLA sweep — the other kind of background work
 
 The relay publishes facts a service already wrote. A **breach** is different in kind: a deadline passing with nothing happening produces no write at the moment it becomes true, so no transaction can record it. `sweepSlaOnce` asks instead — every tenant, every open ticket past its window — and writes the breach to the **outbox**, not to a queue. The sweep is a producer like any service, and ADR-023's rule that only the relay publishes to BullMQ holds for it too.
