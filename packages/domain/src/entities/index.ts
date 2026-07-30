@@ -13,3 +13,4 @@ export * from "./o2c";
 export * from "./support";
 export * from "./loyalty";
 export * from "./reporting";
+export * from "./notification";

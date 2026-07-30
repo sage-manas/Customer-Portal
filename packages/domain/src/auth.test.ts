@@ -9,6 +9,7 @@ import {
   isBackOfficeRole,
   isBuyerRole,
   permissionsForRoles,
+  rolesWithPermission,
   type Permission,
   type Role,
 } from "./auth";
@@ -71,6 +72,26 @@ describe("hasPermission", () => {
   it("gives only tenant_admin the settings permission", () => {
     const withSettings = ROLES.filter((r) => ROLE_PERMISSIONS[r].includes("tenant:settings"));
     expect(withSettings).toEqual(["tenant_admin"]);
+  });
+});
+
+describe("rolesWithPermission", () => {
+  it("is the exact inverse of the role table", () => {
+    for (const permission of PERMISSIONS) {
+      const granted = rolesWithPermission(permission);
+      for (const role of ROLES) {
+        expect(granted.includes(role), `${role} / ${permission}`).toBe(
+          hasPermission(session(role), permission),
+        );
+      }
+    }
+  });
+
+  it("keeps a customer-plane permission out of the back office and vice versa", () => {
+    // The property A7's fan-out leans on: resolving recipients by permission
+    // cannot reach across planes, because no role holds both sides.
+    expect(rolesWithPermission("support:resolve").every(isBackOfficeRole)).toBe(true);
+    expect(rolesWithPermission("payment:pay").every(isBuyerRole)).toBe(true);
   });
 });
 

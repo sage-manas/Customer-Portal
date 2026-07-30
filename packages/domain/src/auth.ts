@@ -168,6 +168,19 @@ export interface SessionClaims {
   availableKunnrs: string[];
 }
 
+/**
+ * The inverse lookup: every role that grants a permission.
+ *
+ * Exists so a *fan-out* can be filtered in SQL rather than in memory —
+ * "which users may be told about this?" becomes `roles hasSome [...]` on the
+ * users table (A7). Loading every user and asking `hasPermission` per row
+ * would give the same answer and a worse failure mode: the filter would live
+ * in a loop somebody can forget, and the rows would be in memory first.
+ */
+export function rolesWithPermission(permission: Permission): Role[] {
+  return ROLES.filter((role) => ROLE_PERMISSIONS[role].includes(permission));
+}
+
 export function permissionsForRoles(roles: readonly Role[]): Set<Permission> {
   const granted = new Set<Permission>();
   for (const role of roles) {
