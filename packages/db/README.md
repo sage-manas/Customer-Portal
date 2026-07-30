@@ -44,6 +44,32 @@ await runWithTenant(tenantId, () =>
 
 `Notification` is the one table in the repo that holds words rendered from a domain event. It is not the mirror ADR-016 forbids: "we told this user at 09:04 and they read it at 11:20" is derivable from nothing, and re-rendering it later from the current document would produce different words than the customer was actually shown. It keeps a relative `href` and deliberately nothing else about the document — clicking re-reads through the owning module, with that module's KUNNR check and its own freshness.
 
+## The tenant credential vault (`src/credentials/`, docs/DECISIONS.md ADR-042)
+
+Per-tenant SAP/GSTN/payment-gateway connection secrets are envelope-encrypted, never inlined. Two layers, both AES-256-GCM:
+
+- **`TenantDataKey`** — one row per tenant, a random 256-bit key wrapped by the platform master key.
+- **`TenantCredential`** — one row per tenant per `CredentialSystem` (`sap` | `gstn` | `payment_gateway`), the credential JSON sealed under that tenant's data key.
+
+```ts
+import { getTenantCredential, setTenantCredential, runWithTenant } from "@cc/db";
+
+await runWithTenant(tenantId, () =>
+  setTenantCredential(tenantId, "sap", { username: "svc", password: "..." }),
+);
+
+const credential = await runWithTenant(tenantId, () => getTenantCredential(tenantId, "sap"));
+// -> { username: "svc", password: "..." } | null (null = nothing stored yet, not an error)
+```
+
+Both models are tenant-scoped like any other table here (`TENANT_SCOPED_MODELS`), so every call needs `runWithTenant` — the three resolvers this is built for (`@cc/service-sap`, `@cc/service-payment`, `@cc/service-onboarding`'s GSTN resolver) each bind their own context around the vault read rather than assuming a caller already did.
+
+The master key's custody is a `MasterKeyProvider` (`src/credentials/master-key.ts`) — an interface with an `env` driver (base64 key in `CREDENTIAL_MASTER_KEY`, local-dev only) built first and a `kms` driver deferred like ADR-006's SAP skeletons, following the same "external system behind an interface" shape as SAP/GSTN/the payment gateway (CLAUDE.md rule 2). Generate a dev key with:
+
+```
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
 ## Local development
 
 ```

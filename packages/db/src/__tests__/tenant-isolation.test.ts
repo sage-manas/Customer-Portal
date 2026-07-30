@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { db, getTenantId, runWithTenant, writeOutboxEvent } from "../index";
+import {
+  db,
+  getTenantCredential,
+  getTenantId,
+  runWithTenant,
+  setTenantCredential,
+  writeOutboxEvent,
+} from "../index";
 
 /**
  * Cross-tenant isolation tests (docs/06-CLAUDE-CODE-KICKOFF-PROMPT.md:
@@ -34,6 +41,8 @@ describe("tenant isolation", () => {
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
       await db.notification.deleteMany();
+      await db.tenantCredential.deleteMany();
+      await db.tenantDataKey.deleteMany();
       await db.outboxEvent.deleteMany();
       await db.creditLimitRequest.deleteMany();
       await db.loyaltyTierSetting.deleteMany();
@@ -53,6 +62,8 @@ describe("tenant isolation", () => {
     });
     await runWithTenant(tenantB.id, async () => {
       await db.notification.deleteMany();
+      await db.tenantCredential.deleteMany();
+      await db.tenantDataKey.deleteMany();
       await db.outboxEvent.deleteMany();
       await db.creditLimitRequest.deleteMany();
       await db.loyaltyTierSetting.deleteMany();
@@ -451,5 +462,40 @@ describe("tenant isolation", () => {
       }),
     );
     expect(again.count).toBe(0);
+  });
+
+  it("scopes the credential vault (B1): each tenant gets its own data key and reads only its own credential", async () => {
+    const credentialA = { username: "svc_acme", password: "acme-only-secret" };
+    const credentialB = { username: "svc_globex", password: "globex-secret" };
+
+    await runWithTenant(tenantA.id, () => setTenantCredential(tenantA.id, "sap", credentialA));
+    await runWithTenant(tenantB.id, () => setTenantCredential(tenantB.id, "sap", credentialB));
+
+    // Each tenant round-trips its own credential correctly...
+    expect(await runWithTenant(tenantA.id, () => getTenantCredential(tenantA.id, "sap"))).toEqual(
+      credentialA,
+    );
+    expect(await runWithTenant(tenantB.id, () => getTenantCredential(tenantB.id, "sap"))).toEqual(
+      credentialB,
+    );
+
+    // ...and gets its own data key row, wrapped separately, so a bug that
+    // reused one tenant's key for another would show up here even before
+    // any credential is decrypted.
+    const dataKeyA = await runWithTenant(tenantA.id, () =>
+      db.tenantDataKey.findUniqueOrThrow({ where: { tenantId: tenantA.id } }),
+    );
+    const dataKeyB = await runWithTenant(tenantB.id, () =>
+      db.tenantDataKey.findUniqueOrThrow({ where: { tenantId: tenantB.id } }),
+    );
+    expect(dataKeyA.wrappedKey).not.toBe(dataKeyB.wrappedKey);
+
+    // The tenant-scoped read itself is what the middleware guarantees: a
+    // credential set for A is invisible to a query bound to B, exactly like
+    // every other tenant-owned table in this suite.
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.tenantCredential.findFirst({ where: { system: "sap" } }),
+    );
+    expect(asSeenByTenantB?.tenantId).toBe(tenantB.id);
   });
 });

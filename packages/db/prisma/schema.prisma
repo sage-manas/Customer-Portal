@@ -32,6 +32,16 @@ enum PaymentGatewayDriver {
   razorpay
 }
 
+/// External systems whose connection secrets are envelope-encrypted rather
+/// than inlined (docs/DECISIONS.md ADR-042). One tenant may hold at most one
+/// credential per system — a driver switch overwrites it, it does not add
+/// a second row.
+enum CredentialSystem {
+  sap
+  gstn
+  payment_gateway
+}
+
 /// Portal-side payment state (@cc/domain entities/payment.ts). Deliberately
 /// not a CanonicalStatus: those describe SAP documents, and a payment only
 /// becomes one at `posted`. `captured` vs `posted` is the window where money
@@ -79,6 +89,8 @@ model Tenant {
   outboxEvents        OutboxEvent[]
   notifications       Notification[]
   auditLogs           AuditLog[]
+  dataKey             TenantDataKey?
+  credentials         TenantCredential[]
 
   @@map("tenants")
 }
@@ -918,4 +930,59 @@ model Notification {
   @@index([tenantId, userId, readAt])
   @@index([tenantId])
   @@map("notifications")
+}
+
+/// The per-tenant envelope-encryption data key, wrapped by the platform
+/// master key (docs/DECISIONS.md ADR-042). One row per tenant: it is
+/// generated on first use and never rotated by re-issuing a row — rotation
+/// re-wraps the same key material under a new `keyVersion` instead, so
+/// existing `TenantCredential` ciphertext (encrypted under the data key
+/// itself, not the master key) never needs re-encrypting.
+model TenantDataKey {
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  /// Base64 AES-256-GCM ciphertext of the random 32-byte data key.
+  wrappedKey String
+  wrapIv     String
+  wrapAuthTag String
+  /// Which master key wrapped this — lets a key rotation identify rows
+  /// still under the old master key without touching credential rows.
+  keyVersion String
+  /// Which MasterKeyProvider produced `keyVersion` ("env" | "kms"), so a
+  /// deploy that switches provider can tell inherited rows apart from new
+  /// ones without guessing from the version string's shape.
+  provider   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenant_data_keys")
+}
+
+/// A tenant's encrypted connection secret for one external system —
+/// SAP/GSTN/payment-gateway credentials move here instead of living inline
+/// in adapter config (ADR-042). Ciphertext is AES-256-GCM under the
+/// tenant's data key (`TenantDataKey`), never the master key directly, so
+/// decrypting one credential never requires touching the master key
+/// provider more than once per data-key unwrap.
+model TenantCredential {
+  id       String           @id @default(cuid())
+  tenantId String
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  system   CredentialSystem
+
+  /// Base64 ciphertext of the credential JSON (an opaque field bag — its
+  /// shape is the concern of the driver that will eventually read it, not
+  /// of the vault).
+  ciphertext String
+  iv         String
+  authTag    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, system])
+  @@index([tenantId])
+  @@map("tenant_credentials")
 }

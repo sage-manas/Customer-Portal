@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createGstnAdapter, resetGstnAdapter } from "./factory";
 import { MockGstnAdapter } from "./mock/driver";
 
-
 afterEach(() => resetGstnAdapter());
 
 describe("createGstnAdapter", () => {
@@ -31,7 +30,7 @@ describe("createGstnAdapter", () => {
     const adapter = createGstnAdapter({
       tenantId: "t1",
       driver: "api",
-      api: { baseUrl: "https://gstn.example", credentialsRef: "kms://t1/gstn" },
+      api: { baseUrl: "https://gstn.example", credentials: { apiKey: "gstn-api-key" } },
     });
 
     expect(adapter.driver).toBe("api");

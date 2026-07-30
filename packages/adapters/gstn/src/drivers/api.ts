@@ -13,8 +13,13 @@ import { GstnError } from "../errors";
 
 export interface GstnApiConfig {
   baseUrl: string;
-  /** Reference to the per-tenant encrypted API credentials (docs/02 §9). */
-  credentialsRef: string;
+  /**
+   * Decrypted once by the resolving service from the per-tenant credential
+   * vault (`@cc/db`, docs/DECISIONS.md ADR-042) and held here for the
+   * adapter's lifetime — never logged, never round-tripped back to
+   * storage.
+   */
+  credentials: Record<string, string>;
 }
 
 export class ApiGstnAdapter implements GstnAdapter {

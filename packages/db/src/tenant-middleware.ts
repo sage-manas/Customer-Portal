@@ -32,6 +32,8 @@ const TENANT_SCOPED_MODELS = new Set([
   "Notification",
   "OutboxEvent",
   "AuditLog",
+  "TenantDataKey",
+  "TenantCredential",
 ]);
 
 type Args = Record<string, unknown>;

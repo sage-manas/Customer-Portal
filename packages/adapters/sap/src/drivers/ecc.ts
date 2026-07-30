@@ -22,8 +22,14 @@ export interface EccConnectionConfig {
   endpoint: string;
   client: string;
   sysnr?: string;
-  /** Resolved from the per-tenant encrypted secret store, never inline. */
-  credentialsRef: string;
+  /**
+   * Decrypted once by the resolving service from the per-tenant credential
+   * vault (`@cc/db`, docs/DECISIONS.md ADR-042) and held here for the
+   * adapter's lifetime — never logged, never round-tripped back to
+   * storage. Field shape (username/password vs. OAuth client credentials)
+   * is this driver's concern once it is built in Phase 7.
+   */
+  credentials: Record<string, string>;
 }
 
 export class EccSapAdapter extends NotImplementedSapAdapter {

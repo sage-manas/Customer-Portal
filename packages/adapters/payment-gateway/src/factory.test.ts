@@ -7,8 +7,7 @@ import { createPaymentGateway, resetPaymentGateway } from "./factory";
 
 const RAZORPAY = {
   keyId: "rzp_test_key",
-  credentialsRef: "vault://tenant/razorpay",
-  webhookSecret: "tenant-webhook-secret",
+  credentials: { keySecret: "tenant-api-secret", webhookSecret: "tenant-webhook-secret" },
 };
 
 describe("createPaymentGateway", () => {
@@ -85,7 +84,7 @@ describe("createPaymentGateway", () => {
       });
 
       const body = JSON.stringify({ hello: "world" });
-      const valid = createHmacHex(body, RAZORPAY.webhookSecret);
+      const valid = createHmacHex(body, RAZORPAY.credentials.webhookSecret);
 
       expect(gateway.verifyWebhookSignature(body, valid)).toBe(true);
       expect(gateway.verifyWebhookSignature(body, createHmacHex(body, "wrong"))).toBe(false);
