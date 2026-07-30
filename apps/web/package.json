@@ -21,6 +21,7 @@
     "@cc/service-inquiry": "workspace:*",
     "@cc/service-invoice": "workspace:*",
     "@cc/service-loyalty": "workspace:*",
+    "@cc/service-notification": "workspace:*",
     "@cc/service-onboarding": "workspace:*",
     "@cc/service-order": "workspace:*",
     "@cc/service-payment": "workspace:*",

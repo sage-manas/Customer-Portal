@@ -1,5 +1,6 @@
 import { PORTAL_NAV, hasPermission, visibleNavItems } from "@cc/domain";
 import { getCartLineCount } from "@cc/service-catalogue";
+import { unreadNotificationCount } from "@cc/service-notification";
 import { redirect } from "next/navigation";
 
 import { AppShellClient } from "@/components/AppShellClient";
@@ -32,6 +33,12 @@ export default async function PortalLayout({ children }: { children: React.React
   // popping in after a fetch. It is a count, not the cart: rendering the
   // shell must not pay for a full SAP repricing.
   const lineCount = showCart ? await getCartLineCount(session.tenantId, session.kunnr) : 0;
+  // Same reasoning as the cart badge: a count, not the inbox. The panel
+  // fetches the list when somebody opens it.
+  const unread = await unreadNotificationCount({
+    tenantId: session.tenantId,
+    userId: session.userId,
+  });
 
   // A CTA is offered only when the owning module is both permitted and
   // built — `status: "planned"` items exist in the nav but have no route yet.
@@ -52,6 +59,7 @@ export default async function PortalLayout({ children }: { children: React.React
         activeKunnr={session.kunnr}
         accounts={session.availableKunnrs.map((kunnr) => ({ kunnr, label: `Account ${kunnr}` }))}
         showCart={showCart}
+        unreadNotifications={unread}
       >
         {children}
       </AppShellClient>
