@@ -53,6 +53,9 @@ importers:
       '@cc/service-loyalty':
         specifier: workspace:*
         version: link:../../packages/services/loyalty
+      '@cc/service-notification':
+        specifier: workspace:*
+        version: link:../../packages/services/notification
       '@cc/service-onboarding':
         specifier: workspace:*
         version: link:../../packages/services/onboarding
@@ -155,6 +158,28 @@ importers:
         specifier: workspace:*
         version: link:../../domain
     devDependencies:
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/adapters/notifications:
+    dependencies:
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
       eslint:
         specifier: ^9.17.0
         version: 9.39.5(jiti@2.7.0)
@@ -483,6 +508,37 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/services/notification:
+    dependencies:
+      '@cc/adapter-notifications':
+        specifier: workspace:*
+        version: link:../../adapters/notifications
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/services/onboarding:
     dependencies:
       '@cc/adapter-gstn':
@@ -765,6 +821,9 @@ importers:
       '@cc/domain':
         specifier: workspace:*
         version: link:../domain
+      '@cc/service-notification':
+        specifier: workspace:*
+        version: link:../services/notification
       '@cc/service-payment':
         specifier: workspace:*
         version: link:../services/payment

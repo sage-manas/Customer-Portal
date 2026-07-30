@@ -4,6 +4,48 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-041: A notification's recipients are resolved from the event, and a template that reaches the wrong plane cannot be written
+
+**Context:** Every module before this one answers a _pull_: a customer asks for an order, a route checks the permission, the service compares the document's KUNNR to the session's, and a mismatch is a 404 (ADR-025, ADR-032). A notification inverts all of it. Nobody asked, no route was involved, there is no session at fan-out time — a worker holds an event and has to decide who hears about it. And the payloads are not innocent: `support.sla.breached` names a ticket and an account, `credit.increase.requested` names a customer and the size of their limit. The obvious implementations are a `userIds` field on the event (producers deciding audience) or a broadcast to the tenant with the screen filtering.
+
+**Decision:** Neither. The template declares an **audience** and a **permission**, and `resolveRecipients` in `@cc/service-notification` is the only code that turns that into people. A `customer` template resolves to the users linked to the KUNNR the event carries; a `back_office` template resolves to users holding the permission _and_ a back-office role. Both filters are pushed into SQL. A `customer` template whose payload carries no KUNNR resolves to **nobody**. The permission a template declares is the one guarding the screen its `href` points at, and a test walks the registry asserting that a `back_office` row's permission appears in `ADMIN_NAV` and a `customer` row's in `PORTAL_NAV`.
+
+**Consequence:** The KUNNR boundary now covers pushes as well as pulls, and it is the same boundary rather than a parallel one — which matters because the failure modes are different in kind. A wrong pull shows one person one screen they should not have seen, and they had to go looking. A wrong push mails another customer's credit limit to a mailing list, and nobody had to do anything. The empty-set default is the sharp edge: the tempting reading of a missing KUNNR is "not customer-specific, so tell everyone", and that is exactly backwards.
+
+The redundant role check on the back-office branch is deliberate and worth defending, because today it excludes nobody: no buyer role holds `support:resolve` or `credit:decide-limit`. That is a property of the current `ROLE_PERMISSIONS` table, not a guarantee about it, and a tenant-plane notification quotes another customer's account in its _title_. The day somebody grants a buyer role one of those permissions for an unrelated reason, this fails closed instead of leaking. `rolesWithPermission` in `@cc/domain` is the inverse lookup that makes the whole thing a query rather than a loop, for ADR-028's reason: a row that was never selected cannot be leaked by the next person to edit the code around it.
+
+**Also decided here:** there is no tenant-wide inbox view and no `notification:view` permission. The bell is guarded by `dashboard:view` — held by every portal role and no platform operator — because a notification carries no capability of its own: it is a message already addressed to this user, and its link is re-authorised by the route it points at. A dedicated permission would mostly be a thing a tenant could revoke to give somebody a bell that never rings.
+
+---
+
+## ADR-040: An event with no template is not a notification, and the worker subscribes from the registry
+
+**Context:** docs/07 A7 asks for a "templates registry in domain (event → channel → template)" consuming "outbox events from A1–A6". Fourteen events exist. The default reading is that A7 notifies on all of them and the registry is a formatting concern — and the handlers, written the obvious way, are fourteen `registerHandler` calls differing only in a string.
+
+**Decision:** The template map is **partial**, and silence is the default. `payment.captured` has no template because it is a worker's retry instruction (ADR-019), and `delivery.discrepancy.reported` has none because it already speaks as the support ticket it raises (A3) — notifying on both would tell a customer twice about one shipment and once about an internal retry. Registration is then driven by the registry itself: one loop over `DOMAIN_EVENT_NAMES`, registering the fan-out for each event `isNotifiableEvent` returns true for. An event may also carry **several** templates, which is how one raised ticket becomes a receipt for the customer and a queue item for the desk with different copy, different links and different channels.
+
+**Consequence:** "Declared" and "delivered" become the same fact. The bug this forecloses is the quiet one: a template added in the domain package with no handler registered for its event produces no error, no job and no notification, and nothing in the diff to notice — the failure mode of a notification system is silence, which is indistinguishable from nothing having happened. Driving subscription from the registry is CLAUDE.md rule 3 applied to subscription rather than to data, and the test asserts the two sets are equal in both directions.
+
+Making silence the default is the other half. A system that notifies on every event it has trains people to ignore it, and the events it has are chosen for _cross-module effects_, not for interest — `DOMAIN_EVENTS` will keep growing with rows that no human should ever hear about. Requiring a template to be written before anybody is told means adding an event is not a decision about somebody's attention.
+
+**Also decided here, and it is a gap worth naming:** three of docs/05 §6.4's seven bell entries are **not** built, because they have no producer. "Delivery dispatched" and "invoice generated" are facts SAP creates and the portal only ever learns by reading (ADR-016); "credit released" belongs to the blocked-order release queue A5 did not build (ADR-035). Announcing the first two needs a sweep that _discovers_ the change — ADR-029's shape, not ADR-023's — and that is honest work for a later phase rather than something to fake from a page load. The registry's comment says so where somebody looking for the missing template will read it.
+
+---
+
+## ADR-039: The bell inbox is stored; it is a message that was delivered, not a projection of anything
+
+**Context:** ADR-016 has governed every module since orders — do not mirror what SAP owns — and ADR-037 refused a reporting table on the same grounds. A notification looks exactly like the thing those ADRs forbid: "Order 4711 confirmed" is a fact about a sales order SAP owns, restated in the portal's database, going stale the moment the order changes. `notifications` is in docs/02 §7's table list, but so were `orders` and `deliveries_cache`, and both were refused.
+
+**Decision:** Store it. `Notification` is one row per person per rendered template, carrying the words, a severity, a relative `href`, the `occurredAt` of the causing event, read state and the email mirror's outcome. It carries **no copy of the document** — clicking re-reads through the owning module, with that module's KUNNR check and its own freshness.
+
+**Consequence:** The distinction is between a _record of an interaction_ and a _copy of state_, and it is the same line ADR-026 drew for the POD evidence. "We told Priya at 09:04 that order 4711 was confirmed, and she read it at 11:20" is not derivable from anything: it is not in SAP, it cannot be recomputed from the order, and it stops being true the moment a template's wording changes. Re-rendering a notification later from the current document would produce _different words than the ones the customer was actually shown_, which makes the inbox a worse record than no inbox. What would violate ADR-016 is storing the order's status alongside it and rendering that — hence the `href` and the deliberate absence of anything else about the document.
+
+Read state is stored per **user**, not per account, while eligibility is per account: two colleagues on one KUNNR both get the notification and clear their own bells. Anything else means one buyer marking a message read hides it from a colleague who never saw it.
+
+**Also decided here:** the row is ordered and stamped by the event's `occurredAt`, not by when the worker wrote it. The relay is at-least-once with a poll interval and a retry, so a backlog would otherwise reorder a customer's bell on the way out of it — a dispatch appearing above the order it belongs to. It is the same reason the event registry put `occurredAt` on every payload in the first place.
+
+---
+
 ## ADR-038: On-time delivery reports what it could not measure, rather than scoring it
 
 **Context:** docs/03 Module 10 asks for "On-time delivery % (LIKP WADAT vs WADAT_IST)" and stops there. The seeded landscape immediately produces three populations the formula does not cover: a delivery that has not been goods-issued yet, a delivery that was issued with no planned date on the header at all, and — once A6 added a year of shipping history — enough of both that the choice moves the headline number by tens of percent. The obvious implementations all fold them in somewhere: count an unshipped delivery as late, or count a delivery with no WADAT as on time, or quietly drop both and report a percentage over a denominator nobody can see.
