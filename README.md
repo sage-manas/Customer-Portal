@@ -24,12 +24,25 @@ docker compose -f docker-compose.dev.yml up -d      # Postgres + Redis
 cp packages/db/.env.example packages/db/.env
 cp apps/web/.env.example apps/web/.env.local
 pnpm --filter @cc/db db:push
-pnpm --filter @cc/service-identity db:seed   # dev tenants + users
+pnpm --filter @cc/service-identity db:seed   # dev tenants +
+users
 
 pnpm --filter web dev            # http://acme.localhost:3000/login
                                  # buyer@acme.example / portal-dev-password
 pnpm --filter @cc/ui storybook   # http://localhost:6006
 ```
+
+Sign in on the **subdomain** (`acme.localhost`), not bare `localhost` — the tenant is resolved from the host.
+
+### On a machine with little free RAM
+
+`next dev` holds the compiler in memory and compiles each route on first visit; with a browser open too, that is roughly a gigabyte. If the dev server dies with `FATAL ERROR: NewSpace::EnsureCurrentCapacity Allocation failed` — or the page never finishes loading — browse a production build instead:
+
+```
+pnpm --filter web preview        # next build && next start, ~190 MB, pages in ~30ms
+```
+
+No compiler is resident and nothing compiles per request. The trade is that there is no hot reload: re-run it after changing code. `next build` itself is the memory-hungry step, so if it fails, give it more headroom with `NODE_OPTIONS=--max-old-space-size=6144`.
 
 ```
 pnpm turbo run typecheck lint test build   # whole repo
