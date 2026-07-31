@@ -13,7 +13,13 @@ import { NextResponse, type NextRequest } from "next/server";
  * as `@cc/service-identity/edge`).
  */
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login"];
+// `/api/auth/logout` is public deliberately, for the same reason apps/web's
+// is: signing out must work even when the token has already expired, or a
+// stale/invalid session cookie can never be cleared through the API. It
+// only deletes cookies, so there is nothing to authorize (docs/07 B6's
+// authz sweep caught this as a gap — apps/web already had the exception,
+// apps/ops's middleware was written without it).
+const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/logout"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { Prisma } from "../../generated/client";
 import {
   db,
   getTenantCredential,
@@ -9,6 +10,7 @@ import {
   runWithTenant,
   setTenantCredential,
   writeOutboxEvent,
+  TENANT_SCOPED_MODELS,
 } from "../index";
 
 /**
@@ -497,5 +499,69 @@ describe("tenant isolation", () => {
       db.tenantCredential.findFirst({ where: { system: "sap" } }),
     );
     expect(asSeenByTenantB?.tenantId).toBe(tenantB.id);
+  });
+
+  it("scopes payments (ADR-019/ADR-044): a payment captured for tenant A is invisible to tenant B", async () => {
+    const paymentA = await runWithTenant(tenantA.id, () =>
+      db.payment.create({
+        data: {
+          tenantId: tenantA.id,
+          customerKunnr: `KUNNR-A-${runId}`,
+          amount: "1000.00",
+          mode: "upi",
+          gatewayReference: `gw-a-${runId}`,
+        },
+      }),
+    );
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.payment.findUnique({ where: { id: paymentA.id } }),
+    );
+    expect(asSeenByTenantB).toBeNull();
+
+    const tenantBList = await runWithTenant(tenantB.id, () => db.payment.findMany());
+    expect(tenantBList.some((p) => p.id === paymentA.id)).toBe(false);
+
+    await runWithTenant(tenantA.id, () => db.payment.deleteMany());
+  });
+
+  /**
+   * docs/07 B6's "cross-tenant fuzz tests extended" line item, answered
+   * generically rather than one model at a time (the same instinct
+   * `rolesWithPermission` and the sap-mapping registries already follow):
+   * every model the schema itself says is tenant-owned (a `tenantId` column)
+   * must be in `TENANT_SCOPED_MODELS`, and nothing *without* one may be —
+   * an `Operator` row (docs/DECISIONS.md ADR-045) with a `tenantId` column
+   * would fail this the instant someone added one, without needing a test
+   * written specifically for that model. A model added to the schema and
+   * forgotten here would previously run entirely unscoped and pass every
+   * other test in this file simply because nothing exercised it.
+   */
+  it("every model with a tenantId column is tenant-scoped, and nothing else is (schema/registry consistency)", () => {
+    const models = Prisma.dmmf.datamodel.models;
+    expect(models.length).toBeGreaterThan(0);
+
+    for (const model of models) {
+      const hasTenantId = model.fields.some((field) => field.name === "tenantId");
+      const isRegistered = TENANT_SCOPED_MODELS.has(model.name);
+      expect(
+        isRegistered,
+        `${model.name}: hasTenantId=${hasTenantId}, in TENANT_SCOPED_MODELS=${isRegistered}. ` +
+          `A model with a tenantId column must be added to TENANT_SCOPED_MODELS (tenant-middleware.ts); ` +
+          `a model without one — like the platform-plane Operator/Tenant tables — must not be.`,
+      ).toBe(hasTenantId);
+    }
+  });
+
+  it("the platform-plane Operator table has no tenantId column and is readable without runWithTenant (ADR-045)", async () => {
+    const operatorModel = Prisma.dmmf.datamodel.models.find((model) => model.name === "Operator");
+    expect(operatorModel?.fields.some((field) => field.name === "tenantId")).toBe(false);
+
+    const email = `operator-isolation-${runId}@platform.example`;
+    await db.operator.create({ data: { email, passwordHash: "unused" } });
+    const found = await db.operator.findUnique({ where: { email } });
+    expect(found?.email).toBe(email);
+
+    await db.operator.deleteMany({ where: { email } });
   });
 });
