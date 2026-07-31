@@ -4,6 +4,7 @@ import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInquiryError } from "@cc/service-inquiry";
 import { isLoyaltyError } from "@cc/service-loyalty";
 import { isOnboardingError } from "@cc/service-onboarding";
+import { isPaymentError } from "@cc/service-payment";
 import { isSupportError } from "@cc/service-support";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
@@ -61,6 +62,15 @@ export function toAdminErrorResponse(error: unknown): NextResponse {
     // behind its errors to pass on.
     return NextResponse.json(
       { error: error.message, issues: error.issues, code: error.code },
+      { status: error.status },
+    );
+  }
+  if (isPaymentError(error)) {
+    // `upstreamMessage` included: this is the reconciliation tray, an
+    // operator screen, and a desk retrying a posting needs SAP's own words —
+    // unlike a customer-facing payment error, which never carries it.
+    return NextResponse.json(
+      { error: error.message, code: error.code, upstreamMessage: error.upstreamMessage },
       { status: error.status },
     );
   }

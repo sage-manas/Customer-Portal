@@ -9,9 +9,11 @@ import {
   getPayment,
   handleGatewayWebhook,
   initiatePayment,
+  listPaymentExceptions,
   listPayments,
   listPendingSync,
   postCapturedPayment,
+  reconcilePayment,
 } from "../payment-service";
 import { listPayableItems } from "../statement-service";
 
@@ -325,6 +327,102 @@ describe("payment flow", () => {
       // Retrying again is a no-op, not a second posting.
       const again = await postCapturedPayment(tenantA.id, initiated.paymentId, sap);
       expect(again.fiDocumentNumber).toBe(retried.fiDocumentNumber);
+    });
+  });
+
+  describe("reconciliation (docs/07 B4)", () => {
+    it("flags a captured payment as overdue once the posting has waited long enough", async () => {
+      const gateway = new MockPaymentGateway();
+      const initiated = await initiatePayment(
+        tenantA.id,
+        KUNNR,
+        { mode: "upi", allocations: [{ documentNumber: OVERDUE_INVOICE, amount: 143252 }] },
+        { sap: new MockSapAdapter(), gateway },
+      );
+      const { body, signature } = gateway.buildWebhook(initiated.gatewayReference);
+      await handleGatewayWebhook(tenantA.id, body, signature, {
+        sap: new MockSapAdapter({ unavailable: true }),
+        gateway,
+      }).catch(() => undefined);
+
+      // Not yet stale: too soon to call this an exception.
+      expect(await listPaymentExceptions(tenantA.id)).toHaveLength(0);
+
+      // Stale by the caller's clock, not by rewriting the row.
+      const later = new Date(Date.now() + 20 * 60 * 1000);
+      const exceptions = await listPaymentExceptions(tenantA.id, later);
+      expect(exceptions).toHaveLength(1);
+      expect(exceptions[0]).toMatchObject({
+        paymentId: initiated.paymentId,
+        status: "captured",
+        exception: { kind: "payment_posting_overdue" },
+      });
+    });
+
+    it("reconcilePayment retries a captured payment's posting like postCapturedPayment does", async () => {
+      const gateway = new MockPaymentGateway();
+      const initiated = await initiatePayment(
+        tenantA.id,
+        KUNNR,
+        { mode: "upi", allocations: [{ documentNumber: OVERDUE_INVOICE, amount: 143252 }] },
+        { sap: new MockSapAdapter(), gateway },
+      );
+      const { body, signature } = gateway.buildWebhook(initiated.gatewayReference);
+      await handleGatewayWebhook(tenantA.id, body, signature, {
+        sap: new MockSapAdapter({ unavailable: true }),
+        gateway,
+      }).catch(() => undefined);
+
+      const sap = new MockSapAdapter();
+      const result = await reconcilePayment(tenantA.id, initiated.paymentId, { sap, gateway });
+
+      expect(result.status).toBe("posted");
+      expect(await listPendingSync(tenantA.id, KUNNR)).toHaveLength(0);
+    });
+
+    it("polls the gateway and records a capture the webhook never delivered", async () => {
+      const gateway = new MockPaymentGateway();
+      const sap = new MockSapAdapter();
+      const initiated = await initiatePayment(
+        tenantA.id,
+        KUNNR,
+        { mode: "upi", allocations: [{ documentNumber: OVERDUE_INVOICE, amount: 143252 }] },
+        { sap, gateway },
+      );
+
+      // The gateway itself has captured the money — mutating its own record
+      // directly, the way a real gateway's ledger would already show it —
+      // but no webhook has reached the portal, so the payment is still
+      // `initiated` here.
+      const { body, signature } = gateway.buildWebhook(initiated.gatewayReference);
+      gateway.parseWebhook(body, signature);
+
+      const before = await getPayment(tenantA.id, KUNNR, initiated.paymentId);
+      expect(before.status).toBe("initiated");
+
+      const result = await reconcilePayment(tenantA.id, initiated.paymentId, { sap, gateway });
+      expect(result.status).toBe("posted");
+
+      const after = await getPayment(tenantA.id, KUNNR, initiated.paymentId);
+      expect(after.status).toBe("posted");
+    });
+
+    it("does not leak another tenant's payment exceptions", async () => {
+      const gateway = new MockPaymentGateway();
+      const initiated = await initiatePayment(
+        tenantB.id,
+        KUNNR,
+        { mode: "upi", allocations: [{ documentNumber: OVERDUE_INVOICE, amount: 143252 }] },
+        { sap: new MockSapAdapter(), gateway },
+      );
+      const { body, signature } = gateway.buildWebhook(initiated.gatewayReference);
+      await handleGatewayWebhook(tenantB.id, body, signature, {
+        sap: new MockSapAdapter({ unavailable: true }),
+        gateway,
+      }).catch(() => undefined);
+
+      const later = new Date(Date.now() + 20 * 60 * 1000);
+      expect(await listPaymentExceptions(tenantA.id, later)).toHaveLength(0);
     });
   });
 

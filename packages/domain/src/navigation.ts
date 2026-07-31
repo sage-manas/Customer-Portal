@@ -40,7 +40,8 @@ export type NavIcon =
   | "TrendingUp"
   | "FileCheck"
   | "ShieldCheck"
-  | "Settings";
+  | "Settings"
+  | "AlertTriangle";
 
 export interface NavItem {
   /** Stable key; also the tenant module-toggle key (Tenant.moduleToggles). */
@@ -211,6 +212,15 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Headphones",
     accent: "support",
     permission: "support:resolve",
+    status: "live",
+  },
+  {
+    key: "admin-exceptions",
+    label: "Exceptions",
+    href: "/admin/exceptions",
+    icon: "AlertTriangle",
+    accent: "payment",
+    permission: "exceptions:view",
     status: "live",
   },
   {

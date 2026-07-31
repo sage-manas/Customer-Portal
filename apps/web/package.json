@@ -28,6 +28,7 @@
     "@cc/service-onboarding": "workspace:*",
     "@cc/service-order": "workspace:*",
     "@cc/service-payment": "workspace:*",
+    "@cc/service-reconciliation": "workspace:*",
     "@cc/service-reporting": "workspace:*",
     "@cc/service-sap": "workspace:*",
     "@cc/service-support": "workspace:*",

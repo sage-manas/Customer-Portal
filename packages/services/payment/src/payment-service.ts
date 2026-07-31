@@ -1,10 +1,16 @@
 import { isPaymentGatewayError, type PaymentGateway } from "@cc/adapter-payment";
 import { isSapError, type SapAdapter } from "@cc/adapter-sap";
 import { db, getTenantId, runWithTenant, writeOutboxEvent } from "@cc/db";
-import type { Payment, PaymentInitiateInput, PaymentStatus } from "@cc/domain";
+import type {
+  Payment,
+  PaymentInitiateInput,
+  PaymentStatus,
+  ReconciliationException,
+} from "@cc/domain";
 import {
   allocationTotal,
   canTransitionPayment,
+  classifyPaymentException,
   paymentInitiateSchema,
   validateAllocations,
 } from "@cc/domain";
@@ -302,34 +308,7 @@ export async function handleGatewayWebhook(
   // payment.captured — the money is taken. Record that first and separately
   // from the posting, so a SAP failure can never lose the fact of the charge.
   if (canTransitionPayment(current, "captured")) {
-    await runWithTenant(tenantId, () =>
-      db.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: row.id },
-          data: { state: "captured", lastEventId: event.eventId },
-        });
-
-        // Same transaction as the capture itself (ADR-023). The posting is
-        // still attempted inline below — this event is what makes sure it
-        // *eventually* happens when that attempt fails, which until now
-        // nothing did: a payment that captured cleanly and then met a SAP
-        // outage had no second chance, because no further webhook is coming.
-        await writeOutboxEvent(tx, {
-          name: "payment.captured",
-          payload: {
-            occurredAt: new Date(),
-            paymentId: row.id,
-            kunnr: row.customerKunnr,
-            amount: toNumber(row.amount),
-            currency: row.currency,
-          },
-          // The payment id, not the gateway event id: a redelivered webhook
-          // and a reconciliation retry describe the same capture and must
-          // produce one event.
-          dedupeKey: `payment.captured:${row.id}`,
-        });
-      }),
-    );
+    await recordCapture(tenantId, row, event.eventId);
   }
 
   const posted = await postCapturedPayment(tenantId, row.id, deps.sap);
@@ -340,6 +319,40 @@ export async function handleGatewayWebhook(
     status: posted.status,
     fiDocumentNumber: posted.fiDocumentNumber,
   };
+}
+
+/**
+ * Records a capture — one transaction, shared by the webhook path and
+ * reconciliation's gateway poll, so there is exactly one place that writes
+ * `state: "captured"` and the `payment.captured` outbox event together
+ * (ADR-023). `eventId` is the webhook's dedupe key when there is one; a
+ * poll-derived capture has no such id and leaves `lastEventId` untouched, so
+ * a genuine webhook that arrives afterwards is still recognised as new.
+ */
+async function recordCapture(tenantId: string, row: PaymentRow, eventId?: string): Promise<void> {
+  await runWithTenant(tenantId, () =>
+    db.$transaction(async (tx) => {
+      await tx.payment.update({
+        where: { id: row.id },
+        data: { state: "captured", ...(eventId ? { lastEventId: eventId } : {}) },
+      });
+
+      await writeOutboxEvent(tx, {
+        name: "payment.captured",
+        payload: {
+          occurredAt: new Date(),
+          paymentId: row.id,
+          kunnr: row.customerKunnr,
+          amount: toNumber(row.amount),
+          currency: row.currency,
+        },
+        // The payment id, not the gateway event id: a redelivered webhook
+        // and a reconciliation retry describe the same capture and must
+        // produce one event.
+        dedupeKey: `payment.captured:${row.id}`,
+      });
+    }),
+  );
 }
 
 /**
@@ -513,12 +526,116 @@ export async function completeMockCheckout(
 
 /**
  * Payments whose money is taken but whose SAP posting hasn't confirmed —
- * the `Pending sync` rows on the statement (docs/05 §7.7). Also what the
- * reconciliation job picks up.
+ * the `Pending sync` rows on the statement (docs/05 §7.7).
  */
 export async function listPendingSync(
   tenantId: string,
   kunnr: string | undefined,
 ): Promise<Payment[]> {
   return listPayments(tenantId, kunnr, { states: ["captured"] });
+}
+
+export interface PaymentException {
+  paymentId: string;
+  kunnr: string;
+  status: PaymentStatus;
+  amount: number;
+  currency: string;
+  gatewayReference?: string;
+  exception: ReconciliationException;
+}
+
+/**
+ * Every payment in the tenant that reconciliation should look at — a
+ * captured payment SAP hasn't posted, or an initiated one whose webhook
+ * never arrived (docs/07 B4).
+ *
+ * Tenant-wide, not `kunnr`-scoped, and deliberately a different function from
+ * `listPendingSync` rather than that function with the account left off
+ * (ADR-032's reasoning, applied to money instead of inquiries): a desk
+ * reading every account's stuck payments must be a call a customer-plane
+ * screen cannot make by omitting an argument.
+ */
+export async function listPaymentExceptions(
+  tenantId: string,
+  now: Date = new Date(),
+): Promise<PaymentException[]> {
+  const rows = await runWithTenant(tenantId, () =>
+    db.payment.findMany({
+      where: { state: { in: ["captured", "initiated"] } },
+      orderBy: { updatedAt: "asc" },
+      select: PAYMENT_SELECT,
+    }),
+  );
+
+  const exceptions: PaymentException[] = [];
+  for (const row of rows) {
+    const classified = classifyPaymentException(row, now);
+    if (!classified) continue;
+    exceptions.push({
+      paymentId: row.id,
+      kunnr: row.customerKunnr,
+      status: row.state as PaymentStatus,
+      amount: toNumber(row.amount),
+      currency: row.currency,
+      gatewayReference: row.gatewayReference ?? undefined,
+      exception: classified,
+    });
+  }
+  return exceptions;
+}
+
+/**
+ * Retries one exception (docs/07 B4's "payment↔gateway↔SAP posting
+ * reconciliation"), called by the nightly worker sweep and by the admin
+ * tray's manual retry alike.
+ *
+ * - `captured`: the SAP posting is retried through `postCapturedPayment`,
+ *   which is already safe to call any number of times (ADR-021).
+ * - `initiated` with a gateway attempt: the gateway is polled directly
+ *   rather than waited on. Unlike a webhook body this needs no signature to
+ *   trust — it is a server-to-server call this tenant's own credentials
+ *   authenticated — so a `captured` answer is recorded the same way a
+ *   webhook would record it, and a `failed` one closes the attempt.
+ * - Anything else is returned as-is; there is nothing to reconcile.
+ */
+export async function reconcilePayment(
+  tenantId: string,
+  paymentId: string,
+  deps: { sap: SapAdapter; gateway: PaymentGateway },
+): Promise<{ status: PaymentStatus; fiDocumentNumber?: string }> {
+  const row = await runWithTenant(tenantId, () =>
+    db.payment.findUnique({ where: { id: paymentId }, select: PAYMENT_SELECT }),
+  );
+  if (!row) throw new PaymentError("not_found");
+
+  const state = row.state as PaymentStatus;
+
+  if (state === "captured") {
+    return postCapturedPayment(tenantId, paymentId, deps.sap);
+  }
+
+  if (state === "initiated" && row.gatewayReference) {
+    const polled = await deps.gateway.getPayment(row.gatewayReference);
+
+    if (polled.status === "captured" && canTransitionPayment(state, "captured")) {
+      await recordCapture(tenantId, row);
+      return postCapturedPayment(tenantId, row.id, deps.sap);
+    }
+
+    if (polled.status === "failed" && canTransitionPayment(state, "failed")) {
+      await runWithTenant(tenantId, () =>
+        db.payment.update({
+          where: { id: row.id },
+          data: {
+            state: "failed",
+            failureReason: polled.failureReason ?? "Payment was not completed",
+          },
+        }),
+      );
+      return { status: "failed" };
+    }
+  }
+
+  return { status: state };
 }

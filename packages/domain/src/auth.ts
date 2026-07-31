@@ -67,6 +67,12 @@ export const PERMISSIONS = [
   "credit:decide-limit",
   "support:resolve",
   "tenant:settings",
+  /** The reconciliation & exception tray (docs/07 B4). Restricted to
+   * `tenant_admin` rather than shared with `tenant_credit`/`tenant_support`
+   * the way `payment:view`/`support:resolve` are: it exposes cross-account
+   * SAP-posting state and internal outbox diagnostics, not a single desk's
+   * queue (ADR-044). */
+  "exceptions:view",
   // Platform plane
   "platform:operate",
 ] as const;
@@ -144,6 +150,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "credit:release",
     "credit:decide-limit",
     "tenant:settings",
+    "exceptions:view",
   ],
 
   // The operator console (apps/ops) is a separate plane: a platform

@@ -71,6 +71,9 @@ importers:
       '@cc/service-payment':
         specifier: workspace:*
         version: link:../../packages/services/payment
+      '@cc/service-reconciliation':
+        specifier: workspace:*
+        version: link:../../packages/services/reconciliation
       '@cc/service-reporting':
         specifier: workspace:*
         version: link:../../packages/services/reporting
@@ -727,6 +730,31 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.1)
 
+  packages/services/reconciliation:
+    dependencies:
+      '@cc/config':
+        specifier: workspace:*
+        version: link:../../config
+      '@cc/db':
+        specifier: workspace:*
+        version: link:../../db
+      '@cc/domain':
+        specifier: workspace:*
+        version: link:../../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.1
+      eslint:
+        specifier: ^9.17.0
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
   packages/services/reporting:
     dependencies:
       '@cc/adapter-cache':
@@ -919,6 +947,9 @@ importers:
       '@cc/service-payment':
         specifier: workspace:*
         version: link:../services/payment
+      '@cc/service-reconciliation':
+        specifier: workspace:*
+        version: link:../services/reconciliation
       '@cc/service-sap':
         specifier: workspace:*
         version: link:../services/sap
@@ -938,6 +969,12 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
+      '@cc/adapter-payment':
+        specifier: workspace:*
+        version: link:../adapters/payment-gateway
+      '@cc/adapter-sap':
+        specifier: workspace:*
+        version: link:../adapters/sap
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.1
