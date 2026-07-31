@@ -8,26 +8,26 @@ Version 1.0 · 2026-07-26 · Companion to docs 00–06. Assumes the state audite
 
 ## 1. Verified current state
 
-| Area                                                                                               | Status                                                          |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Monorepo, boundaries, CI conventions                                                               | ✅ Done (eslint-plugin-boundaries enforced)                     |
-| Tenancy (runWithTenant, TENANT_SCOPED_MODELS, isolation tests)                                     | ✅ Done                                                         |
-| Domain registries (sap-mapping, status, auth, navigation, validation)                              | ✅ Done                                                         |
-| Mock adapters: SAP, GSTN, storage, payment gateway                                                 | ✅ Done (active backbone)                                       |
-| Services: identity, sap, onboarding, catalogue, order, invoice, payment                            | ✅ Done w/ integration tests                                    |
-| UI package + Storybook (SapField, DataTable, O2CTimeline, …)                                       | ✅ Done                                                         |
-| Web app routes: auth, register, admin onboarding, dashboard, catalogue, orders, invoices, payments | ✅ Done                                                         |
-| ECC / S4 real drivers                                                                              | ⬜ Skeletons throwing `not_implemented` (planned Phase 7)       |
-| Delivery & POD (`@cc/service-delivery`)                                                            | ✅ Done (A2: tracking, POD, discrepancy events)                 |
-| Support & SLA (`@cc/service-support`)                                                              | ✅ Done (A3: tickets, SLA sweep, auto-ticket from POD)          |
-| Inquiry & Quotation (`@cc/service-inquiry`)                                                        | ✅ Done (A4: inquiry, quotation, accept → order, workbench)     |
-| Loyalty & Credit (`@cc/service-loyalty`)                                                           | ✅ Done (A5: credit position, tiers, rebates, credit desk)      |
-| Reports                                                                                            | ✅ Done (A6: sales dashboard, AR drill-down, report cache)      |
-| adapters: einvoice, eway                                                                           | ⬜ Not created                                                  |
-| Queue/worker/outbox                                                                                | ✅ Done (A1: `@cc/workers`, transactional outbox, BullMQ relay) |
-| Notification engine                                                                                | ✅ Done (A7: template registry, bell inbox, email driver)       |
-| apps/ops (operator console), tenant provisioning, billing                                          | ⬜ Stub                                                         |
-| KMS/credential vault, security audit, load tests, runbooks, pilots                                 | ⬜ Not reached                                                  |
+| Area                                                                                               | Status                                                                          |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Monorepo, boundaries, CI conventions                                                               | ✅ Done (eslint-plugin-boundaries enforced)                                     |
+| Tenancy (runWithTenant, TENANT_SCOPED_MODELS, isolation tests)                                     | ✅ Done                                                                         |
+| Domain registries (sap-mapping, status, auth, navigation, validation)                              | ✅ Done                                                                         |
+| Mock adapters: SAP, GSTN, storage, payment gateway                                                 | ✅ Done (active backbone)                                                       |
+| Services: identity, sap, onboarding, catalogue, order, invoice, payment                            | ✅ Done w/ integration tests                                                    |
+| UI package + Storybook (SapField, DataTable, O2CTimeline, …)                                       | ✅ Done                                                                         |
+| Web app routes: auth, register, admin onboarding, dashboard, catalogue, orders, invoices, payments | ✅ Done                                                                         |
+| ECC / S4 real drivers                                                                              | ⬜ Skeletons throwing `not_implemented` (planned Phase 7)                       |
+| Delivery & POD (`@cc/service-delivery`)                                                            | ✅ Done (A2: tracking, POD, discrepancy events)                                 |
+| Support & SLA (`@cc/service-support`)                                                              | ✅ Done (A3: tickets, SLA sweep, auto-ticket from POD)                          |
+| Inquiry & Quotation (`@cc/service-inquiry`)                                                        | ✅ Done (A4: inquiry, quotation, accept → order, workbench)                     |
+| Loyalty & Credit (`@cc/service-loyalty`)                                                           | ✅ Done (A5: credit position, tiers, rebates, credit desk)                      |
+| Reports                                                                                            | ✅ Done (A6: sales dashboard, AR drill-down, report cache)                      |
+| adapters: einvoice, eway                                                                           | ⬜ Not created                                                                  |
+| Queue/worker/outbox                                                                                | ✅ Done (A1: `@cc/workers`, transactional outbox, BullMQ relay)                 |
+| Notification engine                                                                                | ✅ Done (A7: template registry, bell inbox, email driver)                       |
+| apps/ops (operator console), tenant provisioning, billing                                          | ✅ Done (B5: separate operator realm, provisioning, health/usage, billing stub) |
+| KMS/credential vault, security audit, load tests, runbooks, pilots                                 | ⬜ Not reached                                                                  |
 
 **Conclusion:** on-plan against docs/06. The remaining work splits into three tracks below. Track A completes the product surface on mocks; Track B builds the production substrate; Track C is integration + pilot. A before B before C, with B-1 (outbox/queue) pulled forward because delivery events and notifications depend on it.
 
@@ -108,9 +108,10 @@ Sequenced; each phase ends with passing `turbo run typecheck lint test build` + 
 - Nightly jobs (worker): payment↔gateway↔SAP-posting reconciliation; stuck-outbox sweep; SAP-sync failure tray surfaced in admin (`/admin/exceptions`).
 - **As built:** nothing new is stored (docs/DECISIONS.md ADR-044) — `Payment.state`/`updatedAt` and `OutboxEvent.state`/`attempts` already carry every fact an exception is made of, and `@cc/domain`'s new `entities/reconciliation.ts` fixes the two staleness thresholds (`captured` past 15 minutes, `initiated`-with-a-gateway-attempt past 30) so the admin tray and the automatic sweep can't drift apart. Split across two services because one may not import the other: `@cc/service-payment` gained `listPaymentExceptions` (tenant-wide, admin-plane — ADR-032's split applied to money) and `reconcilePayment` (retries `postCapturedPayment`, or polls the gateway directly for an `initiated` payment whose webhook never arrived); the new `@cc/service-reconciliation` owns the outbox half (`listOutboxExceptions`, `requeueOutboxEvent`/`requeueStaleFailedOutboxEvents` — a requeue keeps the row's `attempts` counter, so a chronically failing event gets exactly one more try per cooldown rather than a fresh run of five). `packages/workers/src/reconciliation.ts` sequences both on `RECONCILIATION_INTERVAL_MS` (default 5 minutes), a third loop alongside the relay (publishes) and the SLA sweep (discovers) that **retries**. `/admin/exceptions` composes both reads live and offers the same retry a human can trigger early; the permission is `exceptions:view`, `tenant_admin` only.
 
-### B5. Platform operator console (`apps/ops`)
+### B5. Platform operator console (`apps/ops`) — ✅ **Done**
 
 - Minimal but real: operator auth (separate realm), tenant provisioning wizard (create tenant, domains, module toggles, credentials), tenant health dashboard (queue depth, SAP connectivity, error rates), usage metering read-model. Billing integration can stub behind an interface.
+- **As built:** the operator realm shares no code with a tenant session by design (docs/DECISIONS.md ADR-045) — a new platform-plane `Operator` model (no `tenantId`, outside `TENANT_SCOPED_MODELS`, like `Tenant` itself), its own JWT issuer/audience carrying only `{ operatorId, email }`, its own cookie names and secret (`OPS_AUTH_SECRET`), and its own copy of the scrypt/`jose` code in the new `@cc/service-platform` — a deliberate duplication rather than a shared import, since a service may not import another service (rule 1). `createTenant` provisions the `Tenant` row and its first `tenant_admin` login in one call (not `@cc/service-identity`'s `provisionPortalAccess`, which issues a buyer login against an existing KUNNR). `getTenantHealth`/`getTenantUsage` are composed on every read and store nothing, the same refusal reports (ADR-037) and reconciliation (ADR-044) already made; the dashboard stays cross-tenant in shape by looping `listTenants()` and calling each per-tenant function through its own `runWithTenant` scope, rather than any query running unscoped — rule 4 stays structural. Billing is the one genuinely new external system: `@cc/adapter-billing`, contract + `mock` driver only, labelled `source: "mock"` so the stub is never mistaken for a real plan. `apps/ops` needed no boundary change — it fits `apps -> ui, services, domain, config, observability` as-is — and ships `/login`, `/` (tenant list + queue depth/exceptions), `/tenants/new` (the provisioning form) and `/tenants/[id]` (health/usage/billing).
 
 ### B6. GA hardening checklist (tracked as issues, not code-first)
 

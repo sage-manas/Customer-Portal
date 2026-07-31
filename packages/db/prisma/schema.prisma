@@ -932,6 +932,33 @@ model Notification {
   @@map("notifications")
 }
 
+// ---------------------------------------------------------------------------
+// Platform operator console (docs/07 B5, docs/DECISIONS.md ADR-045)
+// ---------------------------------------------------------------------------
+
+/// A platform operator — the login for `apps/ops`, and deliberately not a
+/// `User` row with `roles: [platform_operator]`. `User.tenantId` is required
+/// (rule 4: every tenant-owned model carries one), and an operator manages
+/// tenants rather than belonging to one; forcing a pick would either invent a
+/// fake "platform" tenant or make the one genuinely tenant-less login table
+/// pretend to be tenant-scoped. This table is platform-plane, like `Tenant`
+/// itself: not in `TENANT_SCOPED_MODELS`, readable without `runWithTenant`.
+model Operator {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  /// Same scrypt format as `User.passwordHash` (@cc/service-identity), but
+  /// hashed by @cc/service-platform's own copy of that code — a service may
+  /// not import another service (rule 1), and duplicating ~90 lines of
+  /// crypto is the cost of keeping the operator realm genuinely separate.
+  passwordHash       String
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@map("operators")
+}
+
 /// The per-tenant envelope-encryption data key, wrapped by the platform
 /// master key (docs/DECISIONS.md ADR-042). One row per tenant: it is
 /// generated on first use and never rotated by re-issuing a row — rotation
