@@ -14,6 +14,10 @@ env:
   DEFAULT_TENANT_SLUG: "acme"
   # Uploads land in an in-process store; nothing to clean up between jobs.
   STORAGE_DRIVER: "memory"
+  # CI-only master key for the credential vault's `env` driver (ADR-042) —
+  # wraps/unwraps throwaway CI data only, never a real secret.
+  CREDENTIAL_MASTER_KEY: "h/z4mreBytBcGVc6Qak/dgptjhndgszbTQqZUp7CEU0="
+  CREDENTIAL_MASTER_KEY_PROVIDER: "env"
 
 jobs:
   ci:
