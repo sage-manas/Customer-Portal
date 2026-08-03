@@ -46,6 +46,10 @@ import {
   listPendingSync, // captured but not yet posted — the `Pending sync` rows
   completeMockCheckout, // dev/demo: deliver the mock's own signed webhook
   getPaymentGatewayForTenant,
+
+  // Reconciliation (docs/07 B4) — tenant-wide, admin-plane
+  listPaymentExceptions, // every stuck captured/initiated payment in the tenant
+  reconcilePayment, // retry the SAP posting, or poll the gateway for a lost webhook
   PaymentError,
   isPaymentError,
 } from "@cc/service-payment";
@@ -54,6 +58,18 @@ import {
 The gateway is resolved inside this package (it is this module's own external
 system, like GSTN is onboarding's). The **SAP adapter is passed in** by the
 caller, because a service may not import `@cc/service-sap` — ADR-011.
+
+`listPaymentExceptions` is deliberately a different function from
+`listPendingSync`, not that function with the `kunnr` left off — a tenant-wide
+read for the reconciliation job and the admin tray must not be reachable from
+a customer-plane call (ADR-032's reasoning, applied to money). `reconcilePayment`
+is what both `@cc/workers`' automatic sweep and the `/admin/exceptions` tray's
+manual retry call: for a `captured` payment it retries the SAP posting
+(already idempotent, ADR-021); for an `initiated` one with a gateway attempt
+it polls the gateway directly rather than waiting for a webhook that may
+never come — safe because that call is authenticated by this tenant's own
+credentials, unlike a webhook body, which is untrusted until its signature
+verifies (ADR-044).
 
 ### Error codes
 

@@ -19,8 +19,13 @@ import { NotImplementedSapAdapter } from "./not-implemented";
 export interface S4ConnectionConfig {
   /** Base URL of the OData gateway (or the BTP destination name). */
   baseUrl: string;
-  /** Resolved from the per-tenant encrypted secret store, never inline. */
-  credentialsRef: string;
+  /**
+   * Decrypted once by the resolving service from the per-tenant credential
+   * vault (`@cc/db`, docs/DECISIONS.md ADR-042) and held here for the
+   * adapter's lifetime — never logged, never round-tripped back to
+   * storage.
+   */
+  credentials: Record<string, string>;
   /** Sales area used for pricing/order calls. */
   salesOrg?: string;
   distributionChannel?: string;

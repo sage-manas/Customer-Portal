@@ -1,5 +1,6 @@
 import type { NavIcon } from "@cc/domain";
 import {
+  AlertTriangle,
   Award,
   CreditCard,
   FileCheck,
@@ -38,4 +39,5 @@ export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
   FileCheck,
   ShieldCheck,
   Settings,
+  AlertTriangle,
 };

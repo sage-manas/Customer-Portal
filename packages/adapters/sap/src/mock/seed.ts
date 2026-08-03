@@ -3,10 +3,13 @@ import type {
   CreditInfo,
   CustomerPrice,
   Delivery,
+  Inquiry,
   Invoice,
   Material,
   OpenItem,
   OrderStatusView,
+  Quotation,
+  RebateAgreement,
   ShipToAddress,
   StockLevel,
 } from "@cc/domain";
@@ -38,6 +41,14 @@ function shiftDays(iso: string, days: number): string {
 }
 
 export const PLANTS = ["1000", "2000"] as const;
+
+/**
+ * T005S region of the supplying plants. Place of supply is decided against
+ * this (docs/03 Module 6): a customer in 27 gets CGST+SGST, everyone else
+ * IGST — which is how the seeded invoices below are already split, and how
+ * the mock prices a quotation's tax.
+ */
+export const SUPPLYING_REGION = "27";
 
 /** T005S region codes used below: 27 Maharashtra, 29 Karnataka, 07 Delhi. */
 export const SEED_MATERIALS: Material[] = [
@@ -303,6 +314,426 @@ export const SEED_CREDIT: CreditInfo[] = [
   },
 ];
 
+/**
+ * VBAK AUART=IN. Two inquiries per the states Module 3 has to render: one
+ * still waiting on the sales desk (which is also what the admin workbench's
+ * queue is seeded from), and one that has already been answered, so the
+ * "Quotation received" list state exists in a fresh demo.
+ */
+export const SEED_INQUIRIES: Inquiry[] = [
+  {
+    vbeln: "0010000801",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -1),
+    requiredDeliveryDate: shiftDays(SEED_TODAY, 21),
+    validityDays: 30,
+    notes: "Please quote for the annual maintenance shutdown. Delivery to Chakan.",
+    status: "Open",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10003",
+        description: "Control Valve CV-50 Brass",
+        quantity: 40,
+        uom: "EA",
+        netPrice: 0,
+        netValue: 0,
+      },
+      {
+        lineNo: 20,
+        material: "MAT-30002",
+        description: "PTFE Gasket Set 200mm",
+        quantity: 60,
+        uom: "SET",
+        netPrice: 0,
+        netValue: 0,
+      },
+    ],
+  },
+  {
+    vbeln: "0010000795",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -9),
+    requiredDeliveryDate: shiftDays(SEED_TODAY, 14),
+    validityDays: 30,
+    status: "Closed",
+    quotation: "0020000901",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20001",
+        description: "Seamless Steel Pipe 2in Sch40",
+        quantity: 1200,
+        uom: "M",
+        netPrice: 0,
+        netValue: 0,
+      },
+    ],
+  },
+  {
+    // A second tenant customer's inquiry, so the workbench queue has more than
+    // one account in it and the cross-customer 404 has something to fail on.
+    vbeln: "0010000806",
+    kunnr: "0010001002",
+    createdOn: shiftDays(SEED_TODAY, -2),
+    requiredDeliveryDate: shiftDays(SEED_TODAY, 30),
+    status: "Open",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50002",
+        description: "Digital Flow Meter DN50",
+        quantity: 4,
+        uom: "EA",
+        netPrice: 0,
+        netValue: 0,
+      },
+    ],
+  },
+];
+
+/**
+ * VBAK AUART=AG, with tax as SAP would have calculated it (state 27 supplying
+ * plant to a state-27 customer -> CGST+SGST). Three of them, because the
+ * quotation screen's interesting states are all about *time*: one comfortably
+ * live, one inside the 72-hour warning window, and one that lapsed — which is
+ * the only way the "Request revalidation" path is reachable in a demo.
+ */
+export const SEED_QUOTATIONS: Quotation[] = [
+  {
+    vbeln: "0020000901",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -7),
+    validUntil: shiftDays(SEED_TODAY, 23),
+    inquiry: "0010000795",
+    status: "Open",
+    taxCode: "J1",
+    netValue: 745200,
+    cgst: 67068,
+    sgst: 67068,
+    igst: 0,
+    grossValue: 879336,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20001",
+        description: "Seamless Steel Pipe 2in Sch40",
+        quantity: 1200,
+        uom: "M",
+        netPrice: 621,
+        netValue: 745200,
+      },
+    ],
+  },
+  {
+    vbeln: "0020000884",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -25),
+    // Inside the 72-hour warning window: the countdown chip goes amber.
+    validUntil: shiftDays(SEED_TODAY, 1),
+    status: "Open",
+    taxCode: "J1",
+    netValue: 96052,
+    cgst: 8644.68,
+    sgst: 8644.68,
+    igst: 0,
+    grossValue: 113341.36,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        description: "Pressure Gauge 0-16 bar",
+        quantity: 44,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 96052,
+      },
+    ],
+  },
+  {
+    vbeln: "0020000860",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -60),
+    validUntil: shiftDays(SEED_TODAY, -12),
+    status: "Open",
+    taxCode: "J1",
+    netValue: 425000,
+    cgst: 38250,
+    sgst: 38250,
+    igst: 0,
+    grossValue: 501500,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 10,
+        uom: "EA",
+        netPrice: 42500,
+        netValue: 425000,
+      },
+    ],
+  },
+];
+
+/**
+ * A year of closed trading history for 0010001001 — Module 10's reason for
+ * existing. Doc 05 §7.10 asks for a twelve-month bar chart, a top-products
+ * ranking and an AOV trend, and the orders above span sixty days: every one
+ * of those charts would be one bar and a straight line in a fresh demo,
+ * which is exactly the shape that hides a bug in the bucketing.
+ *
+ * They are all `Closed` deliberately. The dashboard's open-order KPI, the
+ * credit exposure and the orders list's default view are all computed from
+ * this array, and a year of history that quietly trebled every one of them
+ * would be a seed change masquerading as a reporting change.
+ *
+ * The material mix is uneven on purpose: MAT-10001 dominates by value,
+ * MAT-20002 by quantity, and two materials appear once each. A "top
+ * products" chart ranked correctly and one ranked by row count look
+ * identical against a flat mix.
+ */
+const HISTORIC_ORDERS: OrderStatusView[] = [
+  {
+    vbeln: "0000004601",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -330),
+    customerPoRef: "PO-SH-8102",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 636562.5,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 15,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 636562.5,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004602",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -298),
+    customerPoRef: "PO-SH-8149",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 271400,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        description: "Seamless Steel Pipe 4in Sch40",
+        quantity: 250,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 271400,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004603",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -265),
+    customerPoRef: "PO-SH-8203",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 449142.5,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 9,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 381937.5,
+        plant: "1000",
+      },
+      {
+        lineNo: 20,
+        material: "MAT-30001",
+        description: "Nitrile Gasket Set 150mm",
+        quantity: 82,
+        uom: "SET",
+        netPrice: 818.8,
+        netValue: 67141.6,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004604",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -231),
+    customerPoRef: "PO-SH-8266",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 174640,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        description: "Pressure Gauge 0-16 bar",
+        quantity: 80,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 174640,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004605",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -196),
+    customerPoRef: "PO-SH-8321",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 848750,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 20,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 848750,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004606",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -164),
+    customerPoRef: "PO-SH-8390",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 217120,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        description: "Seamless Steel Pipe 4in Sch40",
+        quantity: 200,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 217120,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004607",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -128),
+    customerPoRef: "PO-SH-8452",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 594125,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 14,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 594125,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004608",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -96),
+    customerPoRef: "PO-SH-8517",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 103068,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-30001",
+        description: "Nitrile Gasket Set 150mm",
+        quantity: 126,
+        uom: "SET",
+        netPrice: 818.8,
+        netValue: 103168.8,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    // A cancelled order (ADR-017 leaves every item rejected). It is seeded so
+    // the charts have something to *exclude*: `isReportableOrder` drops it,
+    // and without one here a bug that counted cancellations would be
+    // invisible in every demo and every E2E run.
+    vbeln: "0000004609",
+    kunnr: "0010001001",
+    createdOn: shiftDays(SEED_TODAY, -150),
+    customerPoRef: "PO-SH-8377",
+    orderStatus: "Rejected",
+    creditStatus: "Confirmed",
+    netValue: 1500000,
+    currency: "INR",
+    rejectionReason: "Cancelled at customer request",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        description: "Hydraulic Pump HP-200",
+        quantity: 35,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 1485312.5,
+        plant: "1000",
+      },
+    ],
+  },
+  {
+    vbeln: "0000004650",
+    kunnr: "0010001002",
+    createdOn: shiftDays(SEED_TODAY, -210),
+    customerPoRef: "PO-NR-4402",
+    orderStatus: "Closed",
+    creditStatus: "Confirmed",
+    netValue: 482000,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        description: "Pressure Gauge 0-16 bar",
+        quantity: 221,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 482443,
+        plant: "1000",
+      },
+    ],
+  },
+];
+
 export const SEED_ORDERS: OrderStatusView[] = [
   {
     vbeln: "0000004711",
@@ -402,6 +833,7 @@ export const SEED_ORDERS: OrderStatusView[] = [
       },
     ],
   },
+  ...HISTORIC_ORDERS,
 ];
 
 /**
@@ -411,7 +843,164 @@ export const SEED_ORDERS: OrderStatusView[] = [
  * the warehouse, which is the case where the portal must *not* offer a
  * Confirm Receipt button.
  */
+/**
+ * Shipments for the closed orders above, for the same reason they exist:
+ * docs/03 Module 10 wants an on-time-delivery percentage, and three seeded
+ * deliveries — all of them shipped on their planned date — make that KPI
+ * read 100% forever, which is indistinguishable from a rate that is never
+ * computed at all.
+ *
+ * So two of these went out late (0080001760 by six days, 0080001812 by two)
+ * and one has no planned goods issue at all. The last is the interesting
+ * one: `onTimeDelivery` reports it as `unmeasured` rather than scoring it,
+ * because a delivery with no WADAT to judge against would otherwise let a
+ * tenant's OTD rise by not planning.
+ */
+const HISTORIC_DELIVERIES: Delivery[] = [
+  {
+    vbeln: "0080001702",
+    salesOrder: "0000004601",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -323),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -323),
+    carrier: "BLUEDART",
+    trackingNumber: "BD41120988IN",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -321),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 15,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 636562.5,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001744",
+    salesOrder: "0000004602",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -291),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -292),
+    carrier: "VRL",
+    trackingNumber: "VRL7612044",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -289),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-20002",
+        quantity: 250,
+        uom: "M",
+        netPrice: 1085.6,
+        netValue: 271400,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001760",
+    salesOrder: "0000004603",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -258),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -252),
+    carrier: "GATI",
+    trackingNumber: "GT88120441",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -250),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 9,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 381937.5,
+      },
+      {
+        lineNo: 20,
+        material: "MAT-30001",
+        quantity: 82,
+        uom: "SET",
+        netPrice: 818.8,
+        netValue: 67141.6,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001790",
+    salesOrder: "0000004604",
+    kunnr: "0010001001",
+    status: "Delivered",
+    // No WADAT — a rush order despatched without a planned date.
+    actualGoodsIssue: shiftDays(SEED_TODAY, -226),
+    carrier: "BLUEDART",
+    trackingNumber: "BD44902117IN",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -224),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-50001",
+        quantity: 80,
+        uom: "EA",
+        netPrice: 2183,
+        netValue: 174640,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001812",
+    salesOrder: "0000004605",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -189),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -187),
+    carrier: "VRL",
+    trackingNumber: "VRL7690155",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -185),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 20,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 848750,
+      },
+    ],
+  },
+  {
+    vbeln: "0080001855",
+    salesOrder: "0000004607",
+    kunnr: "0010001001",
+    status: "Delivered",
+    plannedGoodsIssue: shiftDays(SEED_TODAY, -121),
+    actualGoodsIssue: shiftDays(SEED_TODAY, -121),
+    carrier: "GATI",
+    trackingNumber: "GT88451209",
+    podConfirmed: true,
+    podReceiptDate: shiftDays(SEED_TODAY, -119),
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10001",
+        quantity: 14,
+        uom: "EA",
+        netPrice: 42437.5,
+        netValue: 594125,
+      },
+    ],
+  },
+];
+
 export const SEED_DELIVERIES: Delivery[] = [
+  ...HISTORIC_DELIVERIES,
   {
     vbeln: "0080001901",
     salesOrder: "0000004711",
@@ -561,6 +1150,62 @@ export const SEED_INVOICES: Invoice[] = [
     pdfUrl: "/mock/sap/billing/0090002140.pdf",
   },
   /**
+   * Three settled invoices earlier in the same fiscal year (FY 2026-27 starts
+   * 1 April). They exist for Module 9: a loyalty tier is computed from VBRK
+   * over the fiscal year, and an account whose whole seeded history is the
+   * last two months sits at the entry tier forever, which makes the tier card
+   * and its progress bar untestable in a fresh demo. They are all cleared, so
+   * nothing about aging, the open-item list or the payable set changes.
+   */
+  {
+    vbeln: "0090002085",
+    billingDate: shiftDays(SEED_TODAY, -106),
+    reference: "0080001702",
+    kunnr: "0010001001",
+    billingType: "F2",
+    taxableAmount: 2480000,
+    cgst: 223200,
+    sgst: 223200,
+    igst: 0,
+    grossAmount: 2926400,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -76),
+    status: "Paid",
+    pdfUrl: "/mock/sap/billing/0090002085.pdf",
+  },
+  {
+    vbeln: "0090002110",
+    billingDate: shiftDays(SEED_TODAY, -81),
+    reference: "0080001744",
+    kunnr: "0010001001",
+    billingType: "F2",
+    taxableAmount: 1860000,
+    cgst: 167400,
+    sgst: 167400,
+    igst: 0,
+    grossAmount: 2194800,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -51),
+    status: "Paid",
+    pdfUrl: "/mock/sap/billing/0090002110.pdf",
+  },
+  {
+    vbeln: "0090002165",
+    billingDate: shiftDays(SEED_TODAY, -42),
+    reference: "0080001821",
+    kunnr: "0010001001",
+    billingType: "F2",
+    taxableAmount: 1795000,
+    cgst: 161550,
+    sgst: 161550,
+    igst: 0,
+    grossAmount: 2118100,
+    currency: "INR",
+    dueDate: shiftDays(SEED_TODAY, -12),
+    status: "Paid",
+    pdfUrl: "/mock/sap/billing/0090002165.pdf",
+  },
+  /**
    * A credit note (VBRK-FKART G2) against the overdue invoice above — short
    * delivery, reason code 003. Screen 6.2 has a tab for these, and without a
    * seeded one the whole tab would be permanently empty in every demo. It
@@ -629,6 +1274,40 @@ export const SEED_OPEN_ITEMS: OpenItem[] = [
     status: "Cleared",
     clearingDocument: "1400000921",
   },
+  /** The FI side of the three settled invoices above — cleared, nothing open. */
+  {
+    documentNumber: "0090002085",
+    documentType: "RV",
+    postingDate: shiftDays(SEED_TODAY, -106),
+    dueDate: shiftDays(SEED_TODAY, -76),
+    amount: 2926400,
+    openAmount: 0,
+    currency: "INR",
+    status: "Cleared",
+    clearingDocument: "1400000904",
+  },
+  {
+    documentNumber: "0090002110",
+    documentType: "RV",
+    postingDate: shiftDays(SEED_TODAY, -81),
+    dueDate: shiftDays(SEED_TODAY, -51),
+    amount: 2194800,
+    openAmount: 0,
+    currency: "INR",
+    status: "Cleared",
+    clearingDocument: "1400000911",
+  },
+  {
+    documentNumber: "0090002165",
+    documentType: "RV",
+    postingDate: shiftDays(SEED_TODAY, -42),
+    dueDate: shiftDays(SEED_TODAY, -12),
+    amount: 2118100,
+    openAmount: 0,
+    currency: "INR",
+    status: "Cleared",
+    clearingDocument: "1400000918",
+  },
   /**
    * The credit note's FI side: a negative posting (BSEG posting key 15) that
    * reduces what the customer owes. It is left open rather than cleared, so
@@ -653,7 +1332,59 @@ export const SEED_OPEN_ITEM_OWNER: Record<string, string> = {
   "0090002190": "0010001001",
   "0090002140": "0010001001",
   "0090002250": "0010001001",
+  "0090002085": "0010001001",
+  "0090002110": "0010001001",
+  "0090002165": "0010001001",
   "0090002205": "0010001002",
 };
+
+/**
+ * KONA rebate agreements (docs/03 Screen 9.2).
+ *
+ * One live agreement for the demo account, so the rebate card has something to
+ * render, and one that lapsed at the end of the previous fiscal year — the
+ * screen shows only the live ones, and an "expired" row nobody filtered would
+ * otherwise be indistinguishable in a demo from a filter that doesn't work.
+ * 0010001002 has none, which is the empty state.
+ */
+export const SEED_REBATES: RebateAgreement[] = [
+  {
+    agreementNumber: "0000801234",
+    kunnr: "0010001001",
+    agreementType: "0002",
+    description: "Annual volume rebate — MRO consumables",
+    validFrom: "2026-04-01",
+    validTo: "2027-03-31",
+    // KAWRT: what SAP has accrued so far this year. Not derived from the
+    // seeded invoices on purpose — the accrual is a settlement-run figure,
+    // and a mock that recomputed it would teach the portal a habit it must
+    // not have.
+    accruedAmount: 138034,
+    settlementStatus: "B",
+    currency: "INR",
+  },
+  {
+    agreementNumber: "0000800987",
+    kunnr: "0010001001",
+    agreementType: "0002",
+    description: "Annual volume rebate — MRO consumables (FY 2025-26)",
+    validFrom: "2025-04-01",
+    validTo: "2026-03-31",
+    accruedAmount: 96500,
+    settlementStatus: "D",
+    currency: "INR",
+  },
+  {
+    agreementNumber: "0000801301",
+    kunnr: "0010001003",
+    agreementType: "0003",
+    description: "Growth rebate — structural steel",
+    validFrom: "2026-04-01",
+    validTo: "2027-03-31",
+    accruedAmount: 0,
+    settlementStatus: "B",
+    currency: "INR",
+  },
+];
 
 export { shiftDays };

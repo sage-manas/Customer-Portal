@@ -1,5 +1,6 @@
 import { createSapAdapter, type SapAdapter } from "@cc/adapter-sap";
-import { db } from "@cc/db";
+import { db, getTenantCredential, runWithTenant } from "@cc/db";
+import { instrumentAdapter } from "@cc/observability";
 
 /**
  * Resolves a tenant's `SapAdapter` from its stored connection config.
@@ -10,9 +11,14 @@ import { db } from "@cc/db";
  * service for "the adapter for tenant X"; which driver that is, and where
  * its credentials come from, is not their business.
  *
- * Connection credentials are referenced, never inlined: `credentialsRef`
- * points at the per-tenant encrypted secret (KMS envelope pattern, docs/02
- * §2/§9), which the ecc/s4 drivers resolve when they are built in Phase 7.
+ * Connection secrets come from the per-tenant credential vault
+ * (`@cc/db`, docs/DECISIONS.md ADR-042), decrypted once here and passed
+ * to the adapter factory as plain fields — `@cc/adapter-sap` cannot reach
+ * `@cc/db` itself (`adapters -> domain, config`, never `db`), so this
+ * resolver is the only place envelope decryption and adapter construction
+ * meet. A tenant with no stored credential still resolves: the ecc/s4
+ * drivers are Phase-7 skeletons that fail loudly on first real call
+ * (ADR-006) regardless of what `credentials` holds.
  */
 export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapter> {
   // `tenants` is a platform-plane table, not a tenant-scoped model, so this
@@ -20,7 +26,15 @@ export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapt
   const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
   if (!tenant) throw new Error(`Unknown tenant: ${tenantId}`);
 
-  return createSapAdapter({
+  // TenantCredential *is* tenant-scoped (tenant-middleware.ts), so — like
+  // every other service that touches a tenant-owned model — this resolver
+  // binds its own context rather than assuming a caller already did.
+  const credentials =
+    tenant.sapDriver === "mock"
+      ? null
+      : await runWithTenant(tenantId, () => getTenantCredential(tenantId, "sap"));
+
+  const adapter = createSapAdapter({
     tenantId: tenant.id,
     driver: tenant.sapDriver,
     ecc:
@@ -28,15 +42,20 @@ export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapt
         ? {
             endpoint: process.env.SAP_ECC_ENDPOINT ?? "",
             client: process.env.SAP_ECC_CLIENT ?? "100",
-            credentialsRef: `kms://${tenant.slug}/sap`,
+            credentials: (credentials ?? {}) as Record<string, string>,
           }
         : undefined,
     s4:
       tenant.sapDriver === "s4"
         ? {
             baseUrl: process.env.SAP_S4_BASE_URL ?? "",
-            credentialsRef: `kms://${tenant.slug}/sap`,
+            credentials: (credentials ?? {}) as Record<string, string>,
           }
         : undefined,
   });
+
+  // A span + a structured log per method call, for free, at the one place
+  // every caller of this resolver already passes through (docs/07 B3,
+  // `@cc/observability`'s `instrumentAdapter`).
+  return instrumentAdapter("sap", adapter, { tenantId: tenant.id, driver: tenant.sapDriver });
 }

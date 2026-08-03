@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isSapError, type SapError } from "../errors";
 
 import { MockSapAdapter } from "./driver";
-import { SEED_TODAY } from "./seed";
+import { SEED_DELIVERIES, SEED_TODAY } from "./seed";
 
 const KUNNR = "0010001001";
 /** Deccan Fabricators — seeded at 98% credit utilisation. */
@@ -99,6 +99,28 @@ describe("credit", () => {
   it("derives `available` rather than trusting the stored value", async () => {
     const credit = await adapter().getCreditInfo(KUNNR);
     expect(credit.data.available).toBe(credit.data.creditLimit - credit.data.utilized);
+  });
+});
+
+describe("rebate agreements (KONA)", () => {
+  it("returns the account's agreements, live and lapsed alike", async () => {
+    const read = await adapter().getRebateAgreements(KUNNR);
+    expect(read.data.length).toBeGreaterThan(1);
+    expect(read.data.every((agreement) => agreement.kunnr === KUNNR)).toBe(true);
+    // Filtering by validity is the portal's job, not the driver's — KONA
+    // holds both and the screen decides which it is showing.
+    expect(read.data.some((agreement) => agreement.validTo < "2026-07-26")).toBe(true);
+  });
+
+  it("answers empty for an account with none, rather than not-found", async () => {
+    const read = await adapter().getRebateAgreements(TIGHT_CREDIT_KUNNR);
+    expect(read.data).toEqual([]);
+  });
+
+  it("still refuses a customer that doesn't exist", async () => {
+    await expect(adapter().getRebateAgreements("0009999999")).rejects.toMatchObject({
+      kind: "not_found",
+    });
   });
 });
 
@@ -405,8 +427,14 @@ describe("delivery", () => {
   it("lists a customer's deliveries by KUNNR, newest dispatch first", async () => {
     const deliveries = await adapter().getDeliveries("0010001001");
 
-    expect(deliveries.data.total).toBe(3);
+    // Counted from the seed rather than written in: A6 added a year of
+    // shipping history for this account, and a literal here would have to be
+    // edited every time the landscape grows.
+    expect(deliveries.data.total).toBe(
+      SEED_DELIVERIES.filter((d) => d.kunnr === "0010001001").length,
+    );
     expect(deliveries.data.items.every((d) => d.kunnr === "0010001001")).toBe(true);
+    expect(deliveries.data.total).toBeGreaterThan(3);
   });
 
   it("does not return another customer's deliveries", async () => {
@@ -471,6 +499,170 @@ describe("delivery", () => {
           receiptDate: SEED_TODAY,
           lines: [{ lineNo: 10, receivedQty: 1 }],
         }),
+      );
+      expect(error.kind).toBe("not_found");
+    });
+  });
+});
+
+describe("inquiry & quotation (Module 3)", () => {
+  const inquiry = {
+    kunnr: KUNNR,
+    requiredDeliveryDate: "2026-08-20",
+    validityDays: 30,
+    lines: [{ material: "MAT-10001", quantity: 6, uom: "EA" }],
+  };
+
+  it("creates an inquiry with no prices on it — that is the question it asks", async () => {
+    const created = await adapter().createInquiry(inquiry);
+
+    expect(created.vbeln).toMatch(/^\d{10}$/);
+    expect(created.status).toBe("Open");
+    expect(created.quotation).toBeUndefined();
+    expect(created.lines[0]).toMatchObject({ lineNo: 10, netPrice: 0, netValue: 0 });
+  });
+
+  it("refuses an empty inquiry and a zero quantity, as VA11 would", async () => {
+    const empty = await expectSapError(() => adapter().createInquiry({ ...inquiry, lines: [] }));
+    expect(empty.kind).toBe("validation");
+
+    const zero = await expectSapError(() =>
+      adapter().createInquiry({
+        ...inquiry,
+        lines: [{ material: "MAT-10001", quantity: 0, uom: "EA" }],
+      }),
+    );
+    expect(zero.field).toBe("quantity");
+  });
+
+  it("lists a customer's own inquiries only", async () => {
+    const sap = adapter();
+    const mine = await sap.getInquiries(KUNNR);
+    expect(mine.data.items.every((i) => i.kunnr === KUNNR)).toBe(true);
+
+    const other = await sap.getInquiries(TIGHT_CREDIT_KUNNR);
+    expect(other.data.items.map((i) => i.vbeln)).toEqual(["0010000806"]);
+  });
+
+  it("gives the back office every unanswered inquiry, oldest first", async () => {
+    const queue = await adapter().getInquiryQueue();
+
+    expect(queue.data.items.every((i) => !i.quotation)).toBe(true);
+    // Across accounts: the workbench is a tenant queue, not a customer's list.
+    expect(new Set(queue.data.items.map((i) => i.kunnr)).size).toBeGreaterThan(1);
+    expect(queue.data.items.map((i) => i.vbeln)).toEqual(["0010000806", "0010000801"]);
+  });
+
+  describe("auto-quote (docs/07 A4)", () => {
+    it("answers an inquiry once the sales desk's window has passed", async () => {
+      const sap = new MockSapAdapter({ today: SEED_TODAY, autoQuoteAfterMs: 0 });
+      const created = await sap.createInquiry(inquiry);
+
+      const after = await sap.getInquiry(created.vbeln);
+      expect(after.data.quotation).toBeDefined();
+      expect(after.data.status).toBe("Closed");
+
+      const quotations = await sap.getQuotations(KUNNR);
+      const issued = quotations.data.items.find((q) => q.inquiry === created.vbeln);
+      expect(issued?.lines[0]?.netPrice).toBeGreaterThan(0);
+      // Sharma is in state 27, like the supplying plants: CGST + SGST.
+      expect(issued?.igst).toBe(0);
+      expect(issued?.cgst).toBeGreaterThan(0);
+      expect(issued?.grossValue).toBeGreaterThan(issued!.netValue);
+    });
+
+    it("leaves the inquiry alone while the window is still open", async () => {
+      const sap = new MockSapAdapter({ today: SEED_TODAY, autoQuoteAfterMs: 60_000 });
+      const created = await sap.createInquiry(inquiry);
+
+      expect((await sap.getInquiry(created.vbeln)).data.quotation).toBeUndefined();
+      expect((await sap.getInquiryQueue()).data.items.map((i) => i.vbeln)).toContain(created.vbeln);
+    });
+
+    it("never overrules a quotation the sales desk issued by hand", async () => {
+      const sap = new MockSapAdapter({ today: SEED_TODAY, autoQuoteAfterMs: 0 });
+      const created = await sap.createInquiry(inquiry);
+
+      const manual = await sap.createQuotation({
+        inquiryVbeln: created.vbeln,
+        validUntil: "2026-08-31",
+        lines: [{ lineNo: 10, netPrice: 40000 }],
+      });
+
+      const quotations = await sap.getQuotations(KUNNR);
+      expect(quotations.data.items.filter((q) => q.inquiry === created.vbeln)).toHaveLength(1);
+      expect(manual.lines[0]?.netPrice).toBe(40000);
+      expect(manual.netValue).toBe(240000);
+    });
+  });
+
+  it("refuses to quote an inquiry twice", async () => {
+    const sap = adapter();
+    const error = await expectSapError(() =>
+      sap.createQuotation({ inquiryVbeln: "0010000795", validUntil: "2026-08-31" }),
+    );
+    expect(error.kind).toBe("validation");
+  });
+
+  it("refuses a quotation whose validity has already passed", async () => {
+    const sap = adapter();
+    const error = await expectSapError(() =>
+      sap.createQuotation({ inquiryVbeln: "0010000801", validUntil: "2026-07-01" }),
+    );
+    expect(error.field).toBe("validUntil");
+  });
+
+  it("records a revision request against the document, not a portal row", async () => {
+    const sap = adapter();
+    const revised = await sap.requestQuotationRevision("0020000901", "Can you hold this to 600/M?");
+
+    expect(revised.revisionRequests).toHaveLength(1);
+    expect((await sap.getQuotation("0020000901")).data.revisionRequests?.[0]?.comment).toMatch(
+      /600\/M/,
+    );
+  });
+
+  describe("convertQuoteToOrder (VA01 with reference)", () => {
+    it("creates the order at the quoted prices and closes the quotation", async () => {
+      const sap = adapter();
+      const order = await sap.convertQuoteToOrder({
+        quotationVbeln: "0020000901",
+        shipTo: KUNNR,
+        customerPoRef: "PO-SH-9001",
+      });
+
+      // Copy control: the quoted price is carried, not re-derived.
+      expect(order.lines[0]?.netPrice).toBe(621);
+      expect(order.netValue).toBe(745200);
+
+      const quotation = await sap.getQuotation("0020000901");
+      expect(quotation.data.salesOrder).toBe(order.vbeln);
+      expect(quotation.data.status).toBe("Closed");
+
+      const created = await sap.getOrderStatus(order.vbeln);
+      expect(created.data.kunnr).toBe(KUNNR);
+    });
+
+    it("refuses a second conversion of the same quotation", async () => {
+      const sap = adapter();
+      await sap.convertQuoteToOrder({ quotationVbeln: "0020000901", shipTo: KUNNR });
+
+      const error = await expectSapError(() =>
+        sap.convertQuoteToOrder({ quotationVbeln: "0020000901", shipTo: KUNNR }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("refuses an expired quotation", async () => {
+      const error = await expectSapError(() =>
+        adapter().convertQuoteToOrder({ quotationVbeln: "0020000860", shipTo: KUNNR }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("404s an unknown quotation", async () => {
+      const error = await expectSapError(() =>
+        adapter().convertQuoteToOrder({ quotationVbeln: "0020009999", shipTo: KUNNR }),
       );
       expect(error.kind).toBe("not_found");
     });

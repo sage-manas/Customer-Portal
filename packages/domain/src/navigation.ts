@@ -40,7 +40,8 @@ export type NavIcon =
   | "TrendingUp"
   | "FileCheck"
   | "ShieldCheck"
-  | "Settings";
+  | "Settings"
+  | "AlertTriangle";
 
 export interface NavItem {
   /** Stable key; also the tenant module-toggle key (Tenant.moduleToggles). */
@@ -86,7 +87,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "FileText",
     accent: "inquiry",
     permission: "inquiry:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "quotations",
@@ -95,7 +96,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "FileSignature",
     accent: "inquiry",
     permission: "quotation:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "orders",
@@ -140,7 +141,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Headphones",
     accent: "support",
     permission: "support:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "account",
@@ -149,7 +150,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "Award",
     accent: "loyalty",
     permission: "account:view",
-    status: "planned",
+    status: "live",
   },
   {
     key: "reports",
@@ -158,7 +159,7 @@ export const PORTAL_NAV: readonly NavItem[] = [
     icon: "TrendingUp",
     accent: "report",
     permission: "report:view",
-    status: "planned",
+    status: "live",
   },
 ] as const;
 
@@ -188,16 +189,21 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "FileSignature",
     accent: "inquiry",
     permission: "quotation:issue",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-credit",
-    label: "Credit Release",
+    /** Doc 05 §8 calls this the "credit release queue". A5 builds the desk's
+     * other half — the credit-limit requests customers raise — so the label is
+     * the desk rather than one of its queues; the blocked-order release queue
+     * joins this screen when a tenant-wide read for it exists (see the
+     * @cc/service-loyalty README). */
+    label: "Credit Desk",
     href: "/admin/credit",
     icon: "ShieldCheck",
     accent: "payment",
-    permission: "credit:release",
-    status: "planned",
+    permission: "credit:decide-limit",
+    status: "live",
   },
   {
     key: "admin-tickets",
@@ -206,7 +212,16 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Headphones",
     accent: "support",
     permission: "support:resolve",
-    status: "planned",
+    status: "live",
+  },
+  {
+    key: "admin-exceptions",
+    label: "Exceptions",
+    href: "/admin/exceptions",
+    icon: "AlertTriangle",
+    accent: "payment",
+    permission: "exceptions:view",
+    status: "live",
   },
   {
     key: "admin-settings",

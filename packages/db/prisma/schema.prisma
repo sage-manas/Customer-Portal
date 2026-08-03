@@ -32,6 +32,16 @@ enum PaymentGatewayDriver {
   razorpay
 }
 
+/// External systems whose connection secrets are envelope-encrypted rather
+/// than inlined (docs/DECISIONS.md ADR-042). One tenant may hold at most one
+/// credential per system — a driver switch overwrites it, it does not add
+/// a second row.
+enum CredentialSystem {
+  sap
+  gstn
+  payment_gateway
+}
+
 /// Portal-side payment state (@cc/domain entities/payment.ts). Deliberately
 /// not a CanonicalStatus: those describe SAP documents, and a payment only
 /// becomes one at `posted`. `captured` vs `posted` is the window where money
@@ -46,33 +56,41 @@ enum PaymentState {
 }
 
 model Tenant {
-  id           String   @id @default(cuid())
-  slug         String   @unique
-  name         String
-  customDomain String?  @unique
-  sapDriver    SapDriver @default(mock)
+  id             String               @id @default(cuid())
+  slug           String               @unique
+  name           String
+  customDomain   String?              @unique
+  sapDriver      SapDriver            @default(mock)
   /// GSTIN verification driver (docs/03 Screen 1.2); mock until a tenant
   /// has real GSTN API credentials.
-  gstnDriver   GstnDriver @default(mock)
+  gstnDriver     GstnDriver           @default(mock)
   /// Payment gateway (docs/03 Screen 7.2); mock until a tenant has real
   /// gateway credentials.
   paymentGateway PaymentGatewayDriver @default(mock)
   /// Branding (docs/05 P6): tenants change logo + primary color, not layout.
-  logoUrl      String?
-  primaryColor String?
+  logoUrl        String?
+  primaryColor   String?
   /// Module toggles keyed by NavItem.key (@cc/domain navigation registry).
   /// Absent key = enabled; tenants opt modules *out*.
-  moduleToggles Json    @default("{}")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  moduleToggles  Json                 @default("{}")
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   users               User[]
   onboardingApps      OnboardingApplication[]
   salesOrders         SalesOrder[]
+  inquiryDrafts       InquiryDraft[]
   podConfirmations    PodConfirmation[]
   payments            Payment[]
+  supportTickets      SupportTicket[]
+  ticketCounter       TicketCounter?
+  loyaltyTierSettings LoyaltyTierSetting[]
+  creditLimitRequests CreditLimitRequest[]
   outboxEvents        OutboxEvent[]
+  notifications       Notification[]
   auditLogs           AuditLog[]
+  dataKey             TenantDataKey?
+  credentials         TenantCredential[]
 
   @@map("tenants")
 }
@@ -89,30 +107,33 @@ enum UserRole {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  email     String
+  id                 String     @id @default(cuid())
+  tenantId           String
+  tenant             Tenant     @relation(fields: [tenantId], references: [id])
+  email              String
   /// One user may hold several roles; the JWT carries them all as claims
   /// (docs/02 §3). Permissions are derived from roles in @cc/domain/auth.
-  roles     UserRole[]
+  roles              UserRole[]
   /// scrypt hash, format "scrypt$N$r$p$salt$hash" (see @cc/service-identity).
   /// Null for users provisioned before their credentials are issued.
-  passwordHash String?
-  isActive  Boolean  @default(true)
+  passwordHash       String?
+  isActive           Boolean    @default(true)
   /// docs/05 §8: first-login forced password change.
-  mustChangePassword Boolean @default(false)
-  lastLoginAt DateTime?
-  createdAt DateTime @default(now())
+  mustChangePassword Boolean    @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime   @default(now())
 
-  accountLinks UserAccountLink[]
+  accountLinks  UserAccountLink[]
+  notifications Notification[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
   @@map("users")
 }
 
-/** One user may act for multiple SAP sold-to accounts (KUNNR). */
+/**
+ * One user may act for multiple SAP sold-to accounts (KUNNR).
+ */
 model UserAccountLink {
   id       String @id @default(cuid())
   tenantId String
@@ -134,36 +155,36 @@ enum OnboardingStatus {
 }
 
 model OnboardingApplication {
-  id               String            @id @default(cuid())
-  tenantId         String
-  tenant           Tenant            @relation(fields: [tenantId], references: [id])
-  status           OnboardingStatus  @default(draft)
+  id                   String           @id @default(cuid())
+  tenantId             String
+  tenant               Tenant           @relation(fields: [tenantId], references: [id])
+  status               OnboardingStatus @default(draft)
   /// Shape validated against onboardingWriteSchema (@cc/domain). Partial
   /// while the wizard is in progress; complete from `submitted` onwards.
-  data             Json
+  data                 Json
   /// Unguessable bearer handle for the applicant, who has no session until
   /// their account is created at approval (docs/DECISIONS.md ADR-009).
-  draftToken       String
+  draftToken           String
   /// Denormalized out of `data` purely so they can be indexed: the dupe
   /// guard and the reviewer queue both search on them.
-  contactEmail     String?
-  gstin            String?
+  contactEmail         String?
+  gstin                String?
   /// GSTN verification evidence, captured at verify time (ADR-010).
   /// Shape: GstinVerification (@cc/domain).
-  gstinVerification Json?
+  gstinVerification    Json?
   /// Internal approval fields (docs/03 Screen 1.4), set by the reviewer.
-  salesOrg            String?
-  distributionChannel String?
+  salesOrg             String?
+  distributionChannel  String?
   creditApprovalStatus String?
-  sapCustomerCode  String?
-  rejectionReasons String[]
+  sapCustomerCode      String?
+  rejectionReasons     String[]
   /// Reviewer's note on a Request More Info / Reject decision.
-  reviewNote       String?
-  decidedByUserId  String?
-  submittedAt      DateTime?
-  decidedAt        DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  reviewNote           String?
+  decidedByUserId      String?
+  submittedAt          DateTime?
+  decidedAt            DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   documents OnboardingDocument[]
   events    OnboardingEvent[]
@@ -296,6 +317,52 @@ model SalesOrderLine {
   @@map("sales_order_lines")
 }
 
+/// Inquiry drafts — "Draft/Submit" on docs/05 §7.3.
+///
+/// The whole of the portal's storage for Module 3, and for the reason ADR-016
+/// gives: SAP owns the inquiry (VBAK AUART=IN) and the quotation (AUART=AG),
+/// so neither is mirrored here. A draft has no VBELN, no ATP and no price —
+/// SAP has no concept of it — and once submitted the row is kept solely as
+/// the record of which draft became which inquiry.
+///
+/// Keyed to the sold-to account rather than the user, like the cart and the
+/// order draft (ADR-014): a buyer stages the requirement, a colleague sends it.
+model InquiryDraft {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  customerKunnr String
+  /// VBAK-VBELN once raised in SAP; null while the draft is portal-only.
+  inquiryNumber String?
+  /// Shape validated against inquiryHeaderWriteSchema (@cc/domain), partial
+  /// while the customer is still filling it in.
+  header        Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines InquiryDraftLine[]
+
+  @@unique([tenantId, inquiryNumber])
+  @@index([tenantId])
+  @@index([tenantId, customerKunnr])
+  @@map("inquiry_drafts")
+}
+
+model InquiryDraftLine {
+  id       String       @id @default(cuid())
+  tenantId String
+  draftId  String
+  draft    InquiryDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  lineNo   Int
+  material String
+  quantity Decimal
+  uom      String
+
+  @@unique([tenantId, draftId, lineNo])
+  @@index([tenantId])
+  @@map("inquiry_draft_lines")
+}
+
 /// What the customer said when they signed for a delivery.
 ///
 /// `confirmed` — quantities matched what was dispatched.
@@ -318,26 +385,26 @@ enum PodOutcome {
 /// them from there; these rows are evidence, not a second source of truth
 /// about whether the goods arrived.
 model PodConfirmation {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  id                String     @id @default(cuid())
+  tenantId          String
+  tenant            Tenant     @relation(fields: [tenantId], references: [id])
   /// Sold-to account — the security boundary, as on carts and payments.
-  customerKunnr String
+  customerKunnr     String
   /// LIKP-VBELN. One POD per delivery, enforced below: the portal must not
   /// be able to record a second signature for goods received once.
-  deliveryVbeln String
+  deliveryVbeln     String
   /// LIKP-VGBEL, denormalised so the support ticket A3 raises from a
   /// discrepancy can reference the order without a SAP read from a worker.
-  salesOrder    String
-  outcome       PodOutcome
+  salesOrder        String
+  outcome           PodOutcome
   /// ISO date the customer says the goods arrived (their answer, not ours).
-  receiptDate   DateTime
+  receiptDate       DateTime
   /// Portal-only field (docs/03 Screen 5.2 "Discrepancy notes").
-  notes         String?
+  notes             String?
   /// `@cc/adapter-storage` key for the signed POD scan, when one was uploaded.
-  signedPodKey  String?
+  signedPodKey      String?
   confirmedByUserId String?
-  createdAt     DateTime @default(now())
+  createdAt         DateTime   @default(now())
 
   lines PodConfirmationLine[]
 
@@ -354,16 +421,16 @@ model PodConfirmation {
 /// discrepancy is only meaningful line by line — "short by 3 of MAT-30001",
 /// never "short".
 model PodConfirmationLine {
-  id            String          @id @default(cuid())
-  tenantId      String
+  id             String          @id @default(cuid())
+  tenantId       String
   confirmationId String
-  confirmation  PodConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Cascade)
-  lineNo        Int
-  material      String
+  confirmation   PodConfirmation @relation(fields: [confirmationId], references: [id], onDelete: Cascade)
+  lineNo         Int
+  material       String
   /// LIPS-LFIMG as dispatched, captured at signing time so the evidence still
   /// reads correctly after SAP's own quantity is overwritten by the POD.
-  dispatchedQty Decimal
-  receivedQty   Decimal
+  dispatchedQty  Decimal
+  receivedQty    Decimal
 
   @@unique([tenantId, confirmationId, lineNo])
   @@index([tenantId])
@@ -381,34 +448,34 @@ model PodConfirmationLine {
 /// Once `posted`, the SAP fields below are the *record of the posting*, not a
 /// cache: the statement is always re-read from BSID, never from here.
 model Payment {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  id                String       @id @default(cuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id])
   /// Sold-to account the payment is for — the security boundary, like the
   /// cart and drafts (ADR-014).
-  customerKunnr String
+  customerKunnr     String
   /// Who pressed Pay. Kept for the audit trail; the payment belongs to the
   /// account, so a colleague can see it on the statement.
   initiatedByUserId String?
-  amount        Decimal
-  currency      String   @default("INR")
+  amount            Decimal
+  currency          String       @default("INR")
   /// UPI / NEFT / Card / NetBanking (@cc/domain PAYMENT_MODES).
-  mode          String
-  state         PaymentState @default(initiated)
+  mode              String
+  state             PaymentState @default(initiated)
   /// BSEG-KIDNO — the gateway's reference. Unique per tenant: it is the
   /// idempotency key that stops a replayed webhook posting twice.
-  gatewayReference String?
+  gatewayReference  String?
   /// FI document from the F-28 equivalent posting, once cleared in SAP.
-  fiDocumentNumber String?
+  fiDocumentNumber  String?
   /// Gateway's own failure text. Logged and shown to the back office; the
   /// customer reads the translated copy instead (docs/05 §11).
-  failureReason String?
+  failureReason     String?
   /// Last webhook event applied, so an at-least-once redelivery of the same
   /// event is recognised and ignored (docs/02 §6: idempotent webhooks).
-  lastEventId   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  postedAt      DateTime?
+  lastEventId       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  postedAt          DateTime?
 
   allocations PaymentAllocation[]
 
@@ -462,32 +529,32 @@ enum OutboxState {
 /// registered `@cc/domain` shape and answers "what happened", never "what is
 /// true now". A handler that needs current state re-reads it (ADR-016).
 model OutboxEvent {
-  id        String      @id @default(cuid())
-  tenantId  String
-  tenant    Tenant      @relation(fields: [tenantId], references: [id])
+  id          String      @id @default(cuid())
+  tenantId    String
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
   /// A `DomainEventName` from the @cc/domain registry — never a free string.
-  eventName String
+  eventName   String
   /// Validated against the event's registered Zod schema before it is
   /// written, and again by the worker before a handler sees it.
-  payload   Json
+  payload     Json
   /// The BullMQ queue this routes to, denormalised from the registry so the
   /// relay can batch by queue without loading the domain package per row.
-  queue     String
+  queue       String
   /// Producer-side idempotency key (ADR-023): a producer that runs twice
   /// writes the same key and the second write is a no-op. Consumers dedupe
   /// on their own terms — this key is not theirs.
-  dedupeKey String
-  state     OutboxState @default(pending)
+  dedupeKey   String
+  state       OutboxState @default(pending)
   /// Relay attempts. Bounded by the worker; a row that exhausts them lands
   /// in `failed` for the exception tray rather than spinning forever.
-  attempts  Int         @default(0)
-  lastError String?
+  attempts    Int         @default(0)
+  lastError   String?
   /// When the *fact* occurred — not when it was relayed. An SLA timer must
   /// measure from here (see @cc/domain events.ts).
-  occurredAt  DateTime  @default(now())
+  occurredAt  DateTime    @default(now())
   publishedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   @@unique([tenantId, dedupeKey])
   /// The relay's only query: oldest pending rows first, per tenant.
@@ -509,4 +576,440 @@ model AuditLog {
 
   @@index([tenantId])
   @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// Service & Support (docs/03 Module 8, docs/05 §7.8, docs/07 A3)
+//
+// Portal-owned outright, and the deliberate opposite of orders/deliveries/
+// invoices: doc 03 Screen 8.1 allows either a QM notification or "portal-
+// native ticket per tenant config", and there is no SAP document to defer to
+// while the tenant runs portal-native. ADR-016 is not in tension with this —
+// it says don't mirror what SAP owns, and SAP owns none of this.
+//
+// Enum values mirror the @cc/domain support registry exactly; the registry
+// stays the authority for SLA hours, routing and transitions, and none of
+// that behaviour is duplicated in the database.
+// ---------------------------------------------------------------------------
+
+enum TicketCategory {
+  delivery
+  quality
+  billing
+  product
+  general
+}
+
+enum TicketPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+/// Which O2C document a ticket is about (docs/03 Screen 8.1 "Related doc").
+/// The number is stored, the document is not — it is read from SAP on every
+/// render, exactly as ADR-016 requires.
+enum TicketRelatedDocType {
+  order
+  delivery
+  invoice
+}
+
+model SupportTicket {
+  id             String  @id @default(cuid())
+  tenantId       String
+  tenant         Tenant  @relation(fields: [tenantId], references: [id])
+  /// Human-facing reference (docs/03 Screen 8.2 "Ticket No."), per-tenant
+  /// sequential via TicketCounter. Never the key a URL or a lookup trusts —
+  /// a sequential number leaks a tenant's ticket volume.
+  ticketNo       String
+  /// Sold-to account — the security boundary, as on carts, payments and PODs.
+  /// A ticket belongs to the *account*, so a colleague sees it too.
+  customerKunnr  String
+  /// Null when the portal raised the ticket rather than a person: a POD
+  /// discrepancy auto-ticket has a reporter in its event, but no session.
+  raisedByUserId String?
+
+  category    TicketCategory
+  priority    TicketPriority
+  status      TicketStatus   @default(open)
+  subject     String
+  description String
+
+  relatedDocType   TicketRelatedDocType?
+  relatedDocNumber String?
+
+  /// QMEL-VERAN. A portal user in the tenant back office; null while the
+  /// ticket sits in its routed queue unclaimed.
+  assigneeUserId String?
+
+  /// Customer-visible resolution text (QMEL-IDATE's companion).
+  resolution String?
+
+  /// The SLA clock's start. Distinct from `createdAt` because a reopen
+  /// restarts it: the tenant owes a fresh response to a reopened problem,
+  /// and measuring against the original creation would book every reopened
+  /// ticket as breached on arrival. The deadline itself is *derived* from
+  /// this plus the priority (@cc/domain slaDeadline) and never stored.
+  openedAt   DateTime  @default(now())
+  startedAt  DateTime?
+  resolvedAt DateTime?
+  closedAt   DateTime?
+
+  /// CSAT (docs/05 §7.8 "Rate Resolution (1–5 stars + comment)").
+  rating        Int?
+  ratingComment String?
+
+  /// Set once `support.sla.breached` has been emitted for the current
+  /// openedAt window, so the sweep is idempotent across runs without having
+  /// to ask the outbox what it already wrote. Cleared on reopen.
+  slaBreachedAt DateTime?
+
+  /// Identifies the upstream fact that caused an auto-raised ticket — for A2
+  /// discrepancies, the delivery. Unique per tenant below, which is what
+  /// makes the worker's handler idempotent as ADR-023 requires: a redelivered
+  /// event hits the constraint instead of raising a second ticket.
+  sourceKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments    TicketComment[]
+  attachments TicketAttachment[]
+
+  @@unique([tenantId, ticketNo])
+  @@unique([tenantId, sourceKey])
+  @@index([tenantId])
+  @@index([tenantId, customerKunnr, status])
+  /// The workbench's query: open work, most urgent and oldest first.
+  @@index([tenantId, status, priority, openedAt])
+  @@map("support_tickets")
+}
+
+/// Threaded comments (docs/05 §7.8). Flat by design — a support thread is
+/// read top to bottom, and nesting invites replies nobody sees.
+model TicketComment {
+  id            String        @id @default(cuid())
+  tenantId      String
+  ticketId      String
+  ticket        SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorUserId  String?
+  /// Whether the author acted as the customer or as the tenant's agent, so
+  /// the thread renders sides correctly without re-deriving it from the
+  /// author's current roles — which change.
+  authorIsAgent Boolean       @default(false)
+  body          String
+  /// An internal note is invisible to the customer. Enforced in the service
+  /// (a customer session may never set it, and a customer read never selects
+  /// it), never by the screen that draws the thread.
+  internal      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+
+  attachments TicketAttachment[]
+
+  @@index([tenantId])
+  @@index([tenantId, ticketId, createdAt])
+  @@map("ticket_comments")
+}
+
+/// A file on a ticket or one of its comments, held in `@cc/adapter-storage`
+/// exactly like the signed-POD scan: the bytes never enter Postgres, only the
+/// key does.
+model TicketAttachment {
+  id               String         @id @default(cuid())
+  tenantId         String
+  ticketId         String
+  ticket           SupportTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  /// Null for a file attached when the ticket was raised.
+  commentId        String?
+  comment          TicketComment? @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  storageKey       String
+  fileName         String
+  contentType      String
+  sizeBytes        Int
+  uploadedByUserId String?
+  createdAt        DateTime       @default(now())
+
+  @@unique([tenantId, storageKey])
+  @@index([tenantId])
+  @@index([tenantId, ticketId])
+  @@map("ticket_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Loyalty & Credit (docs/03 Module 9, docs/05 §7.9, docs/07 A5)
+//
+// The module that stores least. SAP owns every number on both screens — KNKK
+// the limit and the exposure, VBRK the year's purchases, KONA the rebate — so
+// the credit position, the loyalty tier and DSO are derived on every read and
+// none of them appears below. What is here is the two things SAP has no answer
+// for: what *this tenant* considers a Gold customer, and a customer's request
+// for a larger limit, which is a portal workflow rather than a SAP document.
+// ---------------------------------------------------------------------------
+
+/// Mirrors LOYALTY_TIERS in the @cc/domain registry, which stays the authority
+/// for the ladder's order, labels and default thresholds.
+enum LoyaltyTierName {
+  bronze
+  silver
+  gold
+  platinum
+}
+
+/// A tenant's own tier threshold, overriding the registry default.
+///
+/// A row per tier rather than a JSON blob on Tenant: the settings screen edits
+/// one number at a time, and the ascending-ladder rule is validated in the
+/// domain (`tierThresholdOverridesSchema`) against whatever set of rows exists.
+/// An absent row means "use the registry default" — tenants override tiers,
+/// they don't restate them, the same opt-*out* convention `moduleToggles` uses.
+model LoyaltyTierSetting {
+  id              String          @id @default(cuid())
+  tenantId        String
+  tenant          Tenant          @relation(fields: [tenantId], references: [id])
+  tier            LoyaltyTierName
+  /// Fiscal-year purchase value (VBRK-NETWR) at which the tier is reached.
+  thresholdAmount Decimal
+  updatedByUserId String?
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([tenantId, tier])
+  @@index([tenantId])
+  @@map("loyalty_tier_settings")
+}
+
+/// Portal-side status of a credit-limit increase request. Deliberately not a
+/// CanonicalStatus: those describe SAP documents, and this is not one. The
+/// domain registry maps each value to the badge status the UI renders.
+enum CreditRequestState {
+  pending
+  approved
+  rejected
+  withdrawn
+}
+
+/// "Request Credit Limit Increase" (docs/03 Screen 9.1, docs/05 §7.9).
+///
+/// The one stored document in Module 9, and it is a *request*, never an
+/// instruction. Approving it records that the tenant's credit desk agreed;
+/// KNKK-KLIMK moves when somebody maintains it in FD32, and the portal has no
+/// adapter method that writes it (ADR-035). Nothing here may therefore be read
+/// as the customer's limit — `getCreditInfo` is the only answer to that, on
+/// every read, like every other SAP-owned number in this module.
+model CreditLimitRequest {
+  id                String  @id @default(cuid())
+  tenantId          String
+  tenant            Tenant  @relation(fields: [tenantId], references: [id])
+  /// Sold-to account the request is for — the security boundary, as on carts,
+  /// payments, PODs and tickets.
+  customerKunnr     String
+  requestedByUserId String?
+
+  requestedLimit Decimal
+  /// KNKK-KLIMK as it stood when the request was raised, captured for the same
+  /// reason the POD stores the dispatched quantity (ADR-026): the desk needs to
+  /// see what was asked *for*, and re-reading the limit later would silently
+  /// rewrite the question once it changes.
+  currentLimit   Decimal
+  justification  String
+
+  state           CreditRequestState @default(pending)
+  /// What the desk actually agreed to, which need not be what was asked — a
+  /// counter-offer is the usual answer to a credit request.
+  approvedLimit   Decimal?
+  decisionNote    String?
+  decidedByUserId String?
+  decidedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  /// The customer's own history, and the "do you already have one open?" check.
+  @@index([tenantId, customerKunnr, state])
+  /// The credit desk's queue: pending work, oldest first.
+  @@index([tenantId, state, createdAt])
+  @@map("credit_limit_requests")
+}
+
+/// Per-tenant ticket sequence.
+///
+/// A counter row rather than a Postgres sequence because sequences are not
+/// tenant-scoped and cannot be: one shared sequence would make TKT-000042
+/// mean "the 42nd ticket on the platform", which both leaks other tenants'
+/// volume and makes a tenant's own numbering full of gaps.
+model TicketCounter {
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  value    Int    @default(0)
+
+  @@map("ticket_counters")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications (docs/05 §6.4, docs/07 A7)
+// ---------------------------------------------------------------------------
+
+enum NotificationSeverity {
+  info
+  success
+  warning
+  critical
+}
+
+/// One bell-inbox row — a rendered notification addressed to one person.
+///
+/// This is the *only* thing A7 stores, and it is not a projection of anything:
+/// a notification is a message that was delivered to a named user at a named
+/// moment, and re-deriving it later would produce different words as soon as
+/// a template changed. The document it talks about is still SAP's or the
+/// support module's, and the row keeps a `href` rather than a copy of it —
+/// clicking re-reads through the normal service, with its normal KUNNR check
+/// and its normal freshness (ADR-016).
+///
+/// Addressed to a **user**, not to an account: the account decides who is
+/// eligible (`customerKunnr`, resolved at fan-out time from the event), but
+/// read/unread is a fact about a person, and two colleagues on one KUNNR
+/// clear their own bells.
+model Notification {
+  id            String  @id @default(cuid())
+  tenantId      String
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
+  /// The recipient. Rows are only ever read by this user.
+  userId        String
+  user          User    @relation(fields: [userId], references: [id])
+  /// The account the notification concerns — null for a back-office row,
+  /// which is about the tenant's work rather than one customer's account.
+  /// Kept so a user who switches accounts can be shown the right bell, and
+  /// so a link followed after a switch is explicable.
+  customerKunnr String?
+
+  /// `DomainEventName` and the template key that rendered this, both from the
+  /// @cc/domain registries. Stored so a copy change is traceable and so the
+  /// same event never renders twice for one user (see the unique below).
+  eventName   String
+  templateKey String
+  /// Outbox row id — the fan-out's idempotency key, and the reason an
+  /// at-least-once relay (ADR-023) cannot produce a second bell row.
+  eventId     String
+
+  severity NotificationSeverity @default(info)
+  title    String
+  body     String
+  /// In-portal deep link (docs/05 §6.4 "each deep-links"). Relative, and
+  /// re-authorised by the route it lands on.
+  href     String
+
+  readAt      DateTime?
+  /// When the email mirror went out, and whether it landed. Null `emailSentAt`
+  /// with a non-null `emailError` is a mirror worth retrying; both null means
+  /// the template never asked for one.
+  emailSentAt DateTime?
+  emailError  String?
+
+  /// The moment the *fact* happened (the event's `occurredAt`), not the moment
+  /// the worker wrote the row. A bell that ordered by relay time would reorder
+  /// itself after a queue backlog.
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  /// The fan-out is idempotent structurally rather than by convention: one
+  /// event renders one row per template per user, and a redelivered job is a
+  /// no-op instead of a second buzz.
+  @@unique([tenantId, userId, eventId, templateKey])
+  /// The bell's only queries: this user's newest, and their unread count.
+  @@index([tenantId, userId, occurredAt])
+  @@index([tenantId, userId, readAt])
+  @@index([tenantId])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Platform operator console (docs/07 B5, docs/DECISIONS.md ADR-045)
+// ---------------------------------------------------------------------------
+
+/// A platform operator — the login for `apps/ops`, and deliberately not a
+/// `User` row with `roles: [platform_operator]`. `User.tenantId` is required
+/// (rule 4: every tenant-owned model carries one), and an operator manages
+/// tenants rather than belonging to one; forcing a pick would either invent a
+/// fake "platform" tenant or make the one genuinely tenant-less login table
+/// pretend to be tenant-scoped. This table is platform-plane, like `Tenant`
+/// itself: not in `TENANT_SCOPED_MODELS`, readable without `runWithTenant`.
+model Operator {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  /// Same scrypt format as `User.passwordHash` (@cc/service-identity), but
+  /// hashed by @cc/service-platform's own copy of that code — a service may
+  /// not import another service (rule 1), and duplicating ~90 lines of
+  /// crypto is the cost of keeping the operator realm genuinely separate.
+  passwordHash       String
+  isActive           Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@map("operators")
+}
+
+/// The per-tenant envelope-encryption data key, wrapped by the platform
+/// master key (docs/DECISIONS.md ADR-042). One row per tenant: it is
+/// generated on first use and never rotated by re-issuing a row — rotation
+/// re-wraps the same key material under a new `keyVersion` instead, so
+/// existing `TenantCredential` ciphertext (encrypted under the data key
+/// itself, not the master key) never needs re-encrypting.
+model TenantDataKey {
+  tenantId String @id
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  /// Base64 AES-256-GCM ciphertext of the random 32-byte data key.
+  wrappedKey String
+  wrapIv     String
+  wrapAuthTag String
+  /// Which master key wrapped this — lets a key rotation identify rows
+  /// still under the old master key without touching credential rows.
+  keyVersion String
+  /// Which MasterKeyProvider produced `keyVersion` ("env" | "kms"), so a
+  /// deploy that switches provider can tell inherited rows apart from new
+  /// ones without guessing from the version string's shape.
+  provider   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenant_data_keys")
+}
+
+/// A tenant's encrypted connection secret for one external system —
+/// SAP/GSTN/payment-gateway credentials move here instead of living inline
+/// in adapter config (ADR-042). Ciphertext is AES-256-GCM under the
+/// tenant's data key (`TenantDataKey`), never the master key directly, so
+/// decrypting one credential never requires touching the master key
+/// provider more than once per data-key unwrap.
+model TenantCredential {
+  id       String           @id @default(cuid())
+  tenantId String
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  system   CredentialSystem
+
+  /// Base64 ciphertext of the credential JSON (an opaque field bag — its
+  /// shape is the concern of the driver that will eventually read it, not
+  /// of the vault).
+  ciphertext String
+  iv         String
+  authTag    String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, system])
+  @@index([tenantId])
+  @@map("tenant_credentials")
 }

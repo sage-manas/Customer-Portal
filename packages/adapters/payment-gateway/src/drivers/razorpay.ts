@@ -29,11 +29,16 @@ import { PaymentGatewayError } from "../errors";
  */
 
 export interface RazorpayConfig {
+  /** Public key id — not a secret, kept alongside the credential bag below. */
   keyId: string;
-  /** Reference to the per-tenant encrypted API secret (docs/02 §9). */
-  credentialsRef: string;
-  /** Webhook signing secret, per tenant. */
-  webhookSecret: string;
+  /**
+   * Decrypted once by the resolving service from the per-tenant credential
+   * vault (`@cc/db`, docs/DECISIONS.md ADR-042): `keySecret` (the API
+   * secret paired with `keyId`) and `webhookSecret` (used by
+   * `verifyWebhookSignature` below). Held here for the adapter's lifetime,
+   * never logged, never round-tripped back to storage.
+   */
+  credentials: { keySecret: string; webhookSecret: string };
   baseUrl?: string;
 }
 
@@ -57,7 +62,7 @@ export class RazorpayGateway implements PaymentGateway {
   verifyWebhookSignature(rawBody: string, signature: string): boolean {
     // Implemented deliberately — see the note above. Razorpay signs the raw
     // body with HMAC-SHA256 (hex) under the webhook secret.
-    const expected = createHmac("sha256", this.config.webhookSecret)
+    const expected = createHmac("sha256", this.config.credentials.webhookSecret)
       .update(rawBody, "utf8")
       .digest("hex");
 

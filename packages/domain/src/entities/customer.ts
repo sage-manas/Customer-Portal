@@ -90,6 +90,30 @@ export interface CreditInfo {
   currency: string;
 }
 
+/**
+ * A rebate agreement and what has accrued under it (KONA — docs/03 Screen
+ * 9.2). Created in VBO1 and settled in VBO2, so the portal only ever reads it:
+ * the accrual is SAP's arithmetic over the billing documents, and a portal
+ * that recomputed it would eventually promise a customer money the tenant's
+ * own settlement run disagrees with.
+ */
+export interface RebateAgreement {
+  /** KONA-KNUMA */
+  agreementNumber: string;
+  kunnr: string;
+  /** KONA-BOART — the agreement type, as the tenant configured it. */
+  agreementType?: string;
+  description: string;
+  /** KONA-BODAT / BODBE, ISO dates. */
+  validFrom: string;
+  validTo: string;
+  /** KONA-KAWRT — accrued to date, not yet settled. */
+  accruedAmount: number;
+  /** KONA-BOSTA — B open, C released for settlement, D settled. */
+  settlementStatus?: string;
+  currency: string;
+}
+
 /** Shipping address a customer may pick as ship-to (VBPA partner SH). */
 export interface ShipToAddress {
   kunnr: string;

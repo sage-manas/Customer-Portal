@@ -286,11 +286,23 @@ export interface InvoiceTax {
 }
 
 /**
+ * The tax-bearing shape of a document. Taken structurally rather than as an
+ * `Invoice` because a quotation carries the same KONV conditions and needs
+ * the same card (docs/05 §7.3 totals card) — and a second implementation of
+ * "which pair did SAP populate?" is exactly the duplication ADR-018 exists
+ * to prevent.
+ */
+export type TaxedDocument = Pick<
+  Invoice,
+  "taxableAmount" | "cgst" | "sgst" | "igst" | "grossAmount" | "currency"
+>;
+
+/**
  * Reads the tax split off a billing document. Which pair is populated is
  * what determines the place of supply: SAP applies JOCG+JOSG when the ship-to
  * state matches the supplying plant's, JOIG when it doesn't (docs/03 Module 6).
  */
-export function invoiceTax(invoice: Invoice): InvoiceTax {
+export function invoiceTax(invoice: TaxedDocument): InvoiceTax {
   const totalTax = round2(invoice.cgst + invoice.sgst + invoice.igst);
   const placeOfSupply: PlaceOfSupply = invoice.igst > 0 ? "inter-state" : "intra-state";
 

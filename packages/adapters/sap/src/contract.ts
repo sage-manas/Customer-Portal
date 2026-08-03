@@ -2,6 +2,9 @@ import type {
   CanonicalCustomer,
   ConfirmPodInput,
   ConfirmPodResult,
+  ConvertQuotationInput,
+  CreateInquiryInput,
+  CreateQuotationInput,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -9,6 +12,7 @@ import type {
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  Inquiry,
   Invoice,
   Material,
   MaterialQuery,
@@ -16,6 +20,8 @@ import type {
   OrderSimulation,
   OrderStatusView,
   Page,
+  Quotation,
+  RebateAgreement,
   SalesOrderResult,
   ShipToAddress,
   StockLevel,
@@ -72,6 +78,14 @@ export interface SapAdapter {
   getShipToAddresses(kunnr: string): Promise<SapRead<ShipToAddress[]>>;
   /** KNKK / credit management API. */
   getCreditInfo(kunnr: string): Promise<SapRead<CreditInfo>>;
+  /**
+   * KONA — the customer's rebate agreements and what has accrued under each
+   * (docs/03 Screen 9.2). A read only: agreements are created in VBO1 and
+   * settled in VBO2, and the accrual is SAP's own arithmetic over the billing
+   * documents. There is deliberately no portal-side equivalent, because a
+   * second computation of money owed to a customer is a second answer.
+   */
+  getRebateAgreements(kunnr: string): Promise<SapRead<RebateAgreement[]>>;
 
   // ---- Master data: catalogue ------------------------------------------
   /** MARA/MAKT reads · API_PRODUCT_SRV. */
@@ -85,6 +99,40 @@ export interface SapAdapter {
     material: string,
     quantity: number,
   ): Promise<SapRead<CustomerPrice>>;
+
+  // ---- Pre-sales: inquiry & quotation -----------------------------------
+  /** VA11 · BAPI_INQUIRY_CREATEFROMDATA2 — the customer's question. */
+  createInquiry(input: CreateInquiryInput): Promise<Inquiry>;
+  /** The inquiries of one sold-to account (docs/03 Screen 3.1). */
+  getInquiries(kunnr: string): Promise<SapRead<Page<Inquiry>>>;
+  getInquiry(vbeln: string): Promise<SapRead<Inquiry>>;
+  /**
+   * Inquiries across the tenant that no quotation answers yet — the
+   * back-office workbench's queue (docs/05 §7.3).
+   *
+   * A separate method rather than an optional KUNNR on `getInquiries`,
+   * deliberately: the customer-plane read must not be one forgotten argument
+   * away from returning every customer's inquiries, and a boundary that
+   * depends on a caller passing a parameter is not a boundary (ADR-025's
+   * reasoning, applied to a read).
+   */
+  getInquiryQueue(): Promise<SapRead<Page<Inquiry>>>;
+  /** VA21 · BAPI_QUOTATION_CREATEFROMDATA2 — sales answering an inquiry. */
+  createQuotation(input: CreateQuotationInput): Promise<Quotation>;
+  getQuotations(kunnr: string): Promise<SapRead<Page<Quotation>>>;
+  getQuotation(vbeln: string): Promise<SapRead<Quotation>>;
+  /**
+   * The customer asking for the quotation to be reworked or revalidated
+   * (docs/05 §7.3). Recorded against the document as sales text — a message
+   * about a SAP document belongs on it, not in a portal table.
+   */
+  requestQuotationRevision(vbeln: string, comment: string): Promise<Quotation>;
+  /**
+   * VA01 with reference to the quotation (copy control). Returns the sales
+   * order exactly as `createSalesOrder` does, because that is what it is —
+   * the reference is how it was created, not a different kind of document.
+   */
+  convertQuoteToOrder(input: ConvertQuotationInput): Promise<SalesOrderResult>;
 
   // ---- Sales documents --------------------------------------------------
   /** BAPI_SALESORDER_CREATEFROMDAT2 in SIMULATE mode — ATP + credit preview. */

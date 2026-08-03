@@ -4,9 +4,12 @@ export {
   handleGatewayWebhook,
   initiatePayment,
   listPayments,
+  listPaymentExceptions,
   listPendingSync,
   postCapturedPayment,
+  reconcilePayment,
   type InitiatedPayment,
+  type PaymentException,
   type WebhookResult,
 } from "./payment-service";
 

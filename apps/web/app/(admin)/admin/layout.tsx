@@ -1,4 +1,5 @@
 import { ADMIN_NAV, visibleNavItems } from "@cc/domain";
+import { unreadNotificationCount } from "@cc/service-notification";
 import { redirect } from "next/navigation";
 
 import { AppShellClient } from "@/components/AppShellClient";
@@ -17,6 +18,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   const tenant = await resolveRequestTenant();
   const navItems = visibleNavItems(ADMIN_NAV, session, tenant?.moduleToggles);
+  // The desk has a bell too — SLA breaches, new inquiries, credit requests.
+  const unread = await unreadNotificationCount({
+    tenantId: session.tenantId,
+    userId: session.userId,
+  });
 
   return (
     <AppShellClient
@@ -24,6 +30,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       tenantName={tenant?.name ?? "CustomerConnect"}
       tenantLogoUrl={tenant?.logoUrl}
       userEmail={session.email}
+      unreadNotifications={unread}
     >
       {children}
     </AppShellClient>

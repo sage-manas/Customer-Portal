@@ -25,6 +25,13 @@ export {
 
 export { createQueueWorker } from "./consumer";
 
+export {
+  startSlaSweepLoop,
+  sweepSlaOnce,
+  type SlaSweepLoop,
+  type SlaSweepResult,
+} from "./sla-sweep";
+
 /**
  * The registry itself, not `./handlers` — importing that barrel registers
  * every handler as a side effect, which is what the worker entrypoint wants

@@ -29,6 +29,103 @@ export interface SalesDocLine {
   confirmedDate?: string;
 }
 
+/**
+ * VA11 / BAPI_INQUIRY_CREATEFROMDATA2 — what the portal sends when a customer
+ * asks for a price (docs/03 Screen 3.1). No price on the line: an inquiry is
+ * the question, and the quotation is where sales answers it.
+ */
+export interface CreateInquiryInput {
+  kunnr: string;
+  /** VBAK-VDATU, ISO date */
+  requiredDeliveryDate: string;
+  /** VBAK-ANGDT — how long the customer needs the quotation to stand for. */
+  validityDays?: number;
+  /** STXH-TDLINE header sales text. */
+  notes?: string;
+  lines: Array<Pick<SalesDocLine, "material" | "quantity" | "uom">>;
+}
+
+export interface Inquiry {
+  /** VBAK-VBELN */
+  vbeln: string;
+  kunnr: string;
+  /** VBAK-ERDAT, ISO date */
+  createdOn: string;
+  requiredDeliveryDate: string;
+  validityDays?: number;
+  notes?: string;
+  /** Derived from VBUK-GBSTK: open until a quotation references it. */
+  status: CanonicalStatus;
+  lines: SalesDocLine[];
+  /**
+   * VBFA — the quotation raised against this inquiry, once sales has issued
+   * one. Its presence is what "Quotation received" means on the list
+   * (docs/05 §7.3); the portal stores no flag of its own for it.
+   */
+  quotation?: string;
+}
+
+/**
+ * VA21 — the sales-side answer (docs/03 Screen 3.2).
+ *
+ * Tax is carried as SAP calculated it (KONV, exactly as on `Invoice`): the
+ * portal never computes GST (docs/02 §5), so a quotation's gross value is
+ * SAP's number or it is nothing.
+ */
+export interface Quotation {
+  /** VBAK-VBELN */
+  vbeln: string;
+  kunnr: string;
+  /** VBAK-ERDAT, ISO date */
+  createdOn: string;
+  /** VBAK-BNDDT — the offer lapses after this date. */
+  validUntil: string;
+  /** VBAK-VGBEL — the inquiry it answers, when it came from one. */
+  inquiry?: string;
+  status: CanonicalStatus;
+  lines: SalesDocLine[];
+  /** VBAP-MWSK1, per line in SAP; uniform across the document in practice. */
+  taxCode?: string;
+  /** VBAK-NETWR — net of tax. */
+  netValue: number;
+  /** KONV-KBETR for JOCG / JOSG / JOIG, as on a billing document (ADR-018). */
+  cgst: number;
+  sgst: number;
+  igst: number;
+  /** Net + tax, the figure the customer commits to. */
+  grossValue: number;
+  currency: string;
+  /** VA01-with-reference: the order this quotation became, once accepted. */
+  salesOrder?: string;
+  /**
+   * Revision requests the customer has sent (docs/05 §7.3 "Request
+   * Revision"). Held on the document as sales text rather than as a portal
+   * row — it is a message about the quotation, and the quotation is SAP's.
+   */
+  revisionRequests?: Array<{ requestedOn: string; comment: string }>;
+}
+
+/** VA21 input — the back-office workbench issuing a quotation. */
+export interface CreateQuotationInput {
+  /** The inquiry being answered (VBAK-VGBEL on the quotation). */
+  inquiryVbeln: string;
+  /** VBAK-BNDDT, ISO date. */
+  validUntil: string;
+  /** Per-line net price. Omitted lines are priced from condition records. */
+  lines?: Array<{ lineNo: number; netPrice: number }>;
+}
+
+/** VA01 with reference to a quotation (copy control). */
+export interface ConvertQuotationInput {
+  quotationVbeln: string;
+  /** VBKD-BSTNK — the customer's own PO reference for the resulting order. */
+  customerPoRef?: string;
+  /** VBAK-VDATU; defaults to the quotation's own required date. */
+  requestedDeliveryDate?: string;
+  /** VBPA-KUNNR partner SH. */
+  shipTo: string;
+}
+
 export interface CreateSalesOrderInput {
   kunnr: string;
   /** VBKD-BSTNK — also the portal idempotency key (docs/02 §4.3). */

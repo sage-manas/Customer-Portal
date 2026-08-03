@@ -29,6 +29,14 @@ export interface TopBarProps {
   onSignOut?: () => void;
   notificationCount?: number;
   /**
+   * The bell. A `<NotificationBell />` wired to the inbox API when the app
+   * passes one; without it the bar falls back to a static bell carrying
+   * `notificationCount`, which is what Storybook and any shell not yet wired
+   * render. The slot exists because fetching belongs to the app — @cc/ui
+   * renders what it is given.
+   */
+  notifications?: React.ReactNode;
+  /**
    * Module-owned controls placed left of the bell — the cart trigger is the
    * first (docs/05 §7.2, persistent drawer). The shell renders whatever it
    * is given and knows nothing about carts.
@@ -47,6 +55,7 @@ export function TopBar({
   onSearch,
   onSignOut,
   notificationCount = 0,
+  notifications,
   actions,
   className,
 }: TopBarProps) {
@@ -98,18 +107,22 @@ export function TopBar({
 
       <div className="ml-auto flex items-center gap-1">
         {actions}
-        <button
-          type="button"
-          aria-label={
-            notificationCount > 0 ? `Notifications (${notificationCount} unread)` : "Notifications"
-          }
-          className="relative rounded-sm p-2 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-        >
-          <Bell aria-hidden className="size-4" strokeWidth={1.75} />
-          {notificationCount > 0 ? (
-            <span className="absolute right-1 top-1 size-2 rounded-pill bg-danger" />
-          ) : null}
-        </button>
+        {notifications ?? (
+          <button
+            type="button"
+            aria-label={
+              notificationCount > 0
+                ? `Notifications (${notificationCount} unread)`
+                : "Notifications"
+            }
+            className="relative rounded-sm p-2 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <Bell aria-hidden className="size-4" strokeWidth={1.75} />
+            {notificationCount > 0 ? (
+              <span className="absolute right-1 top-1 size-2 rounded-pill bg-danger" />
+            ) : null}
+          </button>
+        )}
 
         <div className="relative">
           <button

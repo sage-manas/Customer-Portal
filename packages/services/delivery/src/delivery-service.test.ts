@@ -1,4 +1,4 @@
-import { MockSapAdapter } from "@cc/adapter-sap";
+import { MockSapAdapter, SEED_DELIVERIES } from "@cc/adapter-sap";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -35,7 +35,9 @@ describe("listDeliveries", () => {
   it("returns the account's shipments with their stepper, freshness and all", async () => {
     const result = await listDeliveries(sap(), KUNNR);
 
-    expect(result.total).toBe(3);
+    // Counted from the seed rather than written in: A6 added a year of
+    // shipping history for this account so the reports have a trend to draw.
+    expect(result.total).toBe(SEED_DELIVERIES.filter((d) => d.kunnr === KUNNR).length);
     expect(result.freshness).toBe("live");
     expect(result.syncedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result.deliveries.every((d) => d.stages.length === 5)).toBe(true);
@@ -46,7 +48,10 @@ describe("listDeliveries", () => {
     // consignment that arrived last month is history.
     const result = await listDeliveries(sap(), KUNNR);
 
-    expect(result.deliveries.map((d) => d.status)).toEqual(["Packed", "InTransit", "Delivered"]);
+    // The two in flight lead, and everything behind them is history.
+    const statuses = result.deliveries.map((d) => d.status);
+    expect(statuses.slice(0, 2)).toEqual(["Packed", "InTransit"]);
+    expect(statuses.slice(2).every((status) => status === "Delivered")).toBe(true);
   });
 
   it("flags only the shipments the customer still owes a signature for", async () => {

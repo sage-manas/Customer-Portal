@@ -69,7 +69,11 @@ describe("createSapAdapter", () => {
     const adapter = createSapAdapter({
       tenantId: "t5",
       driver: "ecc",
-      ecc: { endpoint: "wss://agent.example", client: "100", credentialsRef: "kms://t5/sap" },
+      ecc: {
+        endpoint: "wss://agent.example",
+        client: "100",
+        credentials: { username: "sap-rfc-user", password: "sap-rfc-pass" },
+      },
     });
     expect(adapter.driver).toBe("ecc");
     await expect(adapter.getMaterials()).rejects.toSatisfy(

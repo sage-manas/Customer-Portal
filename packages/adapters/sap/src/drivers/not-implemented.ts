@@ -2,6 +2,9 @@ import type {
   CanonicalCustomer,
   ConfirmPodInput,
   ConfirmPodResult,
+  ConvertQuotationInput,
+  CreateInquiryInput,
+  CreateQuotationInput,
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
@@ -9,6 +12,7 @@ import type {
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  Inquiry,
   Invoice,
   Material,
   MaterialQuery,
@@ -16,6 +20,8 @@ import type {
   OrderSimulation,
   OrderStatusView,
   Page,
+  Quotation,
+  RebateAgreement,
   SalesOrderResult,
   ShipToAddress,
   StockLevel,
@@ -65,6 +71,9 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   async getCreditInfo(_kunnr: string): Promise<SapRead<CreditInfo>> {
     this.fail("getCreditInfo");
   }
+  async getRebateAgreements(_kunnr: string): Promise<SapRead<RebateAgreement[]>> {
+    this.fail("getRebateAgreements");
+  }
   async getMaterials(_query?: MaterialQuery): Promise<SapRead<Page<Material>>> {
     this.fail("getMaterials");
   }
@@ -80,6 +89,33 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
     _quantity: number,
   ): Promise<SapRead<CustomerPrice>> {
     this.fail("getCustomerPrice");
+  }
+  async createInquiry(_input: CreateInquiryInput): Promise<Inquiry> {
+    this.fail("createInquiry");
+  }
+  async getInquiries(_kunnr: string): Promise<SapRead<Page<Inquiry>>> {
+    this.fail("getInquiries");
+  }
+  async getInquiry(_vbeln: string): Promise<SapRead<Inquiry>> {
+    this.fail("getInquiry");
+  }
+  async getInquiryQueue(): Promise<SapRead<Page<Inquiry>>> {
+    this.fail("getInquiryQueue");
+  }
+  async createQuotation(_input: CreateQuotationInput): Promise<Quotation> {
+    this.fail("createQuotation");
+  }
+  async getQuotations(_kunnr: string): Promise<SapRead<Page<Quotation>>> {
+    this.fail("getQuotations");
+  }
+  async getQuotation(_vbeln: string): Promise<SapRead<Quotation>> {
+    this.fail("getQuotation");
+  }
+  async requestQuotationRevision(_vbeln: string, _comment: string): Promise<Quotation> {
+    this.fail("requestQuotationRevision");
+  }
+  async convertQuoteToOrder(_input: ConvertQuotationInput): Promise<SalesOrderResult> {
+    this.fail("convertQuoteToOrder");
   }
   async simulateOrder(_input: CreateSalesOrderInput): Promise<OrderSimulation> {
     this.fail("simulateOrder");

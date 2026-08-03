@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import * as React from "react";
 
 import { useCart } from "./CartProvider";
+import { NotificationBellClient } from "./NotificationBellClient";
 
 /**
  * Client wrapper around the `@cc/ui` AppShell.
@@ -25,6 +26,7 @@ export function AppShellClient({
   children,
   banner,
   showCart = false,
+  unreadNotifications = 0,
 }: {
   navItems: NavItem[];
   tenantName: string;
@@ -36,6 +38,8 @@ export function AppShellClient({
   banner?: React.ReactNode;
   /** The back-office shell has no cart; only the customer plane does. */
   showCart?: boolean;
+  /** Seeded on the server so the bell's badge is right on first paint. */
+  unreadNotifications?: number;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -71,6 +75,7 @@ export function AppShellClient({
       onSignOut={signOut}
       banner={banner}
       actions={showCart ? <CartTrigger /> : undefined}
+      notifications={<NotificationBellClient initialUnreadCount={unreadNotifications} />}
     >
       {children}
     </AppShell>

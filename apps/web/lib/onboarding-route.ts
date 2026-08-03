@@ -1,7 +1,13 @@
+import { captureException, getLogger, runWithContext, setContextTenant } from "@cc/observability";
 import { OnboardingError, isOnboardingError } from "@cc/service-onboarding";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
+import "./observability-init";
+
 import { resolveRequestTenant } from "./tenant";
+
+const logger = getLogger("route.onboarding");
 
 /**
  * Shared plumbing for the public onboarding endpoints.
@@ -31,6 +37,10 @@ export class RouteError extends Error {
 export async function resolveTenantId(): Promise<string> {
   const tenant = await resolveRequestTenant();
   if (!tenant) throw new RouteError(404, "We couldn't find a portal at this address.");
+  // The applicant has no session, so this — not `requirePortal`'s
+  // `setContextTenant` call — is where an onboarding request's logs and
+  // adapter spans pick up a tenant (docs/07 B3).
+  setContextTenant(tenant.id);
   return tenant.id;
 }
 
@@ -61,13 +71,24 @@ export function toErrorResponse(error: unknown): NextResponse {
   throw error;
 }
 
-/** Wraps a handler so every route maps errors the same way. */
+/** Wraps a handler so every route maps errors the same way, and carries request context (docs/07 B3). */
 export async function handle(fn: () => Promise<NextResponse>): Promise<NextResponse> {
-  try {
-    return await fn();
-  } catch (error) {
-    return toErrorResponse(error);
-  }
+  const requestId = (await headers()).get("x-request-id") ?? crypto.randomUUID();
+  return runWithContext({ requestId }, async () => {
+    const startedAt = Date.now();
+    try {
+      const response = await fn();
+      logger.info(
+        { status: response.status, durationMs: Date.now() - startedAt },
+        "onboarding request handled",
+      );
+      return response;
+    } catch (error) {
+      logger.error({ err: error, durationMs: Date.now() - startedAt }, "onboarding request failed");
+      captureException(error);
+      return toErrorResponse(error);
+    }
+  });
 }
 
 export { OnboardingError };

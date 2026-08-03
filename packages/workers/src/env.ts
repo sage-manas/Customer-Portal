@@ -22,6 +22,19 @@ const schema = z.object({
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   /** Jobs a single worker runs at once, per queue. */
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  /**
+   * How often the SLA sweep looks for newly-breached tickets. Minutes, not
+   * seconds: an SLA is measured in hours, so a breach noticed a minute late
+   * is indistinguishable from one noticed instantly (ADR-029).
+   */
+  SLA_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  /**
+   * How often the reconciliation sweep retries stuck payments and failed
+   * outbox rows (docs/07 B4). Minutes, not seconds: every exception it would
+   * retry is already visible in `/admin/exceptions`, so a tighter tick only
+   * adds load against SAP and the gateway.
+   */
+  RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
 });
 
 export type WorkerEnv = z.infer<typeof schema>;
@@ -39,6 +52,8 @@ function parseEnv(): WorkerEnv {
     OUTBOX_BATCH_SIZE: process.env.OUTBOX_BATCH_SIZE,
     OUTBOX_MAX_ATTEMPTS: process.env.OUTBOX_MAX_ATTEMPTS,
     WORKER_CONCURRENCY: process.env.WORKER_CONCURRENCY,
+    SLA_SWEEP_INTERVAL_MS: process.env.SLA_SWEEP_INTERVAL_MS,
+    RECONCILIATION_INTERVAL_MS: process.env.RECONCILIATION_INTERVAL_MS,
   });
 
   if (!parsed.success) {

@@ -21,10 +21,13 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
  *   domain -> nothing internal
  *   workers -> services + adapters + db + domain (docs/DECISIONS.md ADR-022)
  *   nothing imports from apps or workers
+ *   observability is a leaf like config, importable by services, adapters,
+ *   db, workers and apps, but not domain or ui (docs/DECISIONS.md ADR-043)
  */
 export const boundariesElements = [
   { type: "domain", pattern: "packages/domain/**" },
   { type: "ui", pattern: "packages/ui/**" },
+  { type: "observability", pattern: "packages/observability/**" },
   /**
    * `packages/services/*` with a capture, not `packages/services/**` — and
    * the same for adapters. The difference is not cosmetic: with `**`, every
@@ -51,16 +54,25 @@ export const boundariesElements = [
 const boundariesRules = [
   { from: "domain", allow: ["config"] },
   { from: "ui", allow: ["domain", "config"] },
-  { from: "services", allow: ["domain", "adapters", "db", "config"] },
-  { from: "adapters", allow: ["domain", "config"] },
-  { from: "db", allow: ["domain", "config"] },
+  { from: "services", allow: ["domain", "adapters", "db", "config", "observability"] },
+  { from: "adapters", allow: ["domain", "config", "observability"] },
+  { from: "db", allow: ["domain", "config", "observability"] },
   { from: "config", allow: [] },
-  { from: "apps", allow: ["ui", "services", "domain", "config"] },
+  { from: "apps", allow: ["ui", "services", "domain", "config", "observability"] },
   // The background layer (ADR-022). It is the only element allowed to touch
   // two services in one file — that is what a relay handler is for — and,
   // like `apps`, nothing may import *from* it, so queue work can never creep
   // back onto the request path.
-  { from: "workers", allow: ["services", "adapters", "db", "domain", "config"] },
+  {
+    from: "workers",
+    allow: ["services", "adapters", "db", "domain", "config", "observability"],
+  },
+  // `observability` has zero *workspace* dependencies, like `config` — it
+  // wraps real npm libraries (pino, OpenTelemetry, Sentry) but never reaches
+  // into another first-party package (ADR-043). `domain` and `ui` are
+  // deliberately left off its allow-list on the *importer* side above: they
+  // stay pure/presentational and never call a logger or open a span.
+  { from: "observability", allow: [] },
 ];
 
 export const baseConfig = tseslint.config(

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { TICKET_CATEGORIES, TICKET_PRIORITIES } from "./entities/support";
+
 /**
  * Domain event registry (docs/07 A1, docs/DECISIONS.md ADR-023).
  *
@@ -131,6 +133,109 @@ export const DOMAIN_EVENTS = {
         .default([]),
       /** The customer's own words, when they left any. */
       notes: z.string().optional(),
+    }),
+  },
+  "inquiry.created": {
+    queue: "notifications",
+    description: "A customer asked for a price; the sales desk owes them a quotation.",
+    schema: sapDocumentEvent.extend({
+      requiredDeliveryDate: z.string().min(1),
+      lineCount: z.number().int().nonnegative(),
+      raisedByUserId: z.string().optional(),
+    }),
+  },
+  "quotation.issued": {
+    queue: "notifications",
+    description: "Sales answered an inquiry — this is doc 05 §6.4's 'quote received' bell entry.",
+    schema: sapDocumentEvent.extend({
+      /** VBAK-VGBEL, when the quotation answers an inquiry rather than standing alone. */
+      inquiry: z.string().min(1).optional(),
+      /** VBAK-BNDDT: A7 warns before this lapses, so it travels with the event. */
+      validUntil: z.string().min(1),
+      grossValue: z.number(),
+      currency: z.string().min(1),
+      issuedByUserId: z.string().optional(),
+    }),
+  },
+  "quotation.accepted": {
+    queue: "notifications",
+    description: "The customer accepted; VA01-with-reference created the sales order.",
+    schema: sapDocumentEvent.extend({
+      salesOrder: z.string().min(1),
+      acceptedByUserId: z.string().optional(),
+    }),
+  },
+  "quotation.revision.requested": {
+    queue: "workflow",
+    description: "The customer wants the quotation reworked (or revalidated after expiry).",
+    schema: sapDocumentEvent.extend({
+      comment: z.string().min(1),
+      /** True when the quotation had already lapsed — doc 05's "Request revalidation". */
+      expired: z.boolean().default(false),
+      requestedByUserId: z.string().optional(),
+    }),
+  },
+  "credit.increase.requested": {
+    queue: "notifications",
+    description: "A customer asked for a larger credit limit; the credit desk owes them an answer.",
+    schema: eventBase.extend({
+      requestId: z.string().min(1),
+      kunnr: z.string().min(1),
+      requestedLimit: z.number().positive(),
+      /** KNKK-KLIMK as it stood when they asked — the desk needs the delta. */
+      currentLimit: z.number().nonnegative(),
+      requestedByUserId: z.string().optional(),
+    }),
+  },
+  "credit.increase.decided": {
+    queue: "notifications",
+    description:
+      "The credit desk answered. Note this says nothing about KNKK — the limit moves in FD32 (ADR-035).",
+    schema: eventBase.extend({
+      requestId: z.string().min(1),
+      kunnr: z.string().min(1),
+      decision: z.enum(["approved", "rejected"]),
+      /** What was agreed, which may be less than was asked. Absent on a decline. */
+      approvedLimit: z.number().positive().optional(),
+      decidedByUserId: z.string().optional(),
+    }),
+  },
+  "support.ticket.created": {
+    queue: "notifications",
+    description: "A ticket exists — tell the customer, and tell the queue it routed to.",
+    schema: eventBase.extend({
+      ticketId: z.string().min(1),
+      ticketNo: z.string().min(1),
+      kunnr: z.string().min(1),
+      category: z.enum(TICKET_CATEGORIES),
+      priority: z.enum(TICKET_PRIORITIES),
+      subject: z.string().min(1),
+      /** Absent when the portal raised it (a POD discrepancy), not a person. */
+      raisedByUserId: z.string().optional(),
+    }),
+  },
+  "support.ticket.resolved": {
+    queue: "notifications",
+    description: "An agent answered; the customer may reopen for 7 days or rate the resolution.",
+    schema: eventBase.extend({
+      ticketId: z.string().min(1),
+      ticketNo: z.string().min(1),
+      kunnr: z.string().min(1),
+      resolvedByUserId: z.string().optional(),
+    }),
+  },
+  "support.sla.breached": {
+    queue: "workflow",
+    description:
+      "A ticket passed its resolution deadline unanswered; A7 escalates (docs/03 Module 8 flow).",
+    schema: eventBase.extend({
+      ticketId: z.string().min(1),
+      ticketNo: z.string().min(1),
+      kunnr: z.string().min(1),
+      priority: z.enum(TICKET_PRIORITIES),
+      /** Deadline that was missed — `occurredAt` is when the sweep noticed. */
+      deadline: z.coerce.date(),
+      assigneeUserId: z.string().optional(),
     }),
   },
 } as const satisfies Record<string, EventDefinition>;

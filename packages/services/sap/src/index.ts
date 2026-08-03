@@ -1,5 +1,4 @@
 export { getSapAdapterForTenant } from "./adapter-resolver";
-export { getDashboardSummary, type DashboardKpis, type DashboardSummary } from "./dashboard";
 
 /**
  * Re-exported so app code can render freshness and translate SAP errors

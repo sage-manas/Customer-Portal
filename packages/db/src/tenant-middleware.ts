@@ -7,7 +7,7 @@ import { getTenantId } from "./tenant-context";
  * Keep in sync with prisma/schema.prisma — add here whenever a new
  * tenant-owned model is added to the schema.
  */
-const TENANT_SCOPED_MODELS = new Set([
+export const TENANT_SCOPED_MODELS = new Set([
   "User",
   "UserAccountLink",
   "OnboardingApplication",
@@ -17,12 +17,23 @@ const TENANT_SCOPED_MODELS = new Set([
   "CartLine",
   "SalesOrder",
   "SalesOrderLine",
+  "InquiryDraft",
+  "InquiryDraftLine",
   "PodConfirmation",
   "PodConfirmationLine",
   "Payment",
   "PaymentAllocation",
+  "SupportTicket",
+  "TicketComment",
+  "TicketAttachment",
+  "TicketCounter",
+  "LoyaltyTierSetting",
+  "CreditLimitRequest",
+  "Notification",
   "OutboxEvent",
   "AuditLog",
+  "TenantDataKey",
+  "TenantCredential",
 ]);
 
 type Args = Record<string, unknown>;

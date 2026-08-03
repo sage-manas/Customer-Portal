@@ -1,13 +1,17 @@
 import { createGstnAdapter, type GstnAdapter } from "@cc/adapter-gstn";
 import { createObjectStorage, type ObjectStorage } from "@cc/adapter-storage";
-import { db } from "@cc/db";
+import { db, getTenantCredential, runWithTenant } from "@cc/db";
+import { instrumentAdapter } from "@cc/observability";
 
 /**
  * Adapter resolution for the onboarding module.
  *
  * GSTN is resolved per tenant from its stored driver setting, exactly like
  * the SAP adapter is (`@cc/service-sap`) — a tenant with real GSTN
- * credentials is a config change, not a code change. Object storage is
+ * credentials is a config change, not a code change. Its API credentials
+ * come from the per-tenant credential vault (`@cc/db`, docs/DECISIONS.md
+ * ADR-042), decrypted once here — `@cc/adapter-gstn` cannot reach `@cc/db`
+ * itself (`adapters -> domain, config`, never `db`). Object storage is
  * platform-wide (see `@cc/adapter-storage` README), so it comes from env.
  *
  * The *SAP* adapter is deliberately not resolved here: it belongs to
@@ -21,17 +25,27 @@ export async function getGstnAdapterForTenant(tenantId: string): Promise<GstnAda
   const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
   if (!tenant) throw new Error(`Unknown tenant: ${tenantId}`);
 
-  return createGstnAdapter({
+  // TenantCredential *is* tenant-scoped, so this resolver binds its own
+  // context rather than assuming a caller already did (same reasoning as
+  // `@cc/service-sap`'s adapter-resolver.ts).
+  const credentials =
+    tenant.gstnDriver === "mock"
+      ? null
+      : await runWithTenant(tenantId, () => getTenantCredential(tenantId, "gstn"));
+
+  const adapter = createGstnAdapter({
     tenantId: tenant.id,
     driver: tenant.gstnDriver,
     api:
       tenant.gstnDriver === "api"
         ? {
             baseUrl: process.env.GSTN_API_BASE_URL ?? "",
-            credentialsRef: `kms://${tenant.slug}/gstn`,
+            credentials: (credentials ?? {}) as Record<string, string>,
           }
         : undefined,
   });
+
+  return instrumentAdapter("gstn", adapter, { tenantId: tenant.id, driver: tenant.gstnDriver });
 }
 
 export function getOnboardingStorage(): ObjectStorage {

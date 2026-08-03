@@ -28,11 +28,15 @@ Import everything from the package root: `import { AppShell, PageHeader, Button,
 - **`ProductCard`** — catalogue card with MATNR in mono, "your price", stock chip, stepper and Add to Cart. Price and stock are **optional props** because doc 05 requires them to load lazily per card; pass `pricingLoading` for the skeleton.
 - **`CartDrawer`** / **`CartButton`** — the persistent cart drawer with line edit, per-line issue rendering, and the split CTA (Request Quote vs Create Order). It renders the issues the service computed and decides nothing.
 
+- **`NotificationBell`** — the bell inbox (docs/05 §6.4). Renders items the app fetched and decides nothing: the severity, the words and the deep link were fixed by the `@cc/domain` template registry when the event was fanned out, so a notification reads the same in the bell, in the email and in any future mirror. The badge is a **count**, not a dot — "you have something" and "you have eleven things" are different messages.
+
 `SapField` also renders a `<select>` when given `options`; the lists themselves (state codes, GST registration types, account groups) come from `@cc/domain`, never from the component.
 
 ## App shell
 
 `AppShell` (top bar + sidebar + scrollable content, max 1440px) serves both the customer portal and the tenant back-office — only the nav items differ (docs/05 §5, §8). `PageHeader` is the standard screen header (title, subtitle, freshness meta, actions).
+
+`TopBar` takes a `notifications` slot — the app passes a wired `NotificationBell`; without one the bar falls back to a static bell carrying `notificationCount`. Fetching belongs to the app, as it does for the cart.
 
 `Sidebar` renders exactly the items it is given: filter them with `visibleNavItems()` from `@cc/domain` on the server, so RBAC and tenant module toggles are applied in one place. Modules that aren't built yet render disabled with a "Soon" chip rather than disappearing — doc 05 §4.2 fixes the module order, and a nav that changes shape every phase disorients pilot tenants. `nav-icons.ts` is the only place the domain layer's icon _names_ meet Lucide components, which is what keeps `@cc/domain` free of UI dependencies.
 

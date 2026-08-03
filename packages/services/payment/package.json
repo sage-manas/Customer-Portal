@@ -21,6 +21,7 @@
     "@cc/config": "workspace:*",
     "@cc/db": "workspace:*",
     "@cc/domain": "workspace:*",
+    "@cc/observability": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {

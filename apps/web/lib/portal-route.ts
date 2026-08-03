@@ -1,13 +1,22 @@
 import type { Permission, SessionClaims } from "@cc/domain";
+import { captureException, getLogger, runWithContext, setContextTenant } from "@cc/observability";
 import { isCatalogueError } from "@cc/service-catalogue";
 import { isDeliveryError } from "@cc/service-delivery";
 import { AuthError, requirePermission } from "@cc/service-identity";
+import { isInquiryError } from "@cc/service-inquiry";
 import { isInvoiceError } from "@cc/service-invoice";
+import { isLoyaltyError } from "@cc/service-loyalty";
 import { isOrderError } from "@cc/service-order";
 import { isPaymentError } from "@cc/service-payment";
+import { isSupportError } from "@cc/service-support";
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 
+import "./observability-init";
+
 import { getSession } from "./session";
+
+const logger = getLogger("route.portal");
 
 /**
  * Guard + error mapping for customer-plane route handlers.
@@ -18,7 +27,12 @@ import { getSession } from "./session";
  * (docs/06 engineering standards, docs/05 §11).
  */
 export async function requirePortal(permission: Permission): Promise<SessionClaims> {
-  return requirePermission(await getSession(), permission);
+  const session = await requirePermission(await getSession(), permission);
+  // Fills in the request context `handlePortal` opened, so every log line
+  // for the rest of this request — including the one below — carries the
+  // tenant (docs/07 B3).
+  setContextTenant(session.tenantId, session.userId);
+  return session;
 }
 
 export function toPortalErrorResponse(error: unknown): NextResponse {
@@ -29,8 +43,11 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
     isCatalogueError(error) ||
     isOrderError(error) ||
     isDeliveryError(error) ||
+    isInquiryError(error) ||
     isInvoiceError(error) ||
-    isPaymentError(error)
+    isLoyaltyError(error) ||
+    isPaymentError(error) ||
+    isSupportError(error)
   ) {
     return NextResponse.json(
       { error: error.message, issues: error.issues, code: error.code },
@@ -40,10 +57,27 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
   throw error;
 }
 
+/**
+ * Every `/api/*` portal route calls this once, so it is the one place a
+ * request id (set by `middleware.ts`, or generated here for the rare
+ * handler middleware doesn't cover) becomes the request context every log
+ * line and adapter span for the rest of the call reads from (docs/07 B3).
+ */
 export async function handlePortal(fn: () => Promise<NextResponse>): Promise<NextResponse> {
-  try {
-    return await fn();
-  } catch (error) {
-    return toPortalErrorResponse(error);
-  }
+  const requestId = (await headers()).get("x-request-id") ?? crypto.randomUUID();
+  return runWithContext({ requestId }, async () => {
+    const startedAt = Date.now();
+    try {
+      const response = await fn();
+      logger.info(
+        { status: response.status, durationMs: Date.now() - startedAt },
+        "portal request handled",
+      );
+      return response;
+    } catch (error) {
+      logger.error({ err: error, durationMs: Date.now() - startedAt }, "portal request failed");
+      captureException(error);
+      return toPortalErrorResponse(error);
+    }
+  });
 }

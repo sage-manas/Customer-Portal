@@ -24,6 +24,11 @@ export default [
       // `next build`/`next dev` with a triple-slash reference that's
       // expected, not a violation.
       "**/next-env.d.ts",
+      // k6 load-test scripts (docs/07 B6): not a workspace package, run by
+      // the k6 binary rather than Node/a bundler, and use k6's own globals
+      // (`__ENV`) that no eslint env here declares. Out of scope for the
+      // boundaries graph the same way `.storybook/**` already is.
+      "loadtest/**",
     ],
   },
 ];
