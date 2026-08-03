@@ -156,6 +156,58 @@ export const baseConfig = tseslint.config(
        * next time the settings drift, CI says so instead of shrugging.
        */
       "boundaries/no-unknown-files": "error",
+      /**
+       * CLAUDE.md rule 5 / doc 09 §5, made mechanical: branching on a role is
+       * an error outside `@cc/domain` (which overrides this rule in its own
+       * config, because the registry is where roles are allowed to be named).
+       *
+       * Both halves are required to match — something *named* like a role on
+       * one side, a role *identifier* on the other. Matching the literal
+       * alone was tried first and fired on `visibility === "customer"` in
+       * `@cc/service-support`, which compares a query plane that happens to
+       * share a word with a role; a rule that has to be suppressed at honest
+       * callsites stops being read. Matching the name alone would be worse
+       * still, silencing nothing and flagging `role === expected` in tests.
+       * The four selectors are the shapes a role check actually takes:
+       * `===`/`!==`, `switch (role)`, `roles.includes("…")` and
+       * `["…"].includes(role)`.
+       */
+      "no-restricted-syntax": [
+        "error",
+        ...(() => {
+          const ROLE_IDS =
+            "super_admin|sap_manager|client_admin|ap_manager|ar_manager|customer|platform_operator|tenant_admin|tenant_sales|tenant_credit|tenant_support|buyer_admin|buyer_user|buyer_view_only";
+          const literal = `Literal[value=/^(${ROLE_IDS})$/]`;
+          const named = "/^([Rr]ole|[Rr]oles|.*[Rr]oles?)$/";
+          const message =
+            "Never branch on a role. Ask hasPermission(session, '...') instead (CLAUDE.md rule 5); roles map to permissions only in @cc/domain/auth.ts.";
+          return [
+            // role === "client_admin" / session.roles[0] !== "customer"
+            {
+              selector: `BinaryExpression[operator=/^([=!]==?)$/][left.name=${named}] > ${literal}`,
+              message,
+            },
+            {
+              selector: `BinaryExpression[operator=/^([=!]==?)$/][left.property.name=${named}] > ${literal}`,
+              message,
+            },
+            // switch (role) { case "ap_manager": }
+            {
+              selector: `SwitchStatement[discriminant.name=${named}] > SwitchCase > ${literal}`,
+              message,
+            },
+            // session.roles.includes("client_admin")
+            {
+              selector: `CallExpression[callee.property.name="includes"][callee.object.property.name=${named}] > ${literal}`,
+              message,
+            },
+            {
+              selector: `CallExpression[callee.property.name="includes"][callee.object.name=${named}] > ${literal}`,
+              message,
+            },
+          ];
+        })(),
+      ],
       "boundaries/element-types": [
         "error",
         {

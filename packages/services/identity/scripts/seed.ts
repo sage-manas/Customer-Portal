@@ -81,16 +81,16 @@ async function main() {
   });
 
   await seedTenantUsers(acme.id, passwordHash, [
-    { email: "buyer@acme.example", roles: ["buyer_admin"], kunnrs: ["0010001001"] },
-    { email: "viewer@acme.example", roles: ["buyer_view_only"], kunnrs: ["0010001001"] },
-    { email: "multi@acme.example", roles: ["buyer_user"], kunnrs: ["0010001001", "0010001002"] },
-    { email: "admin@acme.example", roles: ["tenant_admin"], kunnrs: [] },
-    { email: "credit@acme.example", roles: ["tenant_credit"], kunnrs: [] },
+    { email: "buyer@acme.example", roles: ["customer"], kunnrs: ["0010001001"] },
+    { email: "multi@acme.example", roles: ["customer"], kunnrs: ["0010001001", "0010001002"] },
+    { email: "admin@acme.example", roles: ["client_admin"], kunnrs: [] },
+    { email: "ap@acme.example", roles: ["ap_manager"], kunnrs: [] },
+    { email: "ar@acme.example", roles: ["ar_manager"], kunnrs: [] },
   ]);
 
   await seedTenantUsers(globex.id, passwordHash, [
-    { email: "buyer@globex.example", roles: ["buyer_admin"], kunnrs: ["0010001003"] },
-    { email: "admin@globex.example", roles: ["tenant_admin"], kunnrs: [] },
+    { email: "buyer@globex.example", roles: ["customer"], kunnrs: ["0010001003"] },
+    { email: "admin@globex.example", roles: ["client_admin"], kunnrs: [] },
   ]);
 
   console.log(

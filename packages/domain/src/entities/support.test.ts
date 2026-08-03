@@ -33,8 +33,8 @@ describe("category and priority registries", () => {
   });
 
   it("routes billing questions to credit, not to the support desk", () => {
-    expect(TICKET_CATEGORY_DEFS.billing.routesTo).toBe("tenant_credit");
-    expect(TICKET_CATEGORY_DEFS.delivery.routesTo).toBe("tenant_support");
+    expect(TICKET_CATEGORY_DEFS.billing.routesTo).toBe("ar_manager");
+    expect(TICKET_CATEGORY_DEFS.delivery.routesTo).toBe("client_admin");
   });
 
   it("keeps SLA windows strictly increasing as priority falls", () => {

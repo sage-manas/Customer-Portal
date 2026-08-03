@@ -107,7 +107,7 @@ export function ProvisionForm() {
           placeholder="admin@acme.example"
         />
         <p className="text-[11px] text-text-dim">
-          Issued a tenant_admin login with a one-time password (mock/ecc/s4 driver defaults to
+          Issued a client_admin login with a one-time password (mock/ecc/s4 driver defaults to
           mock).
         </p>
       </div>

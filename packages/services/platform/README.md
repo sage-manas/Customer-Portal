@@ -13,7 +13,7 @@ Framework-free, like every service (ADR-002).
   `./edge` subpath for `apps/ops/middleware.ts`, which runs on the edge
   runtime and cannot import anything that touches `@cc/db`).
 - `createTenant`, `listTenants`, `getTenant` — provisioning. `createTenant`
-  creates the `Tenant` row and its first `tenant_admin` `User` in one call;
+  creates the `Tenant` row and its first `client_admin` `User` in one call;
   it is not `@cc/service-identity`'s `provisionPortalAccess` (that issues a
   _buyer_ login against an existing SAP KUNNR, and a service may not import
   another service, CLAUDE.md rule 1).

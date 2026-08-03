@@ -13,7 +13,7 @@ export default async function NewTenantPage() {
     <main className="mx-auto max-w-lg px-6 py-8">
       <PageHeader
         title="Provision tenant"
-        subtitle="Creates the tenant and its first tenant_admin login. SAP/GSTN/payment-gateway drivers default to mock — switch them from the credential vault once real credentials exist."
+        subtitle="Creates the tenant and its first client_admin login. SAP/GSTN/payment-gateway drivers default to mock — switch them from the credential vault once real credentials exist."
       />
       <div className="mt-6">
         <ProvisionForm />

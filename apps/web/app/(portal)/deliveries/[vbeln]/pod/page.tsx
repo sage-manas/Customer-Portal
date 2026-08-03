@@ -1,3 +1,4 @@
+import { hasPermission } from "@cc/domain";
 import { getPodFormDefaults, isDeliveryError } from "@cc/service-delivery";
 import { getSapAdapterForTenant } from "@cc/service-sap";
 import { PageHeader, SapSyncIndicator, formatDisplayDate } from "@cc/ui";
@@ -27,8 +28,11 @@ export default async function PodPage({ params }: { params: Promise<{ vbeln: str
 
   const { vbeln } = await params;
 
-  // A view-only buyer must not be handed a form they cannot submit.
-  if (!session.roles.some((role) => role !== "buyer_view_only")) redirect(`/deliveries/${vbeln}`);
+  // Nobody is handed a form they cannot submit. Asked as a permission, not
+  // as a role comparison (CLAUDE.md rule 5) — this used to name the role it
+  // wanted to exclude, which meant the five-tier collapse would have silently
+  // opened the form to everyone rather than failing to compile.
+  if (!hasPermission(session, "delivery:confirm-receipt")) redirect(`/deliveries/${vbeln}`);
 
   const sap = await getSapAdapterForTenant(session.tenantId);
   const defaults = await getPodFormDefaults(sap, session.kunnr, vbeln).catch((error: unknown) => {

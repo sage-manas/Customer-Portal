@@ -147,7 +147,7 @@ export const Error: StoryObj = {
   ),
 };
 
-/** `buyer_view_only`: no stepper, no remove, no CTAs. */
+/** No `cart:manage`: no stepper, no remove, no CTAs. */
 export const ReadOnly: StoryObj = {
   render: () => (
     <CartDrawer

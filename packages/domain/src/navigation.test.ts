@@ -1,20 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import { PERMISSIONS, type Role } from "./auth";
-import { ADMIN_NAV, PORTAL_NAV, activeNavItem, visibleNavItems } from "./navigation";
+import { ADMIN_NAV, OPS_NAV, PORTAL_NAV, activeNavItem, visibleNavItems } from "./navigation";
 
 const session = (...roles: Role[]) => ({ roles });
 
 describe("nav registry", () => {
   it("references only real permissions", () => {
     const known = new Set<string>(PERMISSIONS);
-    for (const item of [...PORTAL_NAV, ...ADMIN_NAV]) {
+    for (const item of [...PORTAL_NAV, ...ADMIN_NAV, ...OPS_NAV]) {
       expect(known.has(item.permission), item.key).toBe(true);
     }
   });
 
   it("has unique keys and hrefs", () => {
-    const items = [...PORTAL_NAV, ...ADMIN_NAV];
+    const items = [...PORTAL_NAV, ...ADMIN_NAV, ...OPS_NAV];
     expect(new Set(items.map((i) => i.key)).size).toBe(items.length);
     expect(new Set(items.map((i) => i.href)).size).toBe(items.length);
   });
@@ -37,21 +37,44 @@ describe("nav registry", () => {
 });
 
 describe("visibleNavItems", () => {
-  it("shows a buyer the portal modules but no back-office ones", () => {
-    const visible = visibleNavItems(PORTAL_NAV, session("buyer_user"));
+  it("shows a customer the portal modules but no back-office or ops ones", () => {
+    const visible = visibleNavItems(PORTAL_NAV, session("customer"));
     expect(visible.map((i) => i.key)).toContain("orders");
-    expect(visibleNavItems(ADMIN_NAV, session("buyer_admin"))).toEqual([]);
+    expect(visibleNavItems(ADMIN_NAV, session("customer"))).toEqual([]);
+    expect(visibleNavItems(OPS_NAV, session("customer"))).toEqual([]);
   });
 
-  it("shows the credit team only its own queue", () => {
-    const visible = visibleNavItems(ADMIN_NAV, session("tenant_credit")).map((i) => i.key);
-    expect(visible).toContain("admin-credit");
-    expect(visible).not.toContain("admin-settings");
-    expect(visible).not.toContain("admin-tickets");
+  it("shows each finance desk its own workspace and not the other's", () => {
+    const ap = visibleNavItems(ADMIN_NAV, session("ap_manager")).map((i) => i.key);
+    const ar = visibleNavItems(ADMIN_NAV, session("ar_manager")).map((i) => i.key);
+    expect(ap).toContain("admin-ap");
+    expect(ap).toContain("admin-exceptions");
+    expect(ap).not.toContain("admin-ar");
+    expect(ar).toContain("admin-ar");
+    expect(ar).not.toContain("admin-ap");
+    for (const desk of [ap, ar]) {
+      expect(desk).not.toContain("admin-customers");
+      expect(desk).not.toContain("admin-settings");
+    }
+  });
+
+  it("shows the tenant admin every admin tab", () => {
+    const visible = visibleNavItems(ADMIN_NAV, session("client_admin")).map((i) => i.key);
+    expect(visible).toEqual(ADMIN_NAV.map((i) => i.key));
+  });
+
+  it("shows the SAP manager exactly the two SAP tabs (doc 09 §3.3)", () => {
+    expect(visibleNavItems(OPS_NAV, session("sap_manager")).map((i) => i.key)).toEqual([
+      "ops-sap-config",
+      "ops-sap-health",
+    ]);
+    expect(visibleNavItems(OPS_NAV, session("super_admin")).map((i) => i.key)).toEqual(
+      OPS_NAV.map((i) => i.key),
+    );
   });
 
   it("hides modules a tenant has toggled off, and keeps absent toggles on", () => {
-    const visible = visibleNavItems(PORTAL_NAV, session("buyer_user"), { support: false });
+    const visible = visibleNavItems(PORTAL_NAV, session("customer"), { support: false });
     expect(visible.map((i) => i.key)).not.toContain("support");
     expect(visible.map((i) => i.key)).toContain("invoices");
   });

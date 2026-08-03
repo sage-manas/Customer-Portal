@@ -87,12 +87,11 @@ test.describe("deliveries", () => {
     expect(status).toBe(404);
   });
 
-  test("a view-only buyer can track but cannot sign for goods", async ({ page }) => {
-    await signIn(page, "viewer@acme.example");
-    await page.goto("/deliveries/0080001947");
-
-    await expect(page.getByRole("heading", { name: "Delivery 0080001947" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Confirm receipt" })).toHaveCount(0);
+  test("a session without `delivery:confirm-receipt` cannot sign for goods", async ({ page }) => {
+    // The buyer plane is one role now (doc 09 §1), so the denial worth
+    // asserting is plane-vs-plane: an `ap_manager` session exists in the
+    // tenant and holds no `delivery:confirm-receipt`. The API is the control (docs/05 §4.3).
+    await signIn(page, "ap@acme.example");
 
     const status = await page.evaluate(async () => {
       const response = await fetch("/api/deliveries/0080001947/pod", {

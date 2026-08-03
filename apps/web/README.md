@@ -38,7 +38,7 @@ pnpm --filter @cc/service-identity db:seed
 pnpm --filter web dev
 ```
 
-Then open `http://acme.localhost:3000/login` — the subdomain is what resolves the tenant — and sign in as `buyer@acme.example` / `portal-dev-password`. Other seeded logins: `viewer@acme.example` (view-only, no write CTAs), `multi@acme.example` (two sold-to accounts, exercises the account switcher), `admin@acme.example` (back-office), `buyer@globex.example` (second tenant).
+Then open `http://acme.localhost:3000/login` — the subdomain is what resolves the tenant — and sign in as `buyer@acme.example` / `portal-dev-password`. Other seeded logins, one per role of the five-tier model (docs/09): `multi@acme.example` (a second `customer`, two sold-to accounts, exercises the account switcher), `admin@acme.example` (`client_admin`), `ap@acme.example` (`ap_manager`), `ar@acme.example` (`ar_manager`), `buyer@globex.example` (second tenant).
 
 `http://localhost:3000` also works via `DEFAULT_TENANT_SLUG`.
 

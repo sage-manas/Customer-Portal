@@ -1,20 +1,26 @@
 import type { NavIcon } from "@cc/domain";
 import {
+  Activity,
   AlertTriangle,
   Award,
+  Building2,
   CreditCard,
+  Landmark,
   FileCheck,
   FileSignature,
   FileText,
   Headphones,
   LayoutDashboard,
   Package,
+  PlugZap,
   Receipt,
   Settings,
   ShieldCheck,
   ShoppingCart,
   TrendingUp,
   Truck,
+  Users,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -40,4 +46,10 @@ export const NAV_ICONS: Record<NavIcon, LucideIcon> = {
   ShieldCheck,
   Settings,
   AlertTriangle,
+  Users,
+  Building2,
+  Activity,
+  PlugZap,
+  Landmark,
+  Wallet,
 };

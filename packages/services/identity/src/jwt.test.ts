@@ -13,7 +13,7 @@ const claims: SessionClaims = {
   tenantId: "tnt_1",
   tenantSlug: "acme",
   email: "buyer@acme.example",
-  roles: ["buyer_user"],
+  roles: ["customer"],
   kunnr: "0010001001",
   availableKunnrs: ["0010001001", "0010001002"],
 };
@@ -35,7 +35,7 @@ describe("token issue/verify", () => {
     const { accessToken } = await issueTokens(claims, SECRET);
     const [header, payload, signature] = accessToken.split(".");
     const forged = JSON.parse(Buffer.from(payload!, "base64url").toString());
-    forged.roles = ["tenant_admin"];
+    forged.roles = ["client_admin"];
     const tampered = [
       header,
       Buffer.from(JSON.stringify(forged)).toString("base64url"),
@@ -55,7 +55,7 @@ describe("token issue/verify", () => {
   });
 
   it("reports an expired token distinctly so the UI can say 'sign in again'", async () => {
-    const expired = await new SignJWT({ typ: "access", tenantId: "tnt_1", roles: ["buyer_user"] })
+    const expired = await new SignJWT({ typ: "access", tenantId: "tnt_1", roles: ["customer"] })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject("usr_1")
       .setIssuer("customerconnect-portal")
@@ -73,7 +73,7 @@ describe("token issue/verify", () => {
       tenantId: "tnt_1",
       tenantSlug: "acme",
       email: "x@acme.example",
-      roles: ["buyer_user", "superuser", 42],
+      roles: ["customer", "superuser", 42],
       availableKunnrs: ["0010001001", 7],
     })
       .setProtectedHeader({ alg: "HS256" })
@@ -85,7 +85,7 @@ describe("token issue/verify", () => {
       .sign(new TextEncoder().encode(SECRET));
 
     const session = await verifyToken(token, SECRET);
-    expect(session.roles).toEqual(["buyer_user"]);
+    expect(session.roles).toEqual(["customer"]);
     expect(session.availableKunnrs).toEqual(["0010001001"]);
   });
 

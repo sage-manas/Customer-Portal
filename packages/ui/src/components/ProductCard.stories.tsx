@@ -71,7 +71,7 @@ export const Unpriced: Story = {
   },
 };
 
-/** A `buyer_view_only` session gets no CTA at all (docs/05 §4.3). */
+/** A session without `cart:manage` gets no CTA at all (docs/05 §4.3). */
 export const ReadOnly: Story = {
   args: {
     ...base,

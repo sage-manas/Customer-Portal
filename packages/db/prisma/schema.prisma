@@ -95,7 +95,20 @@ model Tenant {
   @@map("tenants")
 }
 
+/// Five-tier role model (docs/09-RBAC-RESTRUCTURE-PLAN.md §1). The legacy
+/// eight identifiers below are retained for the expand-migrate-contract
+/// rollout (doc 09 §3.2): Phase 1 expands the enum, Phase 2 backfills rows
+/// via `LEGACY_ROLE_MAP` in @cc/domain and then drops them. Nothing may
+/// grant a legacy value.
 enum UserRole {
+  super_admin
+  sap_manager
+  client_admin
+  ap_manager
+  ar_manager
+  customer
+
+  // --- legacy, pending the Phase 2 contract step ---
   platform_operator
   tenant_admin
   tenant_sales

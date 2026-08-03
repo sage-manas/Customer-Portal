@@ -1,6 +1,6 @@
 import { db, runWithTenant } from "@cc/db";
 import type { NotificationAudience, Permission, Role } from "@cc/domain";
-import { isBackOfficeRole, rolesWithPermission } from "@cc/domain";
+import { isBackOfficeRole, isRole, rolesWithPermission } from "@cc/domain";
 
 /**
  * Who hears about an event.
@@ -43,6 +43,21 @@ export interface ResolveRecipientsInput {
   kunnr?: string;
 }
 
+/**
+ * Narrows a stored role list to the roles that exist today.
+ *
+ * The `UserRole` enum is deliberately wider than `Role` while the five-tier
+ * rollout is mid-flight (doc 09 §3.2 expand-migrate-contract): a row written
+ * before the migration may still carry a legacy value. Dropping the unknown
+ * ones rather than casting is the fail-closed direction — a recipient row is
+ * used to *address* a message, so a role nobody can interpret must not travel
+ * with it. The `where` clause above has already decided eligibility; this only
+ * shapes what the caller is handed.
+ */
+function knownRoles(roles: readonly string[]): Role[] {
+  return roles.filter(isRole);
+}
+
 export async function resolveRecipients(
   input: ResolveRecipientsInput,
 ): Promise<NotificationRecipientRow[]> {
@@ -56,7 +71,7 @@ export async function resolveRecipients(
     // confirmation to every buyer on the tenant.
     if (!input.kunnr) return [];
 
-    return runWithTenant(input.tenantId, () =>
+    const rows = await runWithTenant(input.tenantId, () =>
       db.user.findMany({
         where: {
           isActive: true,
@@ -67,16 +82,18 @@ export async function resolveRecipients(
         orderBy: { email: "asc" },
       }),
     );
+    return rows.map((row) => ({ ...row, roles: knownRoles(row.roles) }));
   }
 
   const backOffice = eligibleRoles.filter(isBackOfficeRole);
   if (backOffice.length === 0) return [];
 
-  return runWithTenant(input.tenantId, () =>
+  const rows = await runWithTenant(input.tenantId, () =>
     db.user.findMany({
       where: { isActive: true, roles: { hasSome: backOffice } },
       select: { id: true, email: true, roles: true },
       orderBy: { email: "asc" },
     }),
   );
+  return rows.map((row) => ({ ...row, roles: knownRoles(row.roles) }));
 }

@@ -4,7 +4,7 @@ Docs/07 B5: "minimal but real" — operator auth in its own realm, a tenant
 provisioning wizard, a tenant health dashboard, and a usage read-model, with
 billing behind a stubbed interface. See `docs/DECISIONS.md` ADR-045 for why
 this is a wholly separate realm from `apps/web`'s tenant sessions rather than
-a `User` row with `roles: [platform_operator]`.
+a `User` row with a platform role.
 
 ## What's here
 
@@ -15,7 +15,7 @@ a `User` row with `roles: [platform_operator]`.
 - `/login` — operator sign-in.
 - `/` — tenant list with per-tenant queue depth/exceptions.
 - `/tenants/new` — provisioning form: creates the `Tenant` row and its first
-  `tenant_admin` login in one call, returns a one-time password.
+  `client_admin` login in one call, returns a one-time password.
 - `/tenants/[id]` — health (SAP driver + outbox), usage (composed counts) and
   the billing stub.
 - `/api/auth/*`, `/api/tenants*` — thin route handlers over

@@ -41,7 +41,7 @@ describe("notification fan-out and inbox", () => {
   async function makeUser(
     tenantId: string,
     email: string,
-    roles: ("buyer_admin" | "buyer_user" | "tenant_support")[],
+    roles: ("customer" | "client_admin")[],
     kunnr?: string,
   ) {
     const user = await runWithTenant(tenantId, () =>
@@ -67,16 +67,11 @@ describe("notification fan-out and inbox", () => {
     });
     tenantB = await db.tenant.create({ data: { slug: `ntf-b-${runId}`, name: "Tenant B" } });
 
-    buyer = await makeUser(tenantA.id, `buyer-${runId}@a.example`, ["buyer_admin"], KUNNR);
-    colleague = await makeUser(tenantA.id, `colleague-${runId}@a.example`, ["buyer_user"], KUNNR);
-    otherBuyer = await makeUser(
-      tenantA.id,
-      `other-${runId}@a.example`,
-      ["buyer_user"],
-      OTHER_KUNNR,
-    );
-    agent = await makeUser(tenantA.id, `agent-${runId}@a.example`, ["tenant_support"]);
-    tenantBBuyer = await makeUser(tenantB.id, `buyer-${runId}@b.example`, ["buyer_admin"], KUNNR);
+    buyer = await makeUser(tenantA.id, `buyer-${runId}@a.example`, ["customer"], KUNNR);
+    colleague = await makeUser(tenantA.id, `colleague-${runId}@a.example`, ["customer"], KUNNR);
+    otherBuyer = await makeUser(tenantA.id, `other-${runId}@a.example`, ["customer"], OTHER_KUNNR);
+    agent = await makeUser(tenantA.id, `agent-${runId}@a.example`, ["client_admin"]);
+    tenantBBuyer = await makeUser(tenantB.id, `buyer-${runId}@b.example`, ["customer"], KUNNR);
   });
 
   beforeEach(wipeNotifications);
