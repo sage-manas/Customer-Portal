@@ -29,6 +29,7 @@ const { data, freshness, syncedAt } = await sap.getOrders(kunnr);
 - **Credit** is checked against seeded KNKK exposure; an order over the limit comes back `CreditHold` with nothing confirmed, and a released order consumes exposure.
 - **MOQ**, missing price conditions, unknown ship-to and duplicate GSTIN all fail as SAP would, with the matching message id.
 - **Idempotency** holds for both writes: the same customer PO reference never creates two orders, and the same gateway reference never posts two payments.
+- **Customer change** (`updateCustomer` / XD02) applies a _patch_: fields the caller did not send stay as SAP has them, so a portal edit is safe to run against a master somebody is also maintaining in XD02. `tradeName` is truncated to the registry's KNA1-NAME2 length, and a ship-to that carried the billing address moves with it while separately maintained plants do not.
 - **POD** (`confirmPod` / VLPOD) sets LIKP-KOQUK, overwrites the received quantities and completes the delivery. A short receipt is _accepted_ and reported as a discrepancy — it is a fact, not an invalid input — while a second POD, or one against a delivery that has not been despatched, is refused the way SAP refuses it.
 - **Cross-customer reads** fail as `not_found`, never `forbidden` — the portal must not confirm another customer's document exists.
 

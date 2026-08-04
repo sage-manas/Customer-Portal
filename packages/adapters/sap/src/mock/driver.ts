@@ -8,7 +8,9 @@ import type {
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
+  CustomerPatch,
   CustomerPrice,
+  CustomerUpdateResult,
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
@@ -248,6 +250,38 @@ export class MockSapAdapter implements SapAdapter {
       });
 
       return { kunnr, customer: created };
+    });
+  }
+
+  async updateCustomer(kunnr: string, patch: CustomerPatch): Promise<CustomerUpdateResult> {
+    return this.call(() => {
+      const existing = this.requireCustomer(kunnr);
+
+      // A patch, applied field by field: what the caller did not send stays
+      // as SAP has it. `undefined` therefore means "leave alone" and never
+      // "clear", which is what makes a portal edit safe to run against a
+      // master somebody is also maintaining in XD02.
+      const previousAddress = clone(existing.address);
+
+      if (patch.tradeName !== undefined) {
+        existing.tradeName = truncateToSapLength("tradeName", patch.tradeName);
+      }
+      if (patch.address) existing.address = clone(patch.address);
+      if (patch.contact) existing.contact = clone(patch.contact);
+
+      // A ship-to that *was* the billing address moves with it, as changing
+      // KNA1 does in ECC; one the tenant maintains separately (a plant, a
+      // warehouse) does not. A mock that moved all of them would hide the
+      // difference, and one that moved none would hide the sync entirely.
+      if (patch.address) {
+        for (const shipTo of this.store.shipTos) {
+          if (shipTo.kunnr !== kunnr) continue;
+          if (JSON.stringify(shipTo.address) !== JSON.stringify(previousAddress)) continue;
+          shipTo.address = clone(existing.address);
+        }
+      }
+
+      return { kunnr, customer: clone(existing) };
     });
   }
 

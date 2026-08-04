@@ -1,3 +1,4 @@
+import { registerCustomerAccount } from "@cc/service-customer";
 import { provisionPortalAccess } from "@cc/service-identity";
 import { approveApplication } from "@cc/service-onboarding";
 import { getSapAdapterForTenant } from "@cc/service-sap";
@@ -50,6 +51,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       { ...parsed.data, actorUserId: session.userId },
       sap,
     );
+
+    // The portal's own record of the account, so an approved customer
+    // appears in `/admin/customers` and can be deactivated later (ADR-057).
+    // No `registeredByUserId`: this customer registered themselves, and the
+    // reviewer approving them is a different fact from initiating them.
+    await registerCustomerAccount(session.tenantId, {
+      kunnr: result.kunnr,
+      onboardingApplicationId: id,
+    }).catch(() => undefined);
 
     const access = await provisionPortalAccess({
       tenantId: session.tenantId,

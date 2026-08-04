@@ -224,13 +224,13 @@ export const ADMIN_NAV: readonly NavItem[] = [
     key: "admin-customers",
     /** Doc 09 §3.4. Register/edit/deactivate lives behind `customer:register`
      * rather than a coarser `admin:view`: an AP or AR manager holds the shell
-     * and must not see the customer master. Built in Phase 5. */
+     * and must not see the customer master. */
     label: "Customers",
     href: "/admin/customers",
     icon: "Users",
     accent: "onboard",
     permission: "customer:register",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-ap",

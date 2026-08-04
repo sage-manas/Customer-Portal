@@ -36,6 +36,28 @@ Both go through `runWithTenant`, so another tenant's application is simply **not
 
 `approveApplication` returns `{ application, kunnr, contactEmail, legalEntityName }`; the route handler then calls `@cc/service-identity` to issue portal credentials. Splitting it that way is ADR-011.
 
+### Back-office registration (`back-office-service.ts`, ADR-056)
+
+The tenant admin filling the wizard on a customer's behalf, from
+`/admin/customers/new`. **The same flow with a different credential**, not a
+second flow: every function below is a thin wrapper over the implementation
+the applicant's entry point uses, and the only parameter that changes is how
+the caller proved they may act — a draft token there, a session holding
+`customer:register` here.
+
+| Function                                                | Notes                                                                                                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `startBackOfficeRegistration(tenantId, actorUserId)`    | Records `initiatedByUserId`. The draft token is minted and **never returned**.                                                       |
+| `getBackOfficeRegistration(tenantId, id)`               | 404s an application the back office did not start — including an applicant's own in-flight draft.                                    |
+| `saveBackOfficeStep` / `verifyBackOfficeGstin`          | Same registry, same schemas, same GSTN evidence rule as the public wizard.                                                           |
+| `uploadBackOfficeDocument` / `removeBackOfficeDocument` | Same storage adapter and policy.                                                                                                     |
+| `registerCustomer(tenantId, id, decision, sap)`         | Submit **and** approve in one call: the initiator is the approver, so there is no review gate to wait at. Validation is not skipped. |
+| `listBackOfficeRegistrations(tenantId, actorUserId?)`   | Unfinished registrations — there is no browser-stored draft handle on this side to recover one from.                                 |
+
+The route handler then records the portal's account row
+(`@cc/service-customer`), issues credentials (`@cc/service-identity`) and
+mails them — four owners sequenced in one handler, per ADR-011.
+
 ## Why the SAP adapter is passed in
 
 `services → services` is not an allowed dependency edge, and per-tenant SAP resolution lives in `@cc/service-sap`. Rather than duplicate that resolver, this service takes a `SapAdapter` — the same pattern `getDashboardSummary(adapter, kunnr)` already uses. GSTN and storage _are_ resolved here (`adapters.ts`), because this module owns them.

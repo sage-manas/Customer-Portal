@@ -18,6 +18,7 @@
     "@cc/domain": "workspace:*",
     "@cc/observability": "workspace:*",
     "@cc/service-catalogue": "workspace:*",
+    "@cc/service-customer": "workspace:*",
     "@cc/service-delivery": "workspace:*",
     "@cc/service-health": "workspace:*",
     "@cc/service-identity": "workspace:*",

@@ -8,6 +8,8 @@ The customer portal + tenant back-office (Next.js App Router). Route groups matc
 - `app/api/auth/*` — login, logout, account switch
 - `app/api/onboarding/*` — the applicant's own endpoints (**public**, see below)
 - `app/api/admin/onboarding/*` — reviewer decisions and document downloads
+- `app/api/admin/customers/*` — the tenant's customer directory: list, detail, edit (XD02), and the deactivate/reactivate switch. `registrations/*` under it is the back-office half of the onboarding wizard (ADR-056), guarded by `customer:register` rather than a draft token
+- `components/onboarding/OnboardingWizard.tsx` — one wizard, two planes: `/register` injects the draft-token client, `/admin/customers/new` the session one
 - `app/api/catalogue/*` — the per-card price/stock read (one material per request, per ADR-013)
 - `app/api/cart/*` — the cart. `catalogue:view` reads it, `cart:manage` changes it; the KUNNR comes from the session, so there is no cart id to tamper with
 
@@ -16,6 +18,8 @@ The customer portal + tenant back-office (Next.js App Router). Route groups matc
 1. **`middleware.ts`** (edge runtime) verifies the access-token cookie, checks that the tenant in the host matches the tenant in the JWT claim, and applies the coarse route permission (`/admin/*` needs `admin:view`). A host/claim mismatch rewrites to 404, never 403 — the portal never confirms another tenant's portal exists. It imports `@cc/service-identity/edge`, which contains no Prisma.
 2. **Route handlers and server components** re-check with `requirePermission` / `requireSession` from `@cc/service-identity`. Middleware is a gate so an unauthenticated user gets a redirect instead of a rendered shell; the API is what enforces (docs/05 §4.3).
 3. **Every DB query** runs inside `runWithTenant` in the service layer, so even a bug in the two layers above cannot read another tenant's rows.
+
+`/api/admin/customers/registrations/*` is the mirror image of that exception: same wizard, same registry-derived validation, but a session holding `customer:register` instead of a token — and it 404s any application the back office did not itself start, so a client admin cannot edit an applicant's in-flight draft (ADR-056).
 
 `/api/onboarding/*` is the deliberate exception to step 1: an applicant has no portal user until their account is approved. Those routes are still tenant-scoped by host, and the application is addressed by an unguessable draft token sent as `x-draft-token` — a wrong or missing one is a 404 (docs/DECISIONS.md ADR-009). `/api/admin/onboarding/*` is **not** public and re-checks `onboarding:review` / `onboarding:approve` per handler; the coarse `admin:view` middleware check is not enough, because a support role can see the shell without being allowed to create a customer in SAP.
 

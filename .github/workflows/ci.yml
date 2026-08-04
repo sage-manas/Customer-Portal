@@ -140,10 +140,17 @@ jobs:
       - name: Platform console tests
         run: pnpm --filter @cc/service-platform test:integration
 
-      # The other half of tenant deactivation (ADR-054): the console sets a
-      # flag, and this is what proves `login` refuses because of it.
-      - name: Tenant deactivation tests
+      # The other half of tenant deactivation (ADR-054) *and* of customer
+      # deactivation (ADR-057): both set a flag, and this is what proves
+      # `login` and the account switcher refuse because of it.
+      - name: Deactivation tests (tenant + customer)
         run: pnpm --filter @cc/service-identity test:integration
+
+      # The tenant's customer directory (ADR-057): the list composed from SAP
+      # per read, the edit that reaches XD02, and the deactivation that
+      # blocks new orders while deleting nothing.
+      - name: Customer directory tests
+        run: pnpm --filter @cc/service-customer test:integration
 
       # Proves the seed still matches the schema and the tenant-scoped
       # writes it performs — it is the fixture every future e2e run needs.

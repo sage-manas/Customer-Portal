@@ -322,6 +322,75 @@ describe("customer creation", () => {
   });
 });
 
+describe("customer change (XD02)", () => {
+  it("applies only the fields the patch carries and leaves the rest alone", async () => {
+    const sap = adapter();
+    const before = await sap.getCustomer(KUNNR);
+
+    const result = await sap.updateCustomer(KUNNR, {
+      contact: { ...before.data.contact, email: "newap@acme.example" },
+    });
+
+    expect(result.customer.contact.email).toBe("newap@acme.example");
+    // Untouched by the patch, so untouched in the master.
+    expect(result.customer.address).toEqual(before.data.address);
+    expect(result.customer.tax).toEqual(before.data.tax);
+    expect(result.customer.legalEntityName).toBe(before.data.legalEntityName);
+
+    const after = await sap.getCustomer(KUNNR);
+    expect(after.data.contact.email).toBe("newap@acme.example");
+  });
+
+  it("truncates to the registry's SAP field length, as the change BAPI does", async () => {
+    const sap = adapter();
+    const result = await sap.updateCustomer(KUNNR, {
+      tradeName: "A trade name far longer than KNA1-NAME2 can hold in any client",
+    });
+    // KNA1-NAME2 is CHAR 35 per the sap-mapping registry.
+    expect(result.customer.tradeName).toHaveLength(35);
+  });
+
+  it("moves the ship-to that was the billing address, and leaves the others alone", async () => {
+    const sap = adapter();
+    const created = await sap.createCustomer({
+      legalEntityName: "Ship To Sync Private Limited",
+      customerType: "Z001",
+      address: {
+        street: "1 Old Road",
+        city: "Mumbai",
+        region: "27",
+        postalCode: "400001",
+        country: "IN",
+      },
+      contact: { contactPerson: "S Sync", email: "s@example.test", phone: "+912200000001" },
+      tax: { pan: "AAACS9876A", gstin: "27AAACS9876A1Z2" },
+    });
+
+    const address = {
+      street: "9 New Road",
+      city: "Nashik",
+      region: "27",
+      postalCode: "422001",
+      country: "IN",
+    };
+    await sap.updateCustomer(created.kunnr, { address });
+
+    const shipTos = await sap.getShipToAddresses(created.kunnr);
+    expect(shipTos.data.map((shipTo) => shipTo.address)).toEqual([address]);
+
+    // The seeded account's separately maintained plants are untouched.
+    const untouched = await sap.getShipToAddresses(KUNNR);
+    expect(untouched.data.length).toBeGreaterThan(1);
+  });
+
+  it("404s an unknown customer", async () => {
+    const error = await expectSapError(() =>
+      adapter().updateCustomer("0000000000", { tradeName: "Nobody" }),
+    );
+    expect(error.kind).toBe("not_found");
+  });
+});
+
 describe("billing and AR", () => {
   it("returns only the requested customer's invoices, newest first", async () => {
     const invoices = await adapter().getInvoices(KUNNR);

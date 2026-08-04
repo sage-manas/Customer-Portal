@@ -1,4 +1,4 @@
-import { db, runWithTenant } from "@cc/db";
+import { activeCustomerKunnrs, db, isCustomerAccountActive, runWithTenant } from "@cc/db";
 import type { Role, SessionClaims } from "@cc/domain";
 
 import { AuthError } from "./errors";
@@ -135,7 +135,17 @@ export async function login(input: LoginInput, authSecret: string): Promise<Logi
   if (!user || !passwordOk) throw new AuthError("invalid_credentials");
   if (!user.isActive) throw new AuthError("account_inactive");
 
-  const availableKunnrs = user.accountLinks.map((link) => link.sapKunnr).sort();
+  const linkedKunnrs = user.accountLinks.map((link) => link.sapKunnr).sort();
+  // The teeth behind the tenant admin's Deactivate button (ADR-057), in the
+  // same place as the tenant-level one and for the same reason: refusing a
+  // sign-in is identity's decision. A user linked to accounts that are all
+  // switched off has nothing to sign in *to* — the portal is entirely
+  // KUNNR-scoped — so they are refused rather than shown an empty shell.
+  // Back-office and platform users have no links at all and are unaffected.
+  const availableKunnrs = await runWithTenant(tenant.id, () => activeCustomerKunnrs(linkedKunnrs));
+  if (linkedKunnrs.length > 0 && availableKunnrs.length === 0) {
+    throw new AuthError("account_inactive");
+  }
   const session: SessionClaims = {
     userId: user.id,
     tenantId: tenant.id,
@@ -172,6 +182,12 @@ export async function switchAccount(
     db.userAccountLink.findFirst({ where: { userId: session.userId, sapKunnr: kunnr } }),
   );
   if (!link) throw new AuthError("forbidden");
+
+  // Re-checked here rather than trusted from the claim: `availableKunnrs`
+  // was filtered when the token was issued, and a deactivation since then is
+  // exactly the case this catches (ADR-057).
+  const active = await runWithTenant(session.tenantId, () => isCustomerAccountActive(kunnr));
+  if (!active) throw new AuthError("account_inactive");
 
   const next: SessionClaims = { ...session, kunnr };
   return { session: next, tokens: await issueTokens(next, authSecret) };

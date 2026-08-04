@@ -25,6 +25,24 @@ export {
   type UploadDocumentInput,
 } from "./onboarding-service";
 
+/**
+ * The back-office entry point (ADR-056). Deliberately a separate export
+ * block from a separate file: a route handler reaches for one plane's
+ * functions or the other's, never one function with a flag.
+ */
+export {
+  getBackOfficeRegistration,
+  listBackOfficeRegistrations,
+  registerCustomer,
+  removeBackOfficeDocument,
+  saveBackOfficeStep,
+  startBackOfficeRegistration,
+  uploadBackOfficeDocument,
+  verifyBackOfficeGstin,
+  type RegisterCustomerDecision,
+  type StartBackOfficeRegistrationResult,
+} from "./back-office-service";
+
 export { toCanonicalCustomer } from "./to-canonical-customer";
 
 /**

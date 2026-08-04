@@ -74,6 +74,29 @@ export interface CustomerCreateResult {
 }
 
 /**
+ * A partial change to an existing customer master (XD02 / BP PATCH).
+ *
+ * Everything is optional and the tax identifiers are absent entirely: what
+ * may be changed from the portal is the tenant-facing registry
+ * `CUSTOMER_EDITABLE_FIELDS` (entities/customer-account.ts), and this type is
+ * the adapter-side statement of the same boundary — a driver cannot be asked
+ * to write a GSTIN because there is nowhere to put one.
+ */
+export interface CustomerPatch {
+  /** KNA1-NAME2 */
+  tradeName?: string;
+  address?: CanonicalAddress;
+  contact?: CanonicalContact;
+}
+
+/** Result of a change-customer write. */
+export interface CustomerUpdateResult {
+  kunnr: string;
+  /** Echo of what SAP stored after applying the patch, truncation included. */
+  customer: CanonicalCustomer;
+}
+
+/**
  * Credit position (KNKK). `available` is computed, not read — SAP exposes
  * limit and exposure; the portal derives the rest (docs/03 Screen 9.1).
  */

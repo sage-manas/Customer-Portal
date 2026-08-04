@@ -564,6 +564,97 @@ const WEB_ROUTES: readonly ApiRoute[] = [
     scope: "tenant",
     note: "Rejecting is a decision on the application, so it needs the approver's permission, not the reviewer's.",
   },
+  // Customer directory (doc 09 §3.4). Reads are guarded by
+  // `customer:register` — the permission the Customers tab itself declares —
+  // rather than by a `customer:view` that doc 09 §2 does not define. All
+  // three `customer:*` leaves are held by `client_admin` alone, so this is a
+  // naming choice and not a widening: an `ap_manager` holding `admin:view`
+  // is refused by every row below.
+  {
+    plane: "web",
+    path: "/api/admin/customers",
+    method: "GET",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/[kunnr]",
+    method: "GET",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+    note: "The KUNNR is checked against the tenant's own account rows before SAP is read; a miss is 404, not 403.",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/[kunnr]",
+    method: "PATCH",
+    guard: { kind: "permission", permission: "customer:edit" },
+    scope: "tenant",
+    note: "Writes the SAP customer master (XD02), bounded by CUSTOMER_EDITABLE_FIELDS — PAN and GSTIN are not in the schema (ADR-057).",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/[kunnr]/status",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:deactivate" },
+    scope: "tenant",
+    note: "Carries the target state, both directions, no DELETE — the same shape as the console's tenant switch (ADR-054, ADR-057).",
+  },
+  // Back-office registration (ADR-056): the same wizard as `/api/onboarding`,
+  // reached with a session instead of a draft token. Every row guards
+  // `customer:register`, because filling the form on a customer's behalf and
+  // creating them are one capability, not five.
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]",
+    method: "GET",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/step/[step]",
+    method: "PUT",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/gstin-verify",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/documents/[kind]",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/documents/[kind]",
+    method: "DELETE",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/complete",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+    note: "Submit + approve in one call: the initiator is the approver, so there is no review gate to wait at (ADR-056).",
+  },
   {
     plane: "web",
     path: "/api/admin/quotations",

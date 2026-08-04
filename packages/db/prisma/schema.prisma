@@ -84,6 +84,7 @@ model Tenant {
   updatedAt      DateTime             @updatedAt
 
   users               User[]
+  customerAccounts    CustomerAccount[]
   onboardingApps      OnboardingApplication[]
   salesOrders         SalesOrder[]
   inquiryDrafts       InquiryDraft[]
@@ -166,6 +167,55 @@ model UserAccountLink {
   @@map("user_account_links")
 }
 
+/// The portal's side of a customer account (doc 09 §3.4, ADR-057).
+///
+/// SAP owns the customer master; this row owns the one fact SAP has nowhere
+/// to put — whether this sold-to may still *use the portal*. Deactivation is
+/// therefore a portal decision with portal consequences (no login, no new
+/// orders) and no effect whatsoever in SAP, which keeps receiving goods and
+/// posting invoices for an account the tenant has switched off here.
+///
+/// Keyed by KUNNR rather than by user, because a user may act for several
+/// accounts and an account may be reachable by several users: revoking one
+/// person's login is `User.isActive`, and this is the other question.
+///
+/// Like the tenant's own flag (ADR-054) there is no delete: the O2C history
+/// under this KUNNR is the portal's half of documents SAP has already
+/// posted.
+model CustomerAccount {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  /// KNA1-KUNNR. The account's identity everywhere else in the portal.
+  sapKunnr String
+
+  isActive            Boolean   @default(true)
+  deactivatedAt       DateTime?
+  /// `User.id` of the tenant admin who deactivated it. No foreign key: the
+  /// record of who decided must survive that admin's row being removed.
+  deactivatedByUserId String?
+  /// Optional free text, shown on the detail screen. Never shown to the
+  /// customer — they get the generic copy from `customerAccountBlock`.
+  deactivationReason  String?
+
+  /// Set when a tenant admin registered this customer from the back office
+  /// (`/admin/customers/new`), null when the customer self-registered. This
+  /// is the `initiatedBy` doc 09 §3.4 asks for, and it is also what makes
+  /// "who approved this?" answerable for an application that skipped the
+  /// review gate because its initiator was its approver (ADR-056).
+  registeredByUserId String?
+  /// The application this account was created from, when the portal created
+  /// it. Absent for accounts that existed in SAP before the portal did.
+  onboardingApplicationId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, sapKunnr])
+  @@index([tenantId])
+  @@map("customer_accounts")
+}
+
 enum OnboardingStatus {
   draft
   submitted
@@ -184,7 +234,16 @@ model OnboardingApplication {
   data                 Json
   /// Unguessable bearer handle for the applicant, who has no session until
   /// their account is created at approval (docs/DECISIONS.md ADR-009).
+  /// Minted for a back-office registration too, and never handed out: the
+  /// column is not nullable, and an application nobody holds the token for
+  /// is exactly right for one the tenant is filling in itself (ADR-056).
   draftToken           String
+  /// `User.id` of the tenant admin who started this application from
+  /// `/admin/customers/new`, null for a self-registration. It is both the
+  /// `initiatedBy` doc 09 §3.4 asks for and the discriminator the access
+  /// check uses: a back-office session may only continue applications the
+  /// back office started, never an applicant's own draft (ADR-056).
+  initiatedByUserId    String?
   /// Denormalized out of `data` purely so they can be indexed: the dupe
   /// guard and the reviewer queue both search on them.
   contactEmail         String?

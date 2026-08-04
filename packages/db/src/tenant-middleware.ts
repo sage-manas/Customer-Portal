@@ -10,6 +10,7 @@ import { getTenantId } from "./tenant-context";
 export const TENANT_SCOPED_MODELS = new Set([
   "User",
   "UserAccountLink",
+  "CustomerAccount",
   "OnboardingApplication",
   "OnboardingDocument",
   "OnboardingEvent",

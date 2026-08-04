@@ -8,7 +8,9 @@ import type {
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
+  CustomerPatch,
   CustomerPrice,
+  CustomerUpdateResult,
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
@@ -74,6 +76,19 @@ export interface SapAdapter {
   // ---- Master data: customer -------------------------------------------
   /** ECC: BAPI_CUSTOMER_CREATEFROMDATA1 · S/4: Business Partner API. */
   createCustomer(customer: CanonicalCustomer): Promise<CustomerCreateResult>;
+  /**
+   * ECC: BAPI_CUSTOMER_CHANGEFROMDATA1 · S/4: Business Partner PATCH.
+   *
+   * A *partial* change of an existing master, which is why it takes a patch
+   * rather than a whole `CanonicalCustomer`: sending the full record back
+   * would make every read-modify-write a chance to overwrite a field a user
+   * in XD02 changed in between with a stale value the portal happened to be
+   * holding. The patch's shape is bounded by the portal's own registry
+   * (`CUSTOMER_EDITABLE_FIELDS` in @cc/domain), which excludes PAN and GSTIN
+   * — those carry verification evidence and drive tax determination, and
+   * changing them is not a thing a web form gets to do (ADR-057).
+   */
+  updateCustomer(kunnr: string, patch: CustomerPatch): Promise<CustomerUpdateResult>;
   getCustomer(kunnr: string): Promise<SapRead<CanonicalCustomer>>;
   getShipToAddresses(kunnr: string): Promise<SapRead<ShipToAddress[]>>;
   /** KNKK / credit management API. */

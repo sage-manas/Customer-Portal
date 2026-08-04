@@ -18,6 +18,21 @@ Always import `db` from `./client` (or the package root) — never instantiate `
 3. Run `pnpm --filter @cc/db db:push` (dev) or add a migration.
 4. Add an isolation-test case in `src/__tests__/tenant-isolation.test.ts` covering it.
 
+## Customer account access (`src/customer-account.ts`, ADR-057)
+
+`isCustomerAccountActive(kunnr)` and `activeCustomerKunnrs(kunnrs)` are the
+one query three callers need — `login` and the account switcher in
+`@cc/service-identity`, and the order-creation guard in
+`@cc/service-customer`. It lives here rather than in any of them because a
+service may not import another (rule 1), and three copies of the same
+`findFirst` is how "deactivated" comes to mean three slightly different
+things. The _decision_'s wording stays in `@cc/domain`
+(`customerAccountBlock`); what a block prevents stays in each service.
+
+**An account with no row is active.** `CustomerAccount` records a decision,
+and customers that predate the portal or were created in SAP directly have
+never had one taken about them.
+
 ## The transactional outbox (`src/outbox.ts`, docs/DECISIONS.md ADR-023)
 
 Asynchronous work is produced here and nowhere else. A service records an effect by calling `writeOutboxEvent(tx, …)` **inside the same `db.$transaction` as the state change that justifies it** — one commit, so an event can neither be lost after its cause committed nor fired for a transaction that rolled back.

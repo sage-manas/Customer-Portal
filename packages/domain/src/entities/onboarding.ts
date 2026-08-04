@@ -200,8 +200,15 @@ export function onboardingCrossFieldIssues(data: OnboardingData): OnboardingIssu
   return issues;
 }
 
-/** Applies the per-field rules above to whichever fields a schema carries. */
-function withFieldRules<T extends z.ZodTypeAny>(schema: T) {
+/**
+ * Applies the per-field rules above to whichever fields a schema carries.
+ *
+ * Exported because the customer-edit schema (`entities/customer-account.ts`)
+ * validates a *subset* of these same registry fields: a PAN-shaped rule that
+ * applied on the wizard but not on the edit screen would be a second, laxer
+ * answer to the same question.
+ */
+export function withOnboardingFieldRules<T extends z.ZodTypeAny>(schema: T) {
   return schema.superRefine((value, ctx) => {
     const data = (value ?? {}) as OnboardingData;
     for (const [field, rule] of Object.entries(FIELD_RULES)) {
@@ -215,11 +222,11 @@ function withFieldRules<T extends z.ZodTypeAny>(schema: T) {
 
 /** Per-step schema: registry-derived types/lengths + the field rules. */
 export function onboardingStepSchema(step: number) {
-  return withFieldRules(buildZodSchema(onboardingStepFields(step), "write"));
+  return withOnboardingFieldRules(buildZodSchema(onboardingStepFields(step), "write"));
 }
 
 /** Everything the applicant submits, with cross-field rules applied too. */
-export const onboardingWriteSchema = withFieldRules(
+export const onboardingWriteSchema = withOnboardingFieldRules(
   buildZodSchema(onboardingApplicantFields(), "write"),
 ).superRefine((value, ctx) => {
   for (const issue of onboardingCrossFieldIssues(value as OnboardingData)) {

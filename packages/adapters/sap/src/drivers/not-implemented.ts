@@ -8,7 +8,9 @@ import type {
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
+  CustomerPatch,
   CustomerPrice,
+  CustomerUpdateResult,
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
@@ -61,6 +63,9 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
 
   async createCustomer(_customer: CanonicalCustomer): Promise<CustomerCreateResult> {
     this.fail("createCustomer");
+  }
+  async updateCustomer(_kunnr: string, _patch: CustomerPatch): Promise<CustomerUpdateResult> {
+    this.fail("updateCustomer");
   }
   async getCustomer(_kunnr: string): Promise<SapRead<CanonicalCustomer>> {
     this.fail("getCustomer");

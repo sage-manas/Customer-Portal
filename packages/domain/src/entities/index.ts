@@ -3,6 +3,7 @@ export * from "./sap-config";
 export * from "./onboarding";
 export * from "./order";
 export * from "./customer";
+export * from "./customer-account";
 export * from "./catalogue";
 export * from "./cart";
 export * from "./sales-doc";

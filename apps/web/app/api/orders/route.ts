@@ -1,5 +1,6 @@
 import { salesOrderWriteSchema } from "@cc/domain";
 import { clearCart } from "@cc/service-catalogue";
+import { assertCustomerCanOrder } from "@cc/service-customer";
 import {
   createOrder,
   listOrders,
@@ -60,6 +61,12 @@ export async function POST(request: Request) {
         { status: 422 },
       );
     }
+
+    // A customer whose portal access the tenant switched off may not place
+    // new orders (ADR-057). Checked here rather than inside
+    // `@cc/service-order` because a service may not import another, and the
+    // API is the enforcement point either way (CLAUDE.md rule 5).
+    if (session.kunnr) await assertCustomerCanOrder(session.tenantId, session.kunnr);
 
     const sap = await getSapAdapterForTenant(session.tenantId);
     const order = await createOrder(sap, session.kunnr, parsed.data);
