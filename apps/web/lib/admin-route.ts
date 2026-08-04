@@ -21,7 +21,7 @@ const logger = getLogger("route.admin");
  * Hiding a nav item is presentation; this is the control (docs/05 §4.3).
  * Every `/api/admin/*` handler starts with `requireBackOffice(permission)`
  * even though middleware already gated `/admin` on `admin:view` — that
- * check is coarse, and a `tenant_support` session must not be able to
+ * check is coarse, and an `ar_manager` session must not be able to
  * approve a customer just because it can see the shell.
  */
 export async function requireBackOffice(permission: Permission): Promise<SessionClaims> {

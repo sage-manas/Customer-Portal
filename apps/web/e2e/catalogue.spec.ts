@@ -106,13 +106,11 @@ test.describe("product catalogue", () => {
     await expect(page.getByRole("link", { name: "MAT-10001" })).toBeVisible();
   });
 
-  test("a view-only buyer sees the catalogue but no Add to Cart", async ({ page }) => {
-    await signIn(page, "viewer@acme.example");
-    await page.goto("/catalogue");
-
-    await expect(page.locator("article", { hasText: "Hydraulic Pump HP-200" })).toBeVisible();
-    // Hiding the CTA is presentation; the API refuses the same call (docs/05 §4.3).
-    await expect(page.getByRole("button", { name: "Add to Cart" })).toHaveCount(0);
+  test("a session without `cart:manage` cannot add to a cart", async ({ page }) => {
+    // The buyer plane is one role now (doc 09 §1), so the denial worth
+    // asserting is plane-vs-plane: an `ap_manager` session exists in the
+    // tenant and holds no `cart:manage`. The API is the control (docs/05 §4.3).
+    await signIn(page, "ap@acme.example");
 
     // Issued from inside the page so it carries the tenant host — the API
     // context can't resolve `acme.localhost`, and hitting 127.0.0.1 would

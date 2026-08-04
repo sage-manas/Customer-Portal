@@ -95,15 +95,27 @@ model Tenant {
   @@map("tenants")
 }
 
+/// Five-tier role model (docs/09-RBAC-RESTRUCTURE-PLAN.md §1), contracted.
+///
+/// This enum went through expand-migrate-contract (doc 09 §3.2): Phase 1
+/// added these six alongside the legacy eight, Phase 2's
+/// `pnpm --filter @cc/db db:migrate-roles --apply` backfilled every row via
+/// `LEGACY_ROLE_MAP` in @cc/domain, and this is the contract step. Applying
+/// this schema to a database that still holds a legacy value *fails* — that
+/// ordering guard is the point, not an inconvenience (ADR-049).
+///
+/// It names roles across all three planes: `User.roles` only ever holds
+/// tenant/customer ones and `Operator.roles` only platform ones. Splitting
+/// it per plane would put role identifiers in two registries, which is what
+/// CLAUDE.md rule 3 exists to prevent; the constraint is enforced where it
+/// belongs, in @cc/domain's plane helpers.
 enum UserRole {
-  platform_operator
-  tenant_admin
-  tenant_sales
-  tenant_credit
-  tenant_support
-  buyer_admin
-  buyer_user
-  buyer_view_only
+  super_admin
+  sap_manager
+  client_admin
+  ap_manager
+  ar_manager
+  customer
 }
 
 model User {
@@ -951,6 +963,17 @@ model Operator {
   /// not import another service (rule 1), and duplicating ~90 lines of
   /// crypto is the cost of keeping the operator realm genuinely separate.
   passwordHash       String
+  /// Platform-plane roles only — `super_admin` or `sap_manager` (doc 09
+  /// §3.2). The column is a list rather than a single value so an operator
+  /// carries roles the same way a `User` does and one `hasPermission` path
+  /// serves both planes; nothing here grants a tenant role, and
+  /// `isPlatformRole` in @cc/domain is what says so.
+  ///
+  /// Empty for rows created before the five-tier model. The Phase 2
+  /// migration backfills them to `[super_admin]`, which is what
+  /// `platform_operator` maps to (`LEGACY_ROLE_MAP`) and what a
+  /// pre-restructure operator could already do.
+  roles              UserRole[]
   isActive           Boolean   @default(true)
   mustChangePassword Boolean   @default(false)
   lastLoginAt        DateTime?

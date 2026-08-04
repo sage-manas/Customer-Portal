@@ -97,12 +97,11 @@ test.describe("inquiries and quotations", () => {
     expect(status).toBe(409);
   });
 
-  test("a view-only buyer can read inquiries but cannot raise one", async ({ page }) => {
-    await signIn(page, "viewer@acme.example");
-
-    await page.goto("/inquiries");
-    await expect(page.getByRole("heading", { name: "Inquiries" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Raise an inquiry" })).toHaveCount(0);
+  test("a session without `inquiry:create` cannot raise an inquiry", async ({ page }) => {
+    // The buyer plane is one role now (doc 09 §1), so the denial worth
+    // asserting is plane-vs-plane: an `ap_manager` session exists in the
+    // tenant and holds no `inquiry:create`. The API is the control (docs/05 §4.3).
+    await signIn(page, "ap@acme.example");
 
     const status = await page.evaluate(async () => {
       const response = await fetch("/api/inquiries", {

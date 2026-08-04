@@ -5,6 +5,7 @@ export { hashPassword, needsRehash, verifyPassword } from "./password";
 export {
   ACCESS_TOKEN_TTL_SECONDS,
   REFRESH_TOKEN_TTL_SECONDS,
+  CLAIM_VERSION,
   issueTokens,
   verifyToken,
   type TokenPair,

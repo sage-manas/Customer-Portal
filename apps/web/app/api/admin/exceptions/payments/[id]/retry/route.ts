@@ -10,7 +10,7 @@ import { handleAdmin, requireBackOffice } from "@/lib/admin-route";
  * The same `reconcilePayment` the worker's automatic sweep calls on a
  * schedule (ADR-044) — this route exists so an operator doesn't have to
  * wait for the next tick. `requireBackOffice("exceptions:view")`, not a
- * separate `:resolve` permission: only `tenant_admin` holds `exceptions:view`
+ * separate `:resolve` permission: only `client_admin` and `ap_manager` hold `exceptions:view`
  * at all, so there is no narrower plane to split it from.
  */
 export const runtime = "nodejs";

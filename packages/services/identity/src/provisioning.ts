@@ -23,9 +23,9 @@ export interface ProvisionPortalAccessInput {
   /** The KUNNR SAP assigned; the account this login may act for. */
   kunnr: string;
   /**
-   * Defaults to `buyer_admin`: the first user of a new customer has to be
-   * able to invite their colleagues, or every new account needs a support
-   * ticket to become usable.
+   * Defaults to `customer` — the one buyer role in the five-tier model
+   * (doc 09 §1), which carries `account:manage-users` so the first user of a
+   * new account can invite their colleagues without a support ticket.
    */
   roles?: Role[];
 }
@@ -52,7 +52,7 @@ export async function provisionPortalAccess(
   input: ProvisionPortalAccessInput,
 ): Promise<ProvisionPortalAccessResult> {
   const email = input.email.trim().toLowerCase();
-  const roles = input.roles ?? (["buyer_admin"] as Role[]);
+  const roles = input.roles ?? (["customer"] as Role[]);
   const password = temporaryPassword();
   const passwordHash = await hashPassword(password);
 

@@ -1,4 +1,6 @@
 import { db } from "@cc/db";
+import type { Role } from "@cc/domain";
+import { isPlatformRole, isRole } from "@cc/domain";
 
 import { PlatformError } from "./errors";
 import { issueOperatorTokens, type OperatorClaims, type OperatorTokenPair } from "./jwt";
@@ -35,7 +37,16 @@ export async function operatorLogin(
 
   await db.operator.update({ where: { id: operator.id }, data: { lastLoginAt: new Date() } });
 
-  const claims: OperatorClaims = { operatorId: operator.id, email: operator.email };
+  // Filtered rather than cast: the column is a `UserRole[]`, which the
+  // portal's roles share, and only a platform role has any meaning in this
+  // realm (doc 09 §1). A row misconfigured with `client_admin` signs in
+  // with that role dropped, not with a tenant permission in the console.
+  const roles: Role[] = operator.roles.filter(
+    (role): role is Role => isRole(role) && isPlatformRole(role),
+  );
+  if (roles.length === 0) throw new PlatformError("forbidden");
+
+  const claims: OperatorClaims = { operatorId: operator.id, email: operator.email, roles };
   return {
     claims,
     tokens: await issueOperatorTokens(claims, secret),
@@ -50,10 +61,4 @@ export async function setOperatorPassword(operatorId: string, newPassword: strin
     where: { id: operatorId },
     data: { passwordHash, mustChangePassword: false },
   });
-}
-
-/** Throws when there is no operator session. The `requireX` counterpart of `@cc/service-identity`'s `requireSession`. */
-export function requireOperatorSession(claims: OperatorClaims | null | undefined): OperatorClaims {
-  if (!claims) throw new PlatformError("session_invalid");
-  return claims;
 }

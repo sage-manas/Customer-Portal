@@ -11,7 +11,7 @@ import { hashPassword } from "./password";
  *
  * Creates the `Tenant` row (platform-plane, same table `findTenant` in
  * `@cc/service-identity` already reads unscoped) and the tenant's first
- * `tenant_admin` login in one call. This is not `provisionPortalAccess`
+ * `client_admin` login in one call. This is not `provisionPortalAccess`
  * (`@cc/service-identity`) reused: that function issues a *buyer* account
  * against a SAP KUNNR the applicant already has, and a service may not
  * import another service anyway (rule 1) — a fresh tenant has no KUNNR yet
@@ -74,7 +74,7 @@ export async function createTenant(input: CreateTenantInput): Promise<CreateTena
       data: {
         tenantId: tenant.id,
         email: adminEmail,
-        roles: ["tenant_admin"],
+        roles: ["client_admin"],
         passwordHash,
         mustChangePassword: true,
       },

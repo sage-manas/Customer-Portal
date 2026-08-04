@@ -41,7 +41,13 @@ export type NavIcon =
   | "FileCheck"
   | "ShieldCheck"
   | "Settings"
-  | "AlertTriangle";
+  | "AlertTriangle"
+  | "Users"
+  | "Building2"
+  | "Activity"
+  | "PlugZap"
+  | "Landmark"
+  | "Wallet";
 
 export interface NavItem {
   /** Stable key; also the tenant module-toggle key (Tenant.moduleToggles). */
@@ -215,7 +221,40 @@ export const ADMIN_NAV: readonly NavItem[] = [
     status: "live",
   },
   {
+    key: "admin-customers",
+    /** Doc 09 §3.4. Register/edit/deactivate lives behind `customer:register`
+     * rather than a coarser `admin:view`: an AP or AR manager holds the shell
+     * and must not see the customer master. Built in Phase 5. */
+    label: "Customers",
+    href: "/admin/customers",
+    icon: "Users",
+    accent: "onboard",
+    permission: "customer:register",
+    status: "planned",
+  },
+  {
+    key: "admin-ap",
+    label: "Accounts Payable",
+    href: "/admin/ap",
+    icon: "Wallet",
+    accent: "payment",
+    permission: "finance:ap",
+    status: "planned",
+  },
+  {
+    key: "admin-ar",
+    label: "Accounts Receivable",
+    href: "/admin/ar",
+    icon: "Landmark",
+    accent: "invoice",
+    permission: "finance:ar",
+    status: "planned",
+  },
+  {
     key: "admin-exceptions",
+    /** Moves under the AP workspace in Phase 6 (doc 09 §3.4); until that
+     * screen exists it keeps its own tab, now reachable by `ap_manager`
+     * because `exceptions:view` sits in the AP group. */
     label: "Exceptions",
     href: "/admin/exceptions",
     icon: "AlertTriangle",
@@ -229,6 +268,59 @@ export const ADMIN_NAV: readonly NavItem[] = [
     href: "/admin/settings",
     icon: "Settings",
     permission: "tenant:settings",
+    status: "planned",
+  },
+] as const;
+
+/**
+ * Platform operator console nav (apps/ops, doc 09 §3.3).
+ *
+ * A third list rather than a flag on the two above, for the reason the planes
+ * are separate apps at all: a platform role holds no tenant-data permission,
+ * so an ops item can never appear in a web-app sidebar and vice versa. The
+ * filtering is the same `visibleNavItems` — which is the payoff of the
+ * registry design, and why `sap_manager` seeing exactly two tabs needs no
+ * code, only the rows below.
+ */
+export const OPS_NAV: readonly NavItem[] = [
+  {
+    key: "ops-tenants",
+    label: "Tenants",
+    href: "/tenants",
+    icon: "Building2",
+    permission: "platform:tenant-crud",
+    status: "live",
+  },
+  {
+    key: "ops-sap-config",
+    label: "SAP Config",
+    href: "/sap/config",
+    icon: "PlugZap",
+    permission: "platform:sap-config",
+    status: "planned",
+  },
+  {
+    key: "ops-sap-health",
+    label: "SAP Health",
+    href: "/sap/health",
+    icon: "Activity",
+    permission: "platform:sap-health",
+    status: "planned",
+  },
+  {
+    key: "ops-operators",
+    label: "Operators",
+    href: "/operators",
+    icon: "Users",
+    permission: "platform:operators-manage",
+    status: "planned",
+  },
+  {
+    key: "ops-billing",
+    label: "Billing",
+    href: "/billing",
+    icon: "Wallet",
+    permission: "platform:billing",
     status: "planned",
   },
 ] as const;

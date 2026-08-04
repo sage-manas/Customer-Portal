@@ -65,4 +65,6 @@ pnpm --filter @cc/service-notification test              # pure units, no databa
 pnpm --filter @cc/service-notification test:integration  # needs Postgres
 ```
 
+The unit suite includes `src/recipients.test.ts`, the regression doc 09 §3.2 asks for: per notification template, that its permission still resolves to a non-empty role set on the declared plane after the five-tier collapse (ADR-049). `resolveRecipients` fails _silently_ when `rolesWithPermission` returns `[]` — the `hasSome` simply matches nobody — so this is the shape of registry mistake no other test would catch.
+
 The integration suite covers the two recipient rules, cross-tenant and cross-account isolation, the cross-_user_ 404, the redelivery no-op (rows and mails), a failed mail leaving the bell intact, and the inbox reads.

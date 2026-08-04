@@ -13,12 +13,15 @@ const buyer: SessionClaims = {
   tenantId: "tnt_1",
   tenantSlug: "acme",
   email: "buyer@acme.example",
-  roles: ["buyer_user"],
+  roles: ["customer"],
   kunnr: "0010001001",
   availableKunnrs: ["0010001001", "0010001002"],
 };
 
-const viewer: SessionClaims = { ...buyer, roles: ["buyer_view_only"] };
+/** A back-office session: it exists in the tenant, so a route it may not
+ * call is a 403 about a missing permission — not a 404 about a missing
+ * document (doc 09 §1). */
+const desk: SessionClaims = { ...buyer, roles: ["ar_manager"], email: "ar@acme.example" };
 
 describe("guards", () => {
   it("requires a session", () => {
@@ -28,7 +31,7 @@ describe("guards", () => {
 
   it("enforces permissions at the API layer, not the UI (docs/05 §4.3)", () => {
     expect(requirePermission(buyer, "order:create")).toBe(buyer);
-    expect(() => requirePermission(viewer, "order:create")).toThrow(/permission/);
+    expect(() => requirePermission(desk, "order:create")).toThrow(/permission/);
     expect(() => requirePermission(buyer, "credit:release")).toThrow(/permission/);
   });
 

@@ -3,7 +3,7 @@ import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 
 import { isAuthError } from "./errors";
-import { issueTokens, verifyToken } from "./jwt";
+import { CLAIM_VERSION, issueTokens, verifyToken } from "./jwt";
 
 const SECRET = "test-secret-that-is-long-enough-32chars";
 const OTHER_SECRET = "another-secret-that-is-long-enough-32ch";
@@ -13,7 +13,7 @@ const claims: SessionClaims = {
   tenantId: "tnt_1",
   tenantSlug: "acme",
   email: "buyer@acme.example",
-  roles: ["buyer_user"],
+  roles: ["customer"],
   kunnr: "0010001001",
   availableKunnrs: ["0010001001", "0010001002"],
 };
@@ -35,7 +35,7 @@ describe("token issue/verify", () => {
     const { accessToken } = await issueTokens(claims, SECRET);
     const [header, payload, signature] = accessToken.split(".");
     const forged = JSON.parse(Buffer.from(payload!, "base64url").toString());
-    forged.roles = ["tenant_admin"];
+    forged.roles = ["client_admin"];
     const tampered = [
       header,
       Buffer.from(JSON.stringify(forged)).toString("base64url"),
@@ -55,7 +55,7 @@ describe("token issue/verify", () => {
   });
 
   it("reports an expired token distinctly so the UI can say 'sign in again'", async () => {
-    const expired = await new SignJWT({ typ: "access", tenantId: "tnt_1", roles: ["buyer_user"] })
+    const expired = await new SignJWT({ typ: "access", tenantId: "tnt_1", roles: ["customer"] })
       .setProtectedHeader({ alg: "HS256" })
       .setSubject("usr_1")
       .setIssuer("customerconnect-portal")
@@ -67,13 +67,40 @@ describe("token issue/verify", () => {
     await expect(verifyToken(expired, SECRET)).rejects.toMatchObject({ code: "session_expired" });
   });
 
+  it("rejects a token from before the five-tier role collapse", async () => {
+    // Correctly signed, unexpired, and carrying a role that no longer
+    // exists. Without the version check `verifyToken` would drop the role
+    // and hand back a session with no permissions at all — a tenant admin
+    // silently 403ing everywhere for up to a refresh lifetime, with nothing
+    // telling them to sign in again (doc 09 §4.3).
+    const stale = await new SignJWT({
+      typ: "access",
+      ver: CLAIM_VERSION - 1,
+      tenantId: "tnt_1",
+      tenantSlug: "acme",
+      email: "admin@acme.example",
+      roles: ["tenant_admin"],
+      availableKunnrs: [],
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("usr_1")
+      .setIssuer("customerconnect-portal")
+      .setAudience("customerconnect-web")
+      .setIssuedAt()
+      .setExpirationTime("30m")
+      .sign(new TextEncoder().encode(SECRET));
+
+    await expect(verifyToken(stale, SECRET)).rejects.toMatchObject({ code: "session_invalid" });
+  });
+
   it("drops unknown roles instead of trusting them", async () => {
     const token = await new SignJWT({
       typ: "access",
+      ver: CLAIM_VERSION,
       tenantId: "tnt_1",
       tenantSlug: "acme",
       email: "x@acme.example",
-      roles: ["buyer_user", "superuser", 42],
+      roles: ["customer", "superuser", 42],
       availableKunnrs: ["0010001001", 7],
     })
       .setProtectedHeader({ alg: "HS256" })
@@ -85,7 +112,7 @@ describe("token issue/verify", () => {
       .sign(new TextEncoder().encode(SECRET));
 
     const session = await verifyToken(token, SECRET);
-    expect(session.roles).toEqual(["buyer_user"]);
+    expect(session.roles).toEqual(["customer"]);
     expect(session.availableKunnrs).toEqual(["0010001001"]);
   });
 

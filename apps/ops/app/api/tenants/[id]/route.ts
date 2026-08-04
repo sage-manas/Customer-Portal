@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   return handleOps(async () => {
-    await requireOperator();
+    await requireOperator("platform:tenant-crud");
     const { id } = await params;
 
     const tenant = await getTenant(id);

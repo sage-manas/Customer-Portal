@@ -36,7 +36,10 @@ export interface TicketCategoryDef {
    * Back-office role the ticket routes to (docs/03 Module 8 flow: "auto-route
    * by category"). Routing is *which queue sees it first*, not an access
    * control — `support:resolve` is what actually gates the workbench, and a
-   * tenant_admin holds it for every category.
+   * client_admin holds it for every category. Under the five-tier model
+   * (doc 09) the tenant back office is three roles rather than five, so
+   * routing is coarser than it was: billing goes to the AR desk, everything
+   * else to the tenant admin.
    */
   routesTo: Role;
   /** One line for the category picker, so the screen carries no copy. */
@@ -48,35 +51,35 @@ export const TICKET_CATEGORY_DEFS: Record<TicketCategory, TicketCategoryDef> = {
     key: "delivery",
     label: "Delivery",
     qmart: "Q1",
-    routesTo: "tenant_support",
+    routesTo: "client_admin",
     hint: "Shipment delays, short or damaged receipts, proof-of-delivery disputes.",
   },
   quality: {
     key: "quality",
     label: "Quality",
     qmart: "Q2",
-    routesTo: "tenant_support",
+    routesTo: "client_admin",
     hint: "The goods arrived, but they aren't right.",
   },
   billing: {
     key: "billing",
     label: "Billing",
     qmart: "Q3",
-    routesTo: "tenant_credit",
+    routesTo: "ar_manager",
     hint: "Invoice amounts, tax, credit notes, statement queries.",
   },
   product: {
     key: "product",
     label: "Product",
     qmart: "Q4",
-    routesTo: "tenant_sales",
+    routesTo: "client_admin",
     hint: "Specifications, availability, alternatives, pricing questions.",
   },
   general: {
     key: "general",
     label: "General",
     qmart: "Q5",
-    routesTo: "tenant_support",
+    routesTo: "client_admin",
     hint: "Anything else.",
   },
 };

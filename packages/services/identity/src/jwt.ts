@@ -18,6 +18,24 @@ import { AuthError } from "./errors";
 export const ACCESS_TOKEN_TTL_SECONDS = 30 * 60;
 export const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+/**
+ * The shape-version of the claims inside the token (doc 09 §4.3).
+ *
+ * Bumped whenever the *meaning* of a claim changes rather than its
+ * signature — here, the five-tier collapse (ADR-047): a token issued before
+ * the migration carries `roles: ["tenant_admin"]`, which is still a
+ * correctly signed, unexpired token. `verifyToken` already drops unknown
+ * roles, so such a session would not escalate — it would silently degrade
+ * to *no* permissions, and a tenant admin would spend up to a refresh
+ * lifetime seeing an empty nav and 403s with nothing telling them to sign
+ * in again. Rejecting the version outright turns that into
+ * `session_invalid`, which the app already handles by sending the user to
+ * `/login`.
+ *
+ * 1 → the eight-role model. 2 → the five-tier model.
+ */
+export const CLAIM_VERSION = 2;
+
 const ISSUER = "customerconnect-portal";
 const AUDIENCE = "customerconnect-web";
 
@@ -46,6 +64,7 @@ async function sign(
 ): Promise<string> {
   return new SignJWT({
     typ: type,
+    ver: CLAIM_VERSION,
     tenantId: claims.tenantId,
     tenantSlug: claims.tenantSlug,
     email: claims.email,
@@ -93,6 +112,10 @@ export async function verifyToken(
   }
 
   if (payload.typ !== expected) throw new AuthError("session_invalid");
+  // A token from before the role collapse verifies fine and means something
+  // else — see CLAIM_VERSION. Rejected here, before any claim is read, so
+  // the stale-session path is "sign in again", not "silently powerless".
+  if (payload.ver !== CLAIM_VERSION) throw new AuthError("session_invalid");
   if (typeof payload.sub !== "string" || typeof payload.tenantId !== "string") {
     throw new AuthError("session_invalid");
   }

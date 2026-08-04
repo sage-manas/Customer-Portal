@@ -28,7 +28,7 @@ describe("tenant isolation", () => {
     // middleware overwrites it with the bound context regardless (see
     // tenant-middleware.ts) — proven by the "middleware overrides a
     // mismatched tenantId" test below.
-    return db.user.create({ data: { tenantId, email, roles: ["buyer_admin"] } });
+    return db.user.create({ data: { tenantId, email, roles: ["customer"] } });
   }
 
   beforeAll(async () => {
@@ -130,7 +130,7 @@ describe("tenant isolation", () => {
     const result = await runWithTenant(tenantB.id, () =>
       db.user.updateMany({
         where: { id: userA.id },
-        data: { roles: ["tenant_admin"] },
+        data: { roles: ["client_admin"] },
       }),
     );
 
@@ -558,9 +558,17 @@ describe("tenant isolation", () => {
     expect(operatorModel?.fields.some((field) => field.name === "tenantId")).toBe(false);
 
     const email = `operator-isolation-${runId}@platform.example`;
-    await db.operator.create({ data: { email, passwordHash: "unused" } });
+    // `roles` has no schema default on purpose (ADR-049): creating an
+    // operator must state what it may do. An operator row with an empty
+    // role list is a login that reaches nothing once Phase 4 wires
+    // `requirePermission` into the console, and a default of `[]` would
+    // make that the silent outcome of forgetting the field.
+    await db.operator.create({
+      data: { email, passwordHash: "unused", roles: ["super_admin"] },
+    });
     const found = await db.operator.findUnique({ where: { email } });
     expect(found?.email).toBe(email);
+    expect(found?.roles).toEqual(["super_admin"]);
 
     await db.operator.deleteMany({ where: { email } });
   });

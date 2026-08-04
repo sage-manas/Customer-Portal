@@ -16,7 +16,7 @@ export default meta;
 
 type Story = StoryObj<typeof AppShell>;
 
-const buyer: Pick<SessionClaims, "roles"> = { roles: ["buyer_user"] };
+const buyer: Pick<SessionClaims, "roles"> = { roles: ["customer"] };
 
 const baseArgs = {
   tenantName: "Acme Industrials",
@@ -60,7 +60,7 @@ export const TenantBackOffice: Story = {
     ...baseArgs,
     userEmail: "credit.team@acme.example",
     accounts: [],
-    navItems: visibleNavItems([...ADMIN_NAV], { roles: ["tenant_admin"] }),
+    navItems: visibleNavItems([...ADMIN_NAV], { roles: ["client_admin"] }),
     pathname: "/admin/credit",
     children: <PageHeader title="Credit Release" subtitle="Orders blocked on credit." />,
   },
@@ -77,12 +77,15 @@ export const SapOutage: Story = {
   },
 };
 
-/** A view-only buyer sees fewer nav entries and no write CTAs. */
-export const ViewOnlyBuyer: Story = {
+/** A finance desk sees only its own workspace: same shell, fewer tabs, and
+ * the narrowing is the permission registry's doing, not the layout's. */
+export const AccountsPayableDesk: Story = {
   args: {
     ...baseArgs,
-    navItems: visibleNavItems([...PORTAL_NAV], { roles: ["buyer_view_only"] }),
-    pathname: "/invoices",
+    userEmail: "ap@acme.example",
+    accounts: [],
+    navItems: visibleNavItems([...ADMIN_NAV], { roles: ["ap_manager"] }),
+    pathname: "/admin/exceptions",
     children: (
       <PageHeader
         title="Invoices"

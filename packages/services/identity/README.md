@@ -45,4 +45,4 @@ Creates two mock-driver tenants (`acme`, `globex`) with users across every role 
 pnpm --filter @cc/service-identity test
 ```
 
-Covers hashing (salting, malformed input, rehash policy), token round-trip/tampering/expiry/type-confusion and unknown-role stripping, host resolution, and the RBAC guards. These need no database; DB-backed flows are exercised end to end from `apps/web`.
+Covers hashing (salting, malformed input, rehash policy), token round-trip/tampering/expiry/type-confusion and unknown-role stripping, host resolution, and the RBAC guards — including `authz-matrix.test.ts`, the portal's route×role matrix (doc 09 §4.4, ADR-050). That suite is generated from `API_ROUTES` and `rolesWithPermission` in `@cc/domain` and runs the real `requirePermission`, so a permission moved between role groups changes what it asserts with nobody editing a test; every non-admitted role must get 403 and an anonymous caller 401. These need no database; DB-backed flows are exercised end to end from `apps/web`.

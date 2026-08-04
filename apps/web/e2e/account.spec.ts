@@ -3,8 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Module 9 happy path: a buyer reads their credit position and loyalty tier,
  * asks for a bigger limit, the credit desk decides it — plus the cases that
- * matter (a `buyer_user` cannot ask, the desk is unreachable from the customer
- * plane, and an approval does not move the customer's actual limit).
+ * matter (a back-office session cannot ask on a customer's behalf, the desk is
+ * unreachable from the customer plane, and an approval does not move the
+ * customer's actual limit).
  *
  * The credit and loyalty figures come from the mock SAP landscape and are
  * derived on every read, so nothing here depends on a database state; the
@@ -71,14 +72,11 @@ test.describe("account", () => {
     await expect(page.getByText("0000800987")).toHaveCount(0);
   });
 
-  test("a buyer_user can read the account but cannot ask for a bigger limit", async ({ page }) => {
-    // `multi@acme.example` is buyer_user: everyday transactions, but the
-    // credit ask is a buyer_admin's to make.
-    await signIn(page, "multi@acme.example");
-
-    await page.goto("/account");
-    await expect(page.getByRole("region", { name: "Credit position" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Request an increase" })).toHaveCount(0);
+  test("a back-office session cannot raise a customer's credit ask", async ({ page }) => {
+    // Under the five-tier model the buyer plane is one role (doc 09 §1), so
+    // the interesting denial is no longer buyer-vs-buyer but plane-vs-plane:
+    // `ap@acme.example` holds the admin shell and none of `credit:request`.
+    await signIn(page, "ap@acme.example");
 
     // Hiding the CTA is presentation; the API is the control (docs/05 §4.3).
     const status = await page.evaluate(async () => {
@@ -87,7 +85,7 @@ test.describe("account", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           requestedLimit: 99_000_000,
-          justification: "A buyer_user must not be able to commit the account to this ask.",
+          justification: "A back-office session must not commit an account to this ask.",
         }),
       });
       return response.status;
@@ -135,7 +133,7 @@ test.describe("account", () => {
     await expect(page.getByRole("link", { name: "Request an increase" })).toHaveCount(0);
 
     // --- the desk's side ---
-    await signIn(page, "credit@acme.example");
+    await signIn(page, "admin@acme.example");
     await page.goto("/admin/credit");
     await expect(page.getByRole("heading", { name: "Credit Desk" })).toBeVisible();
     // The screen says plainly what a decision here does and does not do.

@@ -12,7 +12,7 @@ import { getTenantUsage } from "../tenant-usage";
 /**
  * The operator console's write and composed-read paths against a real
  * database (docs/07 B5): provisioning a tenant creates both the `Tenant`
- * row and its first `tenant_admin` login, health/usage are read per tenant
+ * row and its first `client_admin` login, health/usage are read per tenant
  * through `runWithTenant`, and an operator's own login is a wholly separate
  * table from `User` (docs/DECISIONS.md ADR-045).
  */
@@ -42,7 +42,7 @@ describe("platform provisioning + composed reads", () => {
 
   beforeEach(wipe);
 
-  it("provisions a tenant with its first tenant_admin, refusing a duplicate slug", async () => {
+  it("provisions a tenant with its first client_admin, refusing a duplicate slug", async () => {
     const slug = `ops-${runId}`;
     const result = await createTenant({
       slug,
@@ -56,7 +56,7 @@ describe("platform provisioning + composed reads", () => {
     const adminUser = await runWithTenant(result.tenantId, () =>
       db.user.findUniqueOrThrow({ where: { id: result.adminUserId } }),
     );
-    expect(adminUser.roles).toEqual(["tenant_admin"]);
+    expect(adminUser.roles).toEqual(["client_admin"]);
     expect(adminUser.mustChangePassword).toBe(true);
 
     const listed = await listTenants();
@@ -98,13 +98,16 @@ describe("platform provisioning + composed reads", () => {
     expect(health.outboxFailed).toBe(0);
 
     const usage = await getTenantUsage(result.tenantId);
-    expect(usage.userCount).toBe(1); // the provisioned tenant_admin
+    expect(usage.userCount).toBe(1); // the provisioned client_admin
   });
 
   it("operator login is a separate table from tenant Users entirely", async () => {
     const email = `operator-${runId}@platform.example`;
     const passwordHash = await hashPassword("a very good operator password");
-    await db.operator.create({ data: { email, passwordHash } });
+    // `roles` has no schema default (ADR-049) — creating an operator states
+    // what it may do, so forgetting the field is a write error rather than a
+    // login that silently reaches nothing.
+    await db.operator.create({ data: { email, passwordHash, roles: ["sap_manager"] } });
 
     const { claims } = await operatorLogin(email, "a very good operator password", SECRET);
     expect(claims.email).toBe(email);

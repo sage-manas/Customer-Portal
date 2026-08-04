@@ -9,11 +9,18 @@ Framework-free, like every service (ADR-002).
   operator realm's auth, entirely separate from `@cc/service-identity`'s
   tenant sessions (docs/DECISIONS.md ADR-045: distinct JWT issuer/audience,
   distinct `Operator` table, distinct password-hashing copy).
+- `requireOperatorPermission` (`guard.ts`) — the console's enforcement
+  point, reading the _same_ `ROLE_PERMISSIONS` registry the portal does
+  (ADR-051). The realms stay separate in who may hold a role, not in what a
+  permission means: `verifyOperatorToken` and `operatorLogin` both filter
+  roles through `isPlatformRole`, so a tenant role can never arrive here.
+  Its own file with no `@cc/db` import, so the matrix test runs without
+  Postgres.
 - `issueOperatorTokens`, `verifyOperatorToken` (also exported from the
   `./edge` subpath for `apps/ops/middleware.ts`, which runs on the edge
   runtime and cannot import anything that touches `@cc/db`).
 - `createTenant`, `listTenants`, `getTenant` — provisioning. `createTenant`
-  creates the `Tenant` row and its first `tenant_admin` `User` in one call;
+  creates the `Tenant` row and its first `client_admin` `User` in one call;
   it is not `@cc/service-identity`'s `provisionPortalAccess` (that issues a
   _buyer_ login against an existing SAP KUNNR, and a service may not import
   another service, CLAUDE.md rule 1).
@@ -36,7 +43,7 @@ code below is a deliberate copy rather than a shared import.
 ## How to test
 
 ```
-pnpm --filter @cc/service-platform test              # password/JWT units, no database
+pnpm --filter @cc/service-platform test              # password/JWT units + the ops route×role matrix, no database
 pnpm --filter @cc/service-platform test:integration   # provisioning + health/usage, needs Postgres
-pnpm --filter @cc/service-platform db:seed            # dev operator login
+pnpm --filter @cc/service-platform db:seed            # dev operator logins (one per platform role)
 ```

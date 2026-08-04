@@ -10,7 +10,7 @@ import { handlePortal, requirePortal } from "@/lib/portal-route";
  *
  * `account:view` lists; `credit:request` raises. Two permissions because the
  * ask commits the account to a commercial conversation and quotes a
- * justification in the customer's name — a buyer_admin's call rather than an
+ * justification in the customer's name — a customer's own call rather than an
  * everyday transaction (docs/05 §4.3).
  */
 export const runtime = "nodejs";

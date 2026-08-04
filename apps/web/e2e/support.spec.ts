@@ -92,14 +92,12 @@ test.describe("support", () => {
     await expect(page.getByText("Response within 3 days.")).toBeVisible();
   });
 
-  test("a view-only buyer can read tickets but cannot raise one", async ({ page }) => {
-    await signIn(page, "viewer@acme.example");
+  test("a session without `support:create` cannot raise a ticket", async ({ page }) => {
+    // The buyer plane is one role now (doc 09 §1), so the denial worth
+    // asserting is plane-vs-plane: an `ap_manager` session exists in the
+    // tenant and holds no `support:create`. The API is the control (docs/05 §4.3).
+    await signIn(page, "ap@acme.example");
 
-    await page.goto("/support");
-    await expect(page.getByRole("heading", { name: "Support" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Raise a ticket" })).toHaveCount(0);
-
-    // Hiding the CTA is presentation; the API is the control (docs/05 §4.3).
     const status = await page.evaluate(async () => {
       const response = await fetch("/api/support", {
         method: "POST",
@@ -108,7 +106,7 @@ test.describe("support", () => {
           category: "general",
           priority: "low",
           subject: "Should not be allowed",
-          description: "A view-only buyer must not be able to commit the account to a query.",
+          description: "A back-office session must not be able to commit an account to a query.",
         }),
       });
       return response.status;

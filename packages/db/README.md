@@ -81,6 +81,25 @@ pnpm --filter @cc/service-identity db:seed   # dev tenants + users
 
 The seed lives in `@cc/service-identity`, not here: it writes credentials, and the password-hash format belongs to the identity service — `db -> services` is not an allowed dependency (`docs/DECISIONS.md` ADR-008).
 
+## The role migration (`scripts/migrate-roles.ts`, ADR-049)
+
+Backfills the eight legacy roles to the five-tier model (`docs/09-RBAC-RESTRUCTURE-PLAN.md` §3.2) using `LEGACY_ROLE_MAP` from `@cc/domain` — the mapping is imported, never restated here.
+
+```
+pnpm --filter @cc/db db:migrate-roles            # report only; writes nothing
+pnpm --filter @cc/db db:migrate-roles --apply    # write
+```
+
+It is idempotent (a row holding no legacy value is not selected) and refuses to write if any row's roles map to nothing, rather than emptying that user's role list and locking them out. Users who held `tenant_sales`/`tenant_support` are widened to `client_admin` and listed under "Manual review required" — that list is the reason the widening is acceptable, so read it before narrowing anyone by hand.
+
+**Rollout order — expand, migrate, contract.** The three steps are separate because the middle one cannot see values the last one has already dropped:
+
+1. **Expand.** Apply a schema with the six new enum values _and_ the legacy eight, plus the additive `Operator.roles` column. (This is the schema at commit `aebca95` with `roles UserRole[]` added to `Operator`.) The script checks for that column up front and says so if it is missing.
+2. **Migrate.** `db:migrate-roles --apply`.
+3. **Contract.** Apply the schema in this repo, whose `UserRole` enum holds only the six. Postgres refuses to drop an enum value still in use, so doing this before step 2 fails loudly instead of dropping data — verified by running it out of order on a scratch database.
+
+A database created fresh from the current schema skips all of this; the script then reports zero users and exits 0.
+
 ## How to test
 
 ```

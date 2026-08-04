@@ -149,14 +149,12 @@ test.describe("sales orders", () => {
     expect(status).toBe(404);
   });
 
-  test("a view-only buyer sees orders but cannot place or cancel one", async ({ page }) => {
-    await signIn(page, "viewer@acme.example");
-    await page.goto("/orders");
+  test("a session without `order:create` cannot place an order", async ({ page }) => {
+    // The buyer plane is one role now (doc 09 §1), so the denial worth
+    // asserting is plane-vs-plane: an `ap_manager` session exists in the
+    // tenant and holds no `order:create`. The API is the control (docs/05 §4.3).
+    await signIn(page, "ap@acme.example");
 
-    await expect(page.getByRole("link", { name: /0000004712/ })).toBeVisible();
-    await expect(page.getByRole("link", { name: "New order" })).toHaveCount(0);
-
-    // Hiding the CTA is presentation; the API refuses the same call (docs/05 §4.3).
     const status = await page.evaluate(async () => {
       const response = await fetch("/api/orders", {
         method: "POST",

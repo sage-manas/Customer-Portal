@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 /**
  * Postgres-backed suite for the operator console (docs/07 B5): provisioning
- * a tenant end to end (Tenant row + first tenant_admin user), and the
+ * a tenant end to end (Tenant row + first client_admin user), and the
  * per-tenant health/usage reads against real `OutboxEvent`/`SalesOrder`/etc
  * rows.
  *

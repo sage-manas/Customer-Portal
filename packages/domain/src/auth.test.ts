@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  LEGACY_ROLES,
+  LEGACY_ROLE_MAP,
   PERMISSIONS,
   ROLES,
   ROLE_PERMISSIONS,
   hasAnyPermission,
   hasPermission,
   isBackOfficeRole,
-  isBuyerRole,
+  isCustomerRole,
+  isPlatformRole,
   permissionsForRoles,
   rolesWithPermission,
   type Permission,
@@ -17,6 +20,17 @@ import {
 const session = (...roles: Role[]) => ({ roles });
 
 describe("role/permission registry", () => {
+  it("has exactly the six identifiers of the five-tier model (doc 09 §5)", () => {
+    expect([...ROLES]).toEqual([
+      "super_admin",
+      "sap_manager",
+      "client_admin",
+      "ap_manager",
+      "ar_manager",
+      "customer",
+    ]);
+  });
+
   it("assigns a permission set to every role", () => {
     for (const role of ROLES) {
       expect(ROLE_PERMISSIONS[role], role).toBeDefined();
@@ -33,10 +47,49 @@ describe("role/permission registry", () => {
     }
   });
 
+  it("lists no permission twice on a role (the composed sets stay a set)", () => {
+    for (const role of ROLES) {
+      const granted = ROLE_PERMISSIONS[role];
+      expect(new Set(granted).size, role).toBe(granted.length);
+    }
+  });
+
   it("unions permissions across multiple roles", () => {
-    const granted = permissionsForRoles(["tenant_credit", "tenant_support"]);
-    expect(granted.has("credit:release")).toBe(true);
-    expect(granted.has("support:resolve")).toBe(true);
+    const granted = permissionsForRoles(["ap_manager", "ar_manager"]);
+    expect(granted.has("finance:ap")).toBe(true);
+    expect(granted.has("finance:ar")).toBe(true);
+  });
+});
+
+describe("client_admin is composed, not hand-listed (doc 09 §2)", () => {
+  it("holds everything ap_manager and ar_manager hold", () => {
+    // The property that makes composition worth insisting on: a permission
+    // added to a desk role can never fail to reach the tenant's admin.
+    for (const staffRole of ["ap_manager", "ar_manager"] as const) {
+      for (const permission of ROLE_PERMISSIONS[staffRole]) {
+        expect(hasPermission(session("client_admin"), permission), permission).toBe(true);
+      }
+    }
+  });
+
+  it("keeps the desks narrower than the admin", () => {
+    expect(hasPermission(session("ap_manager"), "finance:ar")).toBe(false);
+    expect(hasPermission(session("ar_manager"), "finance:ap")).toBe(false);
+    for (const permission of [
+      "customer:register",
+      "onboarding:approve",
+      "tenant:settings",
+    ] as const) {
+      expect(hasPermission(session("ap_manager"), permission), permission).toBe(false);
+      expect(hasPermission(session("ar_manager"), permission), permission).toBe(false);
+    }
+  });
+
+  it("gives the AR desk the credit release, per the matrix", () => {
+    expect(hasPermission(session("ar_manager"), "credit:release")).toBe(true);
+    // Deciding a *new* limit stays the admin's: releasing applies the limit
+    // that exists, changing it is a different call.
+    expect(hasPermission(session("ar_manager"), "credit:decide-limit")).toBe(false);
   });
 });
 
@@ -46,32 +99,62 @@ describe("hasPermission", () => {
     expect(hasPermission(undefined, "order:view")).toBe(false);
   });
 
-  it("gives buyer_view_only reads but no writes (docs/05 §4.3)", () => {
-    const viewer = session("buyer_view_only");
-    const writes: Permission[] = ["order:create", "payment:pay", "support:create"];
-    expect(hasPermission(viewer, "order:view")).toBe(true);
+  it("gives the customer role the whole buyer plane and nothing else", () => {
+    const buyer = session("customer");
+    const writes: Permission[] = [
+      "order:create",
+      "payment:pay",
+      "support:create",
+      "credit:request",
+    ];
+    expect(hasPermission(buyer, "order:view")).toBe(true);
     for (const permission of writes) {
-      expect(hasPermission(viewer, permission), permission).toBe(false);
+      expect(hasPermission(buyer, permission), permission).toBe(true);
     }
-    expect(hasAnyPermission(viewer, writes)).toBe(false);
+    expect(hasAnyPermission(buyer, ["admin:view", "finance:ap", "platform:operate"])).toBe(false);
   });
 
-  it("keeps back-office permissions away from buyers and vice versa", () => {
-    expect(hasPermission(session("buyer_admin"), "credit:release")).toBe(false);
-    expect(hasPermission(session("buyer_admin"), "onboarding:approve")).toBe(false);
-    expect(hasPermission(session("tenant_sales"), "payment:pay")).toBe(false);
+  it("keeps back-office permissions away from customers and vice versa", () => {
+    expect(hasPermission(session("customer"), "credit:release")).toBe(false);
+    expect(hasPermission(session("customer"), "onboarding:approve")).toBe(false);
+    expect(hasPermission(session("client_admin"), "payment:pay")).toBe(false);
+    expect(hasPermission(session("client_admin"), "order:create")).toBe(false);
   });
 
-  it("keeps the platform operator out of tenant data (plane separation)", () => {
-    const operator = session("platform_operator");
-    expect(hasPermission(operator, "platform:operate")).toBe(true);
-    expect(hasPermission(operator, "order:view")).toBe(false);
-    expect(hasPermission(operator, "admin:view")).toBe(false);
+  it("keeps platform roles out of tenant data (plane separation)", () => {
+    for (const role of ["super_admin", "sap_manager"] as const) {
+      const operator = session(role);
+      expect(hasPermission(operator, "platform:operate"), role).toBe(true);
+      expect(hasPermission(operator, "order:view"), role).toBe(false);
+      expect(hasPermission(operator, "admin:view"), role).toBe(false);
+    }
   });
 
-  it("gives only tenant_admin the settings permission", () => {
-    const withSettings = ROLES.filter((r) => ROLE_PERMISSIONS[r].includes("tenant:settings"));
-    expect(withSettings).toEqual(["tenant_admin"]);
+  it("holds the sap_manager to SAP config and health only (doc 09 §5)", () => {
+    const sapManager = session("sap_manager");
+    expect(hasPermission(sapManager, "platform:sap-config")).toBe(true);
+    expect(hasPermission(sapManager, "platform:sap-health")).toBe(true);
+    for (const permission of [
+      "platform:tenant-crud",
+      "platform:operators-manage",
+      "platform:billing",
+    ] as const) {
+      expect(hasPermission(sapManager, permission), permission).toBe(false);
+    }
+  });
+
+  it("gives only client_admin the settings and customer-master permissions", () => {
+    for (const permission of [
+      "tenant:settings",
+      "customer:register",
+      "customer:edit",
+      "customer:deactivate",
+    ] as const) {
+      expect(
+        ROLES.filter((r) => ROLE_PERMISSIONS[r].includes(permission)),
+        permission,
+      ).toEqual(["client_admin"]);
+    }
   });
 });
 
@@ -87,19 +170,48 @@ describe("rolesWithPermission", () => {
     }
   });
 
+  it("grants every declared permission to at least one role", () => {
+    // A permission nothing holds is either a typo or a screen nobody can
+    // reach; both are worth failing on rather than discovering in QA.
+    for (const permission of PERMISSIONS) {
+      expect(rolesWithPermission(permission).length, permission).toBeGreaterThan(0);
+    }
+  });
+
   it("keeps a customer-plane permission out of the back office and vice versa", () => {
     // The property A7's fan-out leans on: resolving recipients by permission
     // cannot reach across planes, because no role holds both sides.
     expect(rolesWithPermission("support:resolve").every(isBackOfficeRole)).toBe(true);
-    expect(rolesWithPermission("payment:pay").every(isBuyerRole)).toBe(true);
+    expect(rolesWithPermission("payment:pay").every(isCustomerRole)).toBe(true);
+    expect(rolesWithPermission("platform:sap-config").every(isPlatformRole)).toBe(true);
   });
 });
 
 describe("role families", () => {
   it("classifies every role into exactly one plane", () => {
     for (const role of ROLES) {
-      const flags = [isBuyerRole(role), isBackOfficeRole(role), role === "platform_operator"];
+      const flags = [isCustomerRole(role), isBackOfficeRole(role), isPlatformRole(role)];
       expect(flags.filter(Boolean).length, role).toBe(1);
     }
+  });
+});
+
+describe("legacy mapping (doc 09 §3.1)", () => {
+  it("maps every legacy role to a role that exists today", () => {
+    for (const legacy of LEGACY_ROLES) {
+      const target = LEGACY_ROLE_MAP[legacy];
+      expect(ROLES.includes(target), legacy).toBe(true);
+    }
+  });
+
+  it("keeps each legacy role in its own plane", () => {
+    // A migration that moved a buyer into the back office, or an operator
+    // into a tenant, would be a privilege escalation performed by a script.
+    expect(isCustomerRole(LEGACY_ROLE_MAP.buyer_admin)).toBe(true);
+    expect(isCustomerRole(LEGACY_ROLE_MAP.buyer_user)).toBe(true);
+    expect(isCustomerRole(LEGACY_ROLE_MAP.buyer_view_only)).toBe(true);
+    expect(isBackOfficeRole(LEGACY_ROLE_MAP.tenant_admin)).toBe(true);
+    expect(isBackOfficeRole(LEGACY_ROLE_MAP.tenant_credit)).toBe(true);
+    expect(isPlatformRole(LEGACY_ROLE_MAP.platform_operator)).toBe(true);
   });
 });
