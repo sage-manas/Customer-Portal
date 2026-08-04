@@ -1,4 +1,4 @@
-export { getSapAdapterForTenant } from "./adapter-resolver";
+export { getSapAdapterForTenant, resetSapAdapterForTenant } from "./adapter-resolver";
 
 /**
  * Re-exported so app code can render freshness and translate SAP errors

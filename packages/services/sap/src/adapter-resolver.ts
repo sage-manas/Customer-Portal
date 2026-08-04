@@ -1,4 +1,4 @@
-import { createSapAdapter, type SapAdapter } from "@cc/adapter-sap";
+import { createSapAdapter, resetSapAdapter, type SapAdapter } from "@cc/adapter-sap";
 import { db, getTenantCredential, runWithTenant } from "@cc/db";
 import { instrumentAdapter } from "@cc/observability";
 
@@ -34,22 +34,32 @@ export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapt
       ? null
       : await runWithTenant(tenantId, () => getTenantCredential(tenantId, "sap"));
 
+  // The stored bag's keys are `SAP_CONNECTION_FIELDS` in @cc/domain — the
+  // same registry the ops console's configuration form renders from
+  // (doc 09 §3.3). Reading `params.endpoint` here and writing `endpoint`
+  // there is only safe because neither side spells the key itself.
+  const params = (credentials ?? {}) as Record<string, string>;
+
+  // Env vars remain the fallback for a tenant configured before the console
+  // existed, and for local development where nothing is in the vault. A
+  // stored value always wins: a per-tenant setting that an environment
+  // variable could override would make the console's screen a suggestion.
   const adapter = createSapAdapter({
     tenantId: tenant.id,
     driver: tenant.sapDriver,
     ecc:
       tenant.sapDriver === "ecc"
         ? {
-            endpoint: process.env.SAP_ECC_ENDPOINT ?? "",
-            client: process.env.SAP_ECC_CLIENT ?? "100",
-            credentials: (credentials ?? {}) as Record<string, string>,
+            endpoint: params.endpoint ?? process.env.SAP_ECC_ENDPOINT ?? "",
+            client: params.client ?? process.env.SAP_ECC_CLIENT ?? "100",
+            credentials: params,
           }
         : undefined,
     s4:
       tenant.sapDriver === "s4"
         ? {
-            baseUrl: process.env.SAP_S4_BASE_URL ?? "",
-            credentials: (credentials ?? {}) as Record<string, string>,
+            baseUrl: params.baseUrl ?? process.env.SAP_S4_BASE_URL ?? "",
+            credentials: params,
           }
         : undefined,
   });
@@ -58,4 +68,23 @@ export async function getSapAdapterForTenant(tenantId: string): Promise<SapAdapt
   // every caller of this resolver already passes through (docs/07 B3,
   // `@cc/observability`'s `instrumentAdapter`).
   return instrumentAdapter("sap", adapter, { tenantId: tenant.id, driver: tenant.sapDriver });
+}
+
+/**
+ * Drops a tenant's cached adapter.
+ *
+ * The factory caches one instance per tenant because a driver owns
+ * connection state — a pool, and the per-tenant circuit breaker of docs/02
+ * §4.3 — so a saved configuration change that nobody invalidated would keep
+ * talking to the previous system until the process restarted. The operator
+ * console calls this after every SAP configuration write, and before a
+ * connection test, so the test probes what is stored rather than what a
+ * resolver happened to build earlier.
+ *
+ * Async despite doing nothing asynchronous: this is the app-facing surface
+ * of adapter resolution, its sibling is async, and a caller that has to
+ * remember which of the two to await is a caller that will get it wrong.
+ */
+export async function resetSapAdapterForTenant(tenantId: string): Promise<void> {
+  resetSapAdapter(tenantId);
 }

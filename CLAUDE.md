@@ -26,6 +26,8 @@ docker compose -f docker-compose.dev.yml up -d   # local Postgres + Redis
 pnpm --filter <pkg> typecheck | lint | test | build
 pnpm --filter @cc/db db:push          # sync Prisma schema to local Postgres
 pnpm --filter @cc/db test:isolation   # cross-tenant isolation tests (needs Postgres)
+pnpm --filter @cc/service-identity test:integration     # tenant deactivation blocks login (needs Postgres)
+pnpm --filter @cc/service-platform test:integration     # provisioning, SAP config + audit trail (needs Postgres)
 pnpm --filter @cc/service-onboarding test:integration   # onboarding flow (needs Postgres)
 pnpm --filter @cc/service-catalogue test:integration    # cart flow (needs Postgres)
 pnpm --filter @cc/service-order test:integration        # draft -> order flow (needs Postgres)
@@ -41,6 +43,7 @@ pnpm --filter @cc/workers start        # the background process: outbox relay + 
 pnpm --filter @cc/service-identity db:seed   # dev tenants + users (see its README)
 pnpm --filter @cc/ui storybook        # component development
 pnpm --filter web dev                 # run the Next.js app
+pnpm --filter ops dev                 # run the operator console (port 3100)
 pnpm --filter web test:e2e            # Playwright smoke E2E (needs a build + seeded DB)
 
 turbo run typecheck lint test build   # whole-repo, from root

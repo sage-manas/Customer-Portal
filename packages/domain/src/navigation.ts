@@ -297,7 +297,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/sap/config",
     icon: "PlugZap",
     permission: "platform:sap-config",
-    status: "planned",
+    status: "live",
   },
   {
     key: "ops-sap-health",
@@ -305,7 +305,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/sap/health",
     icon: "Activity",
     permission: "platform:sap-health",
-    status: "planned",
+    status: "live",
   },
   {
     key: "ops-operators",
@@ -313,7 +313,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/operators",
     icon: "Users",
     permission: "platform:operators-manage",
-    status: "planned",
+    status: "live",
   },
   {
     key: "ops-billing",
@@ -321,7 +321,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/billing",
     icon: "Wallet",
     permission: "platform:billing",
-    status: "planned",
+    status: "live",
   },
 ] as const;
 

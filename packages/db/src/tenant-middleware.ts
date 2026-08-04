@@ -34,6 +34,7 @@ export const TENANT_SCOPED_MODELS = new Set([
   "AuditLog",
   "TenantDataKey",
   "TenantCredential",
+  "SapConfigAudit",
 ]);
 
 type Args = Record<string, unknown>;

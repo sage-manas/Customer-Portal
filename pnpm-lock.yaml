@@ -44,6 +44,9 @@ importers:
       '@cc/service-platform':
         specifier: workspace:*
         version: link:../../packages/services/platform
+      '@cc/service-sap':
+        specifier: workspace:*
+        version: link:../../packages/services/sap
       '@cc/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -77,7 +80,7 @@ importers:
         version: 10.5.4(postcss@8.5.23)
       eslint:
         specifier: ^9.17.0
-        version: 9.39.5(jiti@1.21.7)
+        version: 9.39.5(jiti@2.7.0)
       postcss:
         specifier: ^8.4.49
         version: 8.5.23
@@ -186,7 +189,7 @@ importers:
         version: 10.5.4(postcss@8.5.23)
       eslint:
         specifier: ^9.17.0
-        version: 9.39.5(jiti@2.7.0)
+        version: 9.39.5(jiti@1.21.7)
       postcss:
         specifier: ^8.4.49
         version: 8.5.23

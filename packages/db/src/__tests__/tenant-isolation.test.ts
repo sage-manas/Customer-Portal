@@ -43,6 +43,7 @@ describe("tenant isolation", () => {
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
       await db.notification.deleteMany();
+      await db.sapConfigAudit.deleteMany();
       await db.tenantCredential.deleteMany();
       await db.tenantDataKey.deleteMany();
       await db.outboxEvent.deleteMany();
@@ -64,6 +65,7 @@ describe("tenant isolation", () => {
     });
     await runWithTenant(tenantB.id, async () => {
       await db.notification.deleteMany();
+      await db.sapConfigAudit.deleteMany();
       await db.tenantCredential.deleteMany();
       await db.tenantDataKey.deleteMany();
       await db.outboxEvent.deleteMany();
@@ -499,6 +501,35 @@ describe("tenant isolation", () => {
       db.tenantCredential.findFirst({ where: { system: "sap" } }),
     );
     expect(asSeenByTenantB?.tenantId).toBe(tenantB.id);
+  });
+
+  it("scopes the SAP config trail (Phase 4): tenant A's configuration history is invisible to tenant B", async () => {
+    const auditA = await runWithTenant(tenantA.id, () =>
+      db.sapConfigAudit.create({
+        data: {
+          tenantId: tenantA.id,
+          operatorId: `op-${runId}`,
+          operatorEmail: "operator@platform.example",
+          action: "connection.updated",
+          changedFields: ["endpoint", "password"],
+        },
+      }),
+    );
+
+    // The console is cross-tenant by nature, which is exactly why this row
+    // is scoped: an operator reading tenant B's trail must not be shown
+    // which fields somebody changed on tenant A's connection.
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.sapConfigAudit.findUnique({ where: { id: auditA.id } }),
+    );
+    expect(asSeenByTenantB).toBeNull();
+
+    const tenantBTrail = await runWithTenant(tenantB.id, () => db.sapConfigAudit.findMany());
+    expect(tenantBTrail.some((row) => row.id === auditA.id)).toBe(false);
+
+    // Never values, only names (ADR-053) — asserted on the row itself so a
+    // future writer that starts storing a before/after pair fails here.
+    expect(auditA.changedFields).toEqual(["endpoint", "password"]);
   });
 
   it("scopes payments (ADR-019/ADR-044): a payment captured for tenant A is invisible to tenant B", async () => {

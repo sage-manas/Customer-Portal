@@ -21,6 +21,10 @@ export interface TenantSummary {
   logoUrl: string | null;
   primaryColor: string | null;
   moduleToggles: Record<string, boolean>;
+  /** Soft deactivation from the operator console (ADR-054). `login` refuses
+   * an inactive tenant; the flag is on the summary so a screen can say why
+   * rather than only failing. */
+  isActive: boolean;
 }
 
 export interface LoginInput {
@@ -65,6 +69,7 @@ function toSummary(tenant: {
   logoUrl: string | null;
   primaryColor: string | null;
   moduleToggles: unknown;
+  isActive: boolean;
 }): TenantSummary {
   return {
     id: tenant.id,
@@ -74,6 +79,7 @@ function toSummary(tenant: {
     logoUrl: tenant.logoUrl,
     primaryColor: tenant.primaryColor,
     moduleToggles: toModuleToggles(tenant.moduleToggles),
+    isActive: tenant.isActive,
   };
 }
 
@@ -110,6 +116,11 @@ export async function findTenantBySlug(slug: string): Promise<TenantSummary | nu
 export async function login(input: LoginInput, authSecret: string): Promise<LoginResult> {
   const tenant = await findTenant({ slug: input.tenantSlug, customDomain: input.customDomain });
   if (!tenant) throw new AuthError("tenant_not_found");
+  // The teeth behind the operator console's deactivate button (ADR-054).
+  // Checked before the password is verified, because the answer does not
+  // depend on it — and unlike the credential path there is nothing to
+  // conceal here: whoever is typing already knows this portal exists.
+  if (!tenant.isActive) throw new AuthError("tenant_inactive");
 
   const email = input.email.trim().toLowerCase();
 

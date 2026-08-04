@@ -1,14 +1,16 @@
 import { getTenant, getTenantBilling, getTenantHealth, getTenantUsage } from "@cc/service-platform";
 import { Badge, KpiCard, PageHeader } from "@cc/ui";
-import { notFound, redirect } from "next/navigation";
+import Link from "next/link";
+import { notFound } from "next/navigation";
 
-import { getOperatorSession } from "@/lib/session";
+import { TenantAdminPanel } from "./TenantAdminPanel";
+
+import { requireOperatorPage } from "@/lib/page-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function TenantDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const [session, { id }] = await Promise.all([getOperatorSession(), params]);
-  if (!session) redirect("/login");
+  const [, { id }] = await Promise.all([requireOperatorPage("platform:tenant-crud"), params]);
 
   const tenant = await getTenant(id);
   if (!tenant) notFound();
@@ -20,13 +22,26 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
   ]);
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-8">
+    <>
       <PageHeader
         title={tenant.name}
         subtitle={tenant.customDomain ?? `${tenant.slug}.<root-domain>`}
+        meta={
+          tenant.isActive ? undefined : (
+            <Badge variant="danger">Deactivated {tenant.deactivatedAt?.toLocaleDateString()}</Badge>
+          )
+        }
+        actions={
+          <Link
+            href={`/sap/config/${tenant.id}`}
+            className="rounded-md border border-border px-3 py-1.5 text-[12.5px] font-medium text-text"
+          >
+            SAP configuration
+          </Link>
+        }
       />
 
-      <section className="mt-6">
+      <section>
         <h2 className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-text-dim">Health</h2>
         <div className="mt-2 grid grid-cols-3 gap-4">
           <KpiCard
@@ -47,7 +62,7 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
         </div>
       </section>
 
-      <section className="mt-8">
+      <section>
         <h2 className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-text-dim">Usage</h2>
         <div className="mt-2 grid grid-cols-4 gap-4">
           <KpiCard label="Users" value={usage.userCount} />
@@ -57,7 +72,7 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
         </div>
       </section>
 
-      <section className="mt-8">
+      <section>
         <h2 className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-text-dim">
           Billing
         </h2>
@@ -72,6 +87,21 @@ export default async function TenantDetailPage({ params }: { params: Promise<{ i
           </p>
         </div>
       </section>
-    </main>
+
+      <section>
+        <h2 className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-text-dim">
+          Administration
+        </h2>
+        <div className="mt-2">
+          <TenantAdminPanel
+            tenantId={tenant.id}
+            slug={tenant.slug}
+            name={tenant.name}
+            customDomain={tenant.customDomain}
+            isActive={tenant.isActive}
+          />
+        </div>
+      </section>
+    </>
   );
 }

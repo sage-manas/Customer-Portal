@@ -96,31 +96,48 @@ export interface TenantListItem {
   name: string;
   customDomain: string | null;
   sapDriver: SapDriver;
+  /** Soft-deactivation state (ADR-054): `false` refuses every login. */
+  isActive: boolean;
+  deactivatedAt: Date | null;
   createdAt: Date;
 }
 
-/** Platform-plane read, like `findTenant` — no `runWithTenant` needed: this *is* the tenant registry. */
-export async function listTenants(): Promise<TenantListItem[]> {
-  const tenants = await db.tenant.findMany({ orderBy: { createdAt: "desc" } });
-  return tenants.map((tenant) => ({
-    id: tenant.id,
-    slug: tenant.slug,
-    name: tenant.name,
-    customDomain: tenant.customDomain,
-    sapDriver: tenant.sapDriver,
-    createdAt: tenant.createdAt,
-  }));
-}
-
-export async function getTenant(tenantId: string): Promise<TenantListItem | null> {
-  const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
-  if (!tenant) return null;
+function toListItem(tenant: {
+  id: string;
+  slug: string;
+  name: string;
+  customDomain: string | null;
+  sapDriver: SapDriver;
+  isActive: boolean;
+  deactivatedAt: Date | null;
+  createdAt: Date;
+}): TenantListItem {
   return {
     id: tenant.id,
     slug: tenant.slug,
     name: tenant.name,
     customDomain: tenant.customDomain,
     sapDriver: tenant.sapDriver,
+    isActive: tenant.isActive,
+    deactivatedAt: tenant.deactivatedAt,
     createdAt: tenant.createdAt,
   };
+}
+
+/**
+ * Platform-plane read, like `findTenant` — no `runWithTenant` needed: this
+ * *is* the tenant registry.
+ *
+ * Deactivated tenants are listed, not filtered out: this is the console's
+ * CRUD index, and a tenant an operator can no longer see is a tenant they
+ * cannot reactivate. The row carries `isActive` so the screen can say so.
+ */
+export async function listTenants(): Promise<TenantListItem[]> {
+  const tenants = await db.tenant.findMany({ orderBy: { createdAt: "desc" } });
+  return tenants.map(toListItem);
+}
+
+export async function getTenant(tenantId: string): Promise<TenantListItem | null> {
+  const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+  return tenant ? toListItem(tenant) : null;
 }

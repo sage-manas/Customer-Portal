@@ -17,6 +17,7 @@
     "@cc/db": "workspace:*",
     "@cc/domain": "workspace:*",
     "@cc/service-platform": "workspace:*",
+    "@cc/service-sap": "workspace:*",
     "@cc/ui": "workspace:*",
     "next": "^15.1.3",
     "react": "^19.0.0",

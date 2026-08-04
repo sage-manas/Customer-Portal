@@ -1,4 +1,5 @@
 export * from "./tenant";
+export * from "./sap-config";
 export * from "./onboarding";
 export * from "./order";
 export * from "./customer";

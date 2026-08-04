@@ -1,23 +1,25 @@
 import { getTenantHealth, listTenants } from "@cc/service-platform";
 import { Badge, KpiCard, PageHeader } from "@cc/ui";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
-import { getOperatorSession } from "@/lib/session";
+import { requireOperatorPage } from "@/lib/page-guard";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Tenant health dashboard (docs/07 B5). Composed on every load, never
- * stored (ADR-045, mirroring ADR-037/ADR-044): `listTenants()` is the
- * platform-plane registry, and `getTenantHealth` is called once per tenant
- * through its own `runWithTenant` scope rather than any cross-tenant query
- * running unscoped — the console loops, the database stays structural
- * (rule 4).
+ * Tenant list — CRUD's index (docs/07 B5, doc 09 §3.3), and `super_admin`
+ * only: a `sap_manager` configures every tenant's SAP connection and
+ * provisions none of them, so this screen is not theirs and `/sap/config`
+ * is.
+ *
+ * Composed on every load, never stored (ADR-045, mirroring ADR-037/ADR-044):
+ * `listTenants()` is the platform-plane registry, and `getTenantHealth` is
+ * called once per tenant through its own `runWithTenant` scope rather than
+ * any cross-tenant query running unscoped — the console loops, the database
+ * stays structural (rule 4).
  */
-export default async function OpsDashboardPage() {
-  const session = await getOperatorSession();
-  if (!session) redirect("/login");
+export default async function TenantsPage() {
+  await requireOperatorPage("platform:tenant-crud");
 
   const tenants = await listTenants();
   const health = await Promise.all(tenants.map((tenant) => getTenantHealth(tenant.id)));
@@ -25,9 +27,10 @@ export default async function OpsDashboardPage() {
 
   const totalOutboxFailed = health.reduce((sum, h) => sum + h.outboxFailed, 0);
   const totalOutboxPending = health.reduce((sum, h) => sum + h.outboxPending, 0);
+  const deactivated = tenants.filter((tenant) => !tenant.isActive).length;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-8">
+    <>
       <PageHeader
         title="Tenants"
         subtitle="Platform operator console — provisioning and health, not tenant or customer data."
@@ -41,18 +44,25 @@ export default async function OpsDashboardPage() {
         }
       />
 
-      <div className="mt-6 grid grid-cols-3 gap-4">
-        <KpiCard label="Tenants" value={tenants.length} />
+      <div className="grid grid-cols-3 gap-4">
+        <KpiCard
+          label="Tenants"
+          value={tenants.length}
+          subline={deactivated === 0 ? "All active" : `${deactivated} deactivated`}
+        />
         <KpiCard label="Outbox pending" value={totalOutboxPending} />
         <KpiCard label="Outbox exceptions" value={totalOutboxFailed} />
       </div>
 
-      <div className="mt-6 overflow-x-auto rounded-md border border-border bg-surface shadow-sm">
+      <div className="overflow-x-auto rounded-md border border-border bg-surface shadow-sm">
         <table className="w-full text-[12.5px]">
           <thead>
             <tr className="bg-background text-left text-[11px] uppercase tracking-wide text-text-dim">
               <th scope="col" className="px-4 py-2 font-bold">
                 Tenant
+              </th>
+              <th scope="col" className="px-4 py-2 font-bold">
+                Status
               </th>
               <th scope="col" className="px-4 py-2 font-bold">
                 SAP driver
@@ -66,7 +76,7 @@ export default async function OpsDashboardPage() {
           <tbody>
             {tenants.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-12 text-center text-[12.5px] text-text-dim">
+                <td colSpan={5} className="px-4 py-12 text-center text-[12.5px] text-text-dim">
                   No tenants provisioned yet.
                 </td>
               </tr>
@@ -78,6 +88,11 @@ export default async function OpsDashboardPage() {
                     <td className="px-4 py-2.5 align-top">
                       <div className="font-medium text-text">{tenant.name}</div>
                       <div className="font-mono text-[11px] text-text-dim">{tenant.slug}</div>
+                    </td>
+                    <td className="px-4 py-2.5 align-top">
+                      <Badge variant={tenant.isActive ? "success" : "danger"}>
+                        {tenant.isActive ? "Active" : "Deactivated"}
+                      </Badge>
                     </td>
                     <td className="px-4 py-2.5 align-top text-text-mid">
                       <Badge variant={tenant.sapDriver === "mock" ? "neutral" : "warning"}>
@@ -110,6 +125,6 @@ export default async function OpsDashboardPage() {
           </tbody>
         </table>
       </div>
-    </main>
+    </>
   );
 }

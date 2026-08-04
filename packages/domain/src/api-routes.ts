@@ -690,6 +690,87 @@ const OPS_ROUTES: readonly ApiRoute[] = [
     guard: { kind: "permission", permission: "platform:tenant-crud" },
     scope: "none",
   },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]",
+    method: "PATCH",
+    guard: { kind: "permission", permission: "platform:tenant-crud" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/status",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:tenant-crud" },
+    scope: "none",
+    note: "Soft deactivate/reactivate (ADR-054). There is no DELETE, here or anywhere — a tenant's O2C history is the portal's side of documents SAP has posted.",
+  },
+
+  // SAP configuration — the screens both platform roles share, and the
+  // reason `sap_manager` is a role rather than a restriction. These are
+  // `platform:sap-config`, deliberately *not* `platform:tenant-crud`: a SAP
+  // manager configures every tenant's connection and creates none of them.
+  {
+    plane: "ops",
+    path: "/api/sap/tenants",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+    note: "The per-tenant picker the SAP screens need — id/name/slug/driver only, which is why it is its own route rather than `/api/tenants`, the CRUD index.",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/sap-config",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+    note: "Returns non-secret connection values and whether each secret is set — never a stored secret's value (ADR-053).",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/sap-config",
+    method: "PUT",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/sap-config/test",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+    note: "Resolves the adapter through @cc/service-sap and hands it to @cc/service-platform — a service may not import another service (ADR-011).",
+  },
+  {
+    plane: "ops",
+    path: "/api/sap/health",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:sap-health" },
+    scope: "none",
+  },
+
+  // Operator management & billing — `super_admin` alone (doc 09 §2).
+  {
+    plane: "ops",
+    path: "/api/operators",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:operators-manage" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/operators",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:operators-manage" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/operators/[id]/status",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:operators-manage" },
+    scope: "none",
+  },
 ];
 
 export const API_ROUTES: readonly ApiRoute[] = [...WEB_ROUTES, ...OPS_ROUTES];

@@ -97,6 +97,18 @@ jobs:
       - name: Payment flow tests
         run: pnpm --filter @cc/service-payment test:integration
 
+      # The operator console's write paths: provisioning, the per-tenant SAP
+      # configuration round trip through the envelope vault, and the
+      # append-only trail — including the assertions that a stored secret
+      # never comes back out and that the trail holds no values (ADR-053).
+      - name: Platform console tests
+        run: pnpm --filter @cc/service-platform test:integration
+
+      # The other half of tenant deactivation (ADR-054): the console sets a
+      # flag, and this is what proves `login` refuses because of it.
+      - name: Tenant deactivation tests
+        run: pnpm --filter @cc/service-identity test:integration
+
       # Proves the seed still matches the schema and the tenant-scoped
       # writes it performs — it is the fixture every future e2e run needs.
       - name: Seed development data

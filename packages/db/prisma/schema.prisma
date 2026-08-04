@@ -73,6 +73,13 @@ model Tenant {
   /// Module toggles keyed by NavItem.key (@cc/domain navigation registry).
   /// Absent key = enabled; tenants opt modules *out*.
   moduleToggles  Json                 @default("{}")
+  /// Soft deactivation from the operator console (doc 09 §3.3, ADR-054).
+  /// `false` refuses every login for the tenant and leaves every row it
+  /// owns in place — a tenant's O2C history is the evidence behind
+  /// invoices SAP has already posted, and deleting it is not a thing an
+  /// operator gets to do from a web form.
+  isActive       Boolean              @default(true)
+  deactivatedAt  DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -91,6 +98,7 @@ model Tenant {
   auditLogs           AuditLog[]
   dataKey             TenantDataKey?
   credentials         TenantCredential[]
+  sapConfigAudits     SapConfigAudit[]
 
   @@map("tenants")
 }
@@ -1035,4 +1043,52 @@ model TenantCredential {
   @@unique([tenantId, system])
   @@index([tenantId])
   @@map("tenant_credentials")
+}
+
+/// Append-only trail of SAP configuration changes made from the operator
+/// console (doc 09 §3.3 "config audit trail: who changed what, when").
+///
+/// Tenant-scoped, not platform-plane, even though the actor is an
+/// `Operator` and the console is cross-tenant: the row is *about* one
+/// tenant's configuration, so scoping it makes rule 4 structural here the
+/// way it is everywhere else, and the console reads it per tenant inside
+/// `runWithTenant` exactly as `getTenantHealth` already does.
+///
+/// It deliberately does not reuse `AuditLog`: that model's actor is
+/// `actorUserId`, a portal `User`, and an operator is emphatically not one
+/// (ADR-045 — separate table, separate realm). Storing an operator id in a
+/// column named for portal users is how "who did this?" comes to have two
+/// possible answers and no way to tell them apart.
+///
+/// `changedFields` holds field *names* only — never values, and never a
+/// before/after pair. A trail that recorded values would be an unencrypted
+/// second copy of the credential vault (ADR-053).
+model SapConfigAudit {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  /// `Operator.id` — no foreign key, deliberately: the trail must survive
+  /// an operator row being deleted, and a FK would make deleting one either
+  /// impossible or a way to erase what they did.
+  operatorId    String
+  /// Denormalised for the same reason: the address as it was at the time.
+  operatorEmail String
+
+  /// A `SapConfigAction` from @cc/domain's registry.
+  action        String
+  /// Driver before/after, where the action changed it.
+  fromDriver    SapDriver?
+  toDriver      SapDriver?
+  /// Connection field keys touched (`sapConnectionDiff`). Names only.
+  changedFields String[]
+  /// Outcome of a `connection.tested` action; null for the others.
+  result        String?
+  /// Anything else worth keeping that is not a credential value.
+  metadata      Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@map("sap_config_audit")
 }

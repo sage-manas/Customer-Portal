@@ -83,7 +83,8 @@ export const PERMISSIONS = [
    * mirror of public self-registration. */
   "customer:register",
   "customer:edit",
-  /** Blocks login and new orders; never deletes O2C history (ADR-048). */
+  /** Blocks login and new orders; never deletes O2C history (doc 09 §3.4,
+   * built in Phase 5 — the tenant-level equivalent is ADR-054). */
   "customer:deactivate",
   /** The AP workspace: outgoing money (doc 09 §1 tier 4). */
   "finance:ap",
