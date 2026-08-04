@@ -4,6 +4,22 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-055: A background loop's counters are not an assertable quantity, and every integration suite now runs in CI
+
+**Context:** Phase 4 ran all thirteen Postgres-backed suites back to back for the first time, and `@cc/workers`'s reconciliation suite failed one case — then passed five isolated re-runs. The reason CI had never caught it is the second half of this ADR: only five of the thirteen suites were wired into `ci.yml` at all, and `@cc/workers` was not one of them.
+
+**Decision, part one — the three background loops are cross-tenant, so their return values describe the database rather than the test.** `reconcileOnce`, `sweepSlaOnce` and `relayOnce` each open with `db.tenant.findMany()` and sum across every tenant, because that is what a background loop _is_ (ADR-023/029/044 — nothing about them is request-scoped, so nothing about them is tenant-scoped either). Three assertions had been written as though the counter belonged to the suite: `outboxRequeued` exactly 1, `paymentsRetried` exactly 0, `breaches` exactly 1. Each was really asserting "no other suite left a stale row behind" — a fact about the whole database that the suite neither controls nor has an opinion about, and one that a `beforeEach` wiping its own two tenants cannot establish.
+
+They are now assertions about the suite's own rows: which of _these_ two outbox rows moved state, whether _this_ payment is still pending, how many `support.sla.breached` events exist for _this_ tenant after two sweeps. That is strictly stronger — "requeued exactly one row somewhere in the database" never implied it was the right one — and it is what the tests' names claimed all along. Where a total is genuinely the point, the existing `relayOnce` case already shows the shape: `toBeGreaterThanOrEqual(2)` plus `toContain` on the tenant ids.
+
+**Decision, part two — the flake was reproduced deliberately before being fixed, per ADR-024.** Diagnosis by inspection would have been a guess, and the failure did not recur on its own in eight subsequent runs. Inserting one unrelated tenant carrying a stale `failed` outbox row and running the single affected case reproduced it exactly: `expected 2 to be 1`. The same leftover row against the fixed assertions passes, and so does the full suite. The reason it was intermittent rather than constant also fell out of the reproduction: the file's _first_ `reconcileOnce` consumes any pre-existing stale row, so a leftover only breaks the run when it lands between two cases — which is precisely what a batch of suites sharing one database produces and a lone re-run never does.
+
+**Decision, part three — all thirteen suites run in CI.** Delivery, inquiry, support, loyalty, notification and workers were passing locally and never ran on a pull request, which is the same class of gap as an undeclared route (ADR-050): the check existed and nothing executed it. Adding them also makes part one load-bearing rather than theoretical — CI now runs exactly the shared-database sequence that surfaced the flake, so a future test that assumes it owns the database fails on the first pull request instead of intermittently, months later, on somebody's laptop.
+
+**Consequence:** the CI job is longer, and that is the cost of the suites being real. The ordering is deliberate — the modules that only _write_ rows run before the loops that _sweep_ them, so a leak shows up as a failure in the loop suite, which is where it is diagnosable, rather than as a wrong number three steps later. Verified by running the exact CI order twice against an already-populated local database.
+
+---
+
 ## ADR-054: A tenant is deactivated, never deleted, and the console's dialog names the consequences the code actually causes
 
 **Context:** doc 09 §3.3 asks for tenant CRUD with "deactivate = soft, confirmation dialog naming consequences". Three things were open: whether a delete should exist at all, what deactivation _does_ beyond setting a column, and where the consequence is enforced.

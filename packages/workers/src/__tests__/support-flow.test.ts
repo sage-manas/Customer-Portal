@@ -154,9 +154,17 @@ describe("POD discrepancy raises a support ticket", () => {
       }),
     );
 
-    expect(await sweepSlaOnce()).toMatchObject({ breaches: 1 });
-    expect(await sweepSlaOnce()).toMatchObject({ breaches: 0 });
+    await sweepSlaOnce();
+    await sweepSlaOnce();
 
+    // The "once" in this test's name is asserted per tenant, not on the
+    // sweep's global counter: `sweepSlaOnce` walks every tenant in the
+    // database (it is a background loop, not a request), so a breached
+    // ticket left behind by any other integration suite would make an exact
+    // `breaches: 1` wrong for reasons that have nothing to do with this
+    // ticket. Counting *this* tenant's rows after two sweeps is the
+    // stronger statement anyway — it is what "once" actually means, and it
+    // is what ADR-029's idempotency claim rests on.
     const breaches = await runWithTenant(tenant.id, () =>
       db.outboxEvent.findMany({ where: { eventName: "support.sla.breached" } }),
     );
