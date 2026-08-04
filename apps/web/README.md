@@ -19,6 +19,8 @@ The customer portal + tenant back-office (Next.js App Router). Route groups matc
 
 `/api/onboarding/*` is the deliberate exception to step 1: an applicant has no portal user until their account is approved. Those routes are still tenant-scoped by host, and the application is addressed by an unguessable draft token sent as `x-draft-token` — a wrong or missing one is a 404 (docs/DECISIONS.md ADR-009). `/api/admin/onboarding/*` is **not** public and re-checks `onboarding:review` / `onboarding:approve` per handler; the coarse `admin:view` middleware check is not enough, because a support role can see the shell without being allowed to create a customer in SAP.
 
+Every handler's permission is also declared as data in `API_ROUTES` (`packages/domain/src/api-routes.ts`), and `pnpm --filter web test` runs the sweep that compares that registry against `app/api/**` in both directions — an undeclared handler, a handler guarding a different permission than it declares, and a stale registry row all fail CI (ADR-050). The route×role matrix itself lives with the guard it executes, in `packages/services/identity/src/authz-matrix.test.ts`.
+
 Route handlers stay thin: parse → call a service → map the typed error to a status (docs/DECISIONS.md ADR-002). No auth or SAP logic lives in this app.
 
 ## Layers this app may use
@@ -48,6 +50,7 @@ Then open `http://acme.localhost:3000/login` — the subdomain is what resolves 
 pnpm --filter web typecheck
 pnpm --filter web lint
 pnpm --filter web build
+pnpm --filter web test        # authz sweep: every handler vs the API_ROUTES registry
 pnpm --filter web test:e2e     # Playwright, needs the build + a seeded database
 ```
 

@@ -4,6 +4,7 @@ export { hashPassword, verifyPassword } from "./password";
 
 export {
   OPERATOR_ACCESS_TOKEN_TTL_SECONDS,
+  OPERATOR_CLAIM_VERSION,
   OPERATOR_REFRESH_TOKEN_TTL_SECONDS,
   issueOperatorTokens,
   verifyOperatorToken,
@@ -12,12 +13,9 @@ export {
   type OperatorTokenType,
 } from "./jwt";
 
-export {
-  operatorLogin,
-  requireOperatorSession,
-  setOperatorPassword,
-  type OperatorLoginResult,
-} from "./operator-service";
+export { requireOperatorPermission, requireOperatorSession } from "./guard";
+
+export { operatorLogin, setOperatorPassword, type OperatorLoginResult } from "./operator-service";
 
 export {
   createTenant,

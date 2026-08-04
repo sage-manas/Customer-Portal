@@ -21,14 +21,14 @@ const createTenantSchema = z.object({
 
 export async function GET() {
   return handleOps(async () => {
-    await requireOperator();
+    await requireOperator("platform:tenant-crud");
     return NextResponse.json({ tenants: await listTenants() });
   });
 }
 
 export async function POST(request: Request) {
   return handleOps(async () => {
-    await requireOperator();
+    await requireOperator("platform:tenant-crud");
 
     const parsed = createTenantSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {

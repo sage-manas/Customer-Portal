@@ -1,3 +1,5 @@
+import type { Role } from "@cc/domain";
+import { isPlatformRole, isRole } from "@cc/domain";
 import { SignJWT, jwtVerify, type JWTPayload } from "jose";
 
 import { PlatformError } from "./errors";
@@ -13,6 +15,20 @@ import { PlatformError } from "./errors";
 export const OPERATOR_ACCESS_TOKEN_TTL_SECONDS = 30 * 60;
 export const OPERATOR_REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 
+/**
+ * Claim shape-version, the operator-realm twin of `@cc/service-identity`'s
+ * `CLAIM_VERSION` (doc 09 §4.3).
+ *
+ * 1 → the single implicit operator role: every session could do everything
+ * the console offered, because the console offered one thing.
+ * 2 → the five-tier model: the token carries platform roles, and the guard
+ * asks for a permission. A version-1 token has no `roles` claim at all, so
+ * accepting it would produce a session that fails every `requireOperatorPermission`
+ * with a 403 nobody can act on. Rejecting it outright is a `session_invalid`,
+ * which the console already handles by sending the operator to `/login`.
+ */
+export const OPERATOR_CLAIM_VERSION = 2;
+
 const ISSUER = "customerconnect-ops";
 const AUDIENCE = "customerconnect-ops-console";
 
@@ -21,6 +37,14 @@ export type OperatorTokenType = "access" | "refresh";
 export interface OperatorClaims {
   operatorId: string;
   email: string;
+  /**
+   * Platform-plane roles only. `verifyOperatorToken` drops anything that
+   * isn't one, so a token that somehow carried `client_admin` would arrive
+   * here without it rather than granting a tenant permission in the
+   * operator realm — plane separation enforced at the parse, not by
+   * everyone downstream remembering to check.
+   */
+  roles: Role[];
 }
 
 export interface OperatorTokenPair {
@@ -44,7 +68,12 @@ async function sign(
   secret: string,
   ttlSeconds: number,
 ): Promise<string> {
-  return new SignJWT({ typ: type, email: claims.email })
+  return new SignJWT({
+    typ: type,
+    ver: OPERATOR_CLAIM_VERSION,
+    email: claims.email,
+    roles: claims.roles,
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(claims.operatorId)
     .setIssuer(ISSUER)
@@ -80,9 +109,17 @@ export async function verifyOperatorToken(
 
   if (payload.typ !== expected) throw new PlatformError("session_invalid");
   if (typeof payload.sub !== "string") throw new PlatformError("session_invalid");
+  // Checked before any claim is read, so a pre-restructure token is
+  // "sign in again" rather than a roleless session (see OPERATOR_CLAIM_VERSION).
+  if (payload.ver !== OPERATOR_CLAIM_VERSION) throw new PlatformError("session_invalid");
 
   return {
     operatorId: payload.sub,
     email: typeof payload.email === "string" ? payload.email : "",
+    roles: Array.isArray(payload.roles)
+      ? payload.roles.filter(
+          (role): role is Role => typeof role === "string" && isRole(role) && isPlatformRole(role),
+        )
+      : [],
   };
 }

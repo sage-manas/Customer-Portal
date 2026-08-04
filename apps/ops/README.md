@@ -9,9 +9,12 @@ a `User` row with a platform role.
 ## What's here
 
 - `middleware.ts` — verifies the `cc_ops_access` cookie against
-  `@cc/service-platform/edge`'s `verifyOperatorToken`. No tenant/host
-  resolution (an operator isn't scoped to a tenant) and no per-route
-  permission split (there is exactly one operator role).
+  `@cc/service-platform/edge`'s `verifyOperatorToken`, then gates on
+  `platform:operate` — the console's mirror of `apps/web`'s `admin:view`
+  check. No tenant/host resolution (an operator isn't scoped to a tenant).
+  Like the web app's, it is a gate and not _the_ enforcement: every handler
+  calls `requireOperator(permission)`, because a session that may open the
+  shell is not a session that may create a tenant.
 - `/login` — operator sign-in.
 - `/` — tenant list with per-tenant queue depth/exceptions.
 - `/tenants/new` — provisioning form: creates the `Tenant` row and its first
@@ -35,12 +38,20 @@ platform role (`operator@platform.example` = `super_admin`,
 idempotent, production-refusing shape as `@cc/service-identity`'s tenant
 seed. Two rows because the difference between the roles is only
 demonstrable when a login exists that _cannot_ reach tenant CRUD or
-billing. The console does not read `Operator.roles` yet — role-aware auth
-and `requirePermission` here are Phase 4 of
-`docs/09-RBAC-RESTRUCTURE-PLAN.md`; today both logins see everything.
+billing — and as of Phase 3 that difference is real: the operator token
+carries platform roles, `requireOperator(permission)` enforces them, and
+`sap@platform.example` gets a 403 from `/api/tenants` (ADR-051). The
+_screens_ that make `sap_manager` useful rather than merely restricted —
+SAP config, SAP health, the config audit trail — are Phase 4 of
+`docs/09-RBAC-RESTRUCTURE-PLAN.md`.
 
 ## How to test
 
-`pnpm --filter ops dev` runs on port 3100 (apps/web owns 3000). There is no
+`pnpm --filter ops dev` runs on port 3100 (apps/web owns 3000).
+`pnpm --filter ops test` runs the authz sweep, which checks every handler
+here against `API_ROUTES` in `@cc/domain` — an undeclared route or a guard
+naming a permission its registry row doesn't fails CI. The route×role
+matrix itself lives with the guard it executes, in
+`packages/services/platform/src/authz-matrix.test.ts`. There is no
 Playwright suite yet — `pnpm --filter @cc/service-platform test:integration`
 covers provisioning, health and usage against a real database.
