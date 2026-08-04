@@ -29,9 +29,15 @@ undo the point of a separate realm.
 
 ## Seeding an operator
 
-`pnpm --filter @cc/service-platform db:seed` upserts a dev operator
-(`operator@platform.example` / `ops-dev-password`), the same idempotent,
-production-refusing shape as `@cc/service-identity`'s tenant seed.
+`pnpm --filter @cc/service-platform db:seed` upserts one dev operator per
+platform role (`operator@platform.example` = `super_admin`,
+`sap@platform.example` = `sap_manager`, both `ops-dev-password`), the same
+idempotent, production-refusing shape as `@cc/service-identity`'s tenant
+seed. Two rows because the difference between the roles is only
+demonstrable when a login exists that _cannot_ reach tenant CRUD or
+billing. The console does not read `Operator.roles` yet — role-aware auth
+and `requirePermission` here are Phase 4 of
+`docs/09-RBAC-RESTRUCTURE-PLAN.md`; today both logins see everything.
 
 ## How to test
 

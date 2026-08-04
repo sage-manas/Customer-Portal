@@ -104,7 +104,10 @@ describe("platform provisioning + composed reads", () => {
   it("operator login is a separate table from tenant Users entirely", async () => {
     const email = `operator-${runId}@platform.example`;
     const passwordHash = await hashPassword("a very good operator password");
-    await db.operator.create({ data: { email, passwordHash } });
+    // `roles` has no schema default (ADR-049) — creating an operator states
+    // what it may do, so forgetting the field is a write error rather than a
+    // login that silently reaches nothing.
+    await db.operator.create({ data: { email, passwordHash, roles: ["sap_manager"] } });
 
     const { claims } = await operatorLogin(email, "a very good operator password", SECRET);
     expect(claims.email).toBe(email);

@@ -38,5 +38,5 @@ code below is a deliberate copy rather than a shared import.
 ```
 pnpm --filter @cc/service-platform test              # password/JWT units, no database
 pnpm --filter @cc/service-platform test:integration   # provisioning + health/usage, needs Postgres
-pnpm --filter @cc/service-platform db:seed            # dev operator login
+pnpm --filter @cc/service-platform db:seed            # dev operator logins (one per platform role)
 ```

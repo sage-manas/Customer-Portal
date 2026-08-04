@@ -3,7 +3,7 @@ import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 
 import { isAuthError } from "./errors";
-import { issueTokens, verifyToken } from "./jwt";
+import { CLAIM_VERSION, issueTokens, verifyToken } from "./jwt";
 
 const SECRET = "test-secret-that-is-long-enough-32chars";
 const OTHER_SECRET = "another-secret-that-is-long-enough-32ch";
@@ -67,9 +67,36 @@ describe("token issue/verify", () => {
     await expect(verifyToken(expired, SECRET)).rejects.toMatchObject({ code: "session_expired" });
   });
 
+  it("rejects a token from before the five-tier role collapse", async () => {
+    // Correctly signed, unexpired, and carrying a role that no longer
+    // exists. Without the version check `verifyToken` would drop the role
+    // and hand back a session with no permissions at all — a tenant admin
+    // silently 403ing everywhere for up to a refresh lifetime, with nothing
+    // telling them to sign in again (doc 09 §4.3).
+    const stale = await new SignJWT({
+      typ: "access",
+      ver: CLAIM_VERSION - 1,
+      tenantId: "tnt_1",
+      tenantSlug: "acme",
+      email: "admin@acme.example",
+      roles: ["tenant_admin"],
+      availableKunnrs: [],
+    })
+      .setProtectedHeader({ alg: "HS256" })
+      .setSubject("usr_1")
+      .setIssuer("customerconnect-portal")
+      .setAudience("customerconnect-web")
+      .setIssuedAt()
+      .setExpirationTime("30m")
+      .sign(new TextEncoder().encode(SECRET));
+
+    await expect(verifyToken(stale, SECRET)).rejects.toMatchObject({ code: "session_invalid" });
+  });
+
   it("drops unknown roles instead of trusting them", async () => {
     const token = await new SignJWT({
       typ: "access",
+      ver: CLAIM_VERSION,
       tenantId: "tnt_1",
       tenantSlug: "acme",
       email: "x@acme.example",
