@@ -1,4 +1,4 @@
-import { PORTAL_NAV, hasPermission, visibleNavItems } from "@cc/domain";
+import { PORTAL_NAV, hasPermission, sessionPlane, visibleNavItems } from "@cc/domain";
 import { getCartLineCount } from "@cc/service-catalogue";
 import { unreadNotificationCount } from "@cc/service-notification";
 import { redirect } from "next/navigation";
@@ -23,6 +23,14 @@ import { resolveRequestTenant } from "@/lib/tenant";
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect("/login");
+
+  // The portal is the customer plane, and after the role collapse that is one
+  // role (ADR-061). A back-office session holds `order:view` and
+  // `invoice:view` too — but scoped to the tenant's desks, not to a KUNNR it
+  // does not have — so rendering this shell for it would offer a nav whose
+  // every screen reads an account the session has never been linked to
+  // (ADR-062). It belongs in its own shell, and the API refuses either way.
+  if (sessionPlane(session) === "back_office") redirect("/admin");
 
   const tenant = await resolveRequestTenant();
   const navItems = visibleNavItems(PORTAL_NAV, session, tenant?.moduleToggles);

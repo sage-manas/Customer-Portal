@@ -13,9 +13,10 @@ import { handlePortal, requirePortal } from "@/lib/portal-route";
 /**
  * The customer's inquiries (docs/03 Module 3, docs/05 §7.3).
  *
- * `inquiry:view` lists, `inquiry:create` raises — two permissions, because a
- * view-only buyer may follow what their colleagues have asked for without
- * being able to commit the account to a new requirement (docs/05 §4.3).
+ * `inquiry:view` lists, `inquiry:create` raises. One role holds both after
+ * the collapse (ADR-061); they stay separate because reading what the
+ * account has asked for and committing it to a new requirement are different
+ * acts, and the registry is where that distinction survives (docs/05 §4.3).
  *
  * POST sequences two owners: SAP creates the inquiry (VA11), then the portal
  * records which draft it came from. The order is deliberate and the

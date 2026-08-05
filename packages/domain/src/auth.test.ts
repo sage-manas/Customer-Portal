@@ -11,6 +11,7 @@ import {
   isBackOfficeRole,
   isCustomerRole,
   isPlatformRole,
+  sessionPlane,
   permissionsForRoles,
   rolesWithPermission,
   type Permission,
@@ -193,6 +194,34 @@ describe("role families", () => {
       const flags = [isCustomerRole(role), isBackOfficeRole(role), isPlatformRole(role)];
       expect(flags.filter(Boolean).length, role).toBe(1);
     }
+  });
+
+  it("gives every role a session plane, and the empty session none", () => {
+    // The property the portal shell leans on (ADR-062): a session always has
+    // an answer, so a shell never has to guess from a role name.
+    expect(sessionPlane(null)).toBe("none");
+    expect(sessionPlane({ roles: [] })).toBe("none");
+
+    for (const role of ROLES) {
+      const plane = sessionPlane({ roles: [role] });
+      expect(plane, role).not.toBe("none");
+      expect(
+        plane === "platform"
+          ? isPlatformRole(role)
+          : plane === "back_office"
+            ? isBackOfficeRole(role)
+            : isCustomerRole(role),
+        role,
+      ).toBe(true);
+    }
+  });
+
+  it("resolves a mixed-plane session to the widest plane", () => {
+    // Not a state the seeds or the migration produce; asserted so that if one
+    // ever does, the session lands in the console rather than in a portal it
+    // holds no KUNNR for.
+    expect(sessionPlane({ roles: ["customer", "client_admin"] })).toBe("back_office");
+    expect(sessionPlane({ roles: ["customer", "super_admin"] })).toBe("platform");
   });
 });
 

@@ -1,5 +1,6 @@
 import type { Permission, SessionClaims } from "@cc/domain";
 import { captureException, getLogger, runWithContext, setContextTenant } from "@cc/observability";
+import { isCustomerError } from "@cc/service-customer";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInquiryError } from "@cc/service-inquiry";
 import { isLoyaltyError } from "@cc/service-loyalty";
@@ -71,6 +72,23 @@ export function toAdminErrorResponse(error: unknown): NextResponse {
     // unlike a customer-facing payment error, which never carries it.
     return NextResponse.json(
       { error: error.message, code: error.code, upstreamMessage: error.upstreamMessage },
+      { status: error.status },
+    );
+  }
+  if (isCustomerError(error)) {
+    // `upstreamMessage` included, for onboarding's reason: an XD02 write that
+    // SAP refused is only actionable if the desk can read what SAP said. The
+    // 404 this also carries is the cross-tenant answer (CLAUDE.md rule 5) —
+    // without this branch it left as a 500, which tells a caller probing for
+    // another tenant's KUNNR that something went wrong rather than that
+    // nothing is there.
+    return NextResponse.json(
+      {
+        error: error.message,
+        issues: error.issues,
+        code: error.code,
+        upstreamMessage: error.upstreamMessage,
+      },
       { status: error.status },
     );
   }

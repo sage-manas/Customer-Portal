@@ -123,12 +123,14 @@ export function RegisterCustomerWizard() {
                 field={field}
                 name={field.portalField}
                 value={decision[field.portalField as keyof Decision] ?? ""}
-                onChange={(event) =>
-                  setDecision((previous) => ({
-                    ...previous,
-                    [field.portalField]: event.currentTarget.value,
-                  }))
-                }
+                onChange={(event) => {
+                  // Read before the updater runs, not inside it: React may
+                  // call a functional updater after the handler has returned,
+                  // by which time `currentTarget` is null and the whole screen
+                  // dies on a keystroke.
+                  const { value } = event.currentTarget;
+                  setDecision((previous) => ({ ...previous, [field.portalField]: value }));
+                }}
               />
             ))}
           </FormSection>

@@ -4,6 +4,36 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-063: A service error that no route helper maps is a 500 wearing a 404's clothes — and the role E2E is what found it
+
+**Context:** the Phase 7 role spec asserted that a client admin asking for another tenant's KUNNR gets a 404. It got a 500. `CustomerError` carries `status: 404` and its own file says "so `toAdminErrorResponse` maps it the way it maps the rest" — but neither `toAdminErrorResponse` nor `toPortalErrorResponse` had a branch for it, so every `/api/admin/customers/*` failure and every `assertCustomerCanOrder` refusal (a deactivated account placing an order — ADR-057's whole point) fell through to `throw error` and came back as a 500.
+
+**Decision:** both helpers gain the branch — the admin one with `upstreamMessage` (a desk needs SAP's words about a refused XD02), the portal one without, per the split those files already keep. Recorded rather than fixed silently because of what it says about the shape of the codebase: a service declaring a status is a _claim_, and the claim is only true if a route helper was edited too. The integration suites test the service, and the authz sweep tests the guard; neither covers the wire.
+
+**Consequence:** the 404-not-403 rule was structurally undermined at the one place it was most load-bearing — a caller probing for another tenant's customer was being told "something went wrong" instead of "there is nothing here", which is a distinguishable answer. The generalisable fix (a sweep asserting every exported service error type appears in a route helper) is not built here; it is noted in doc 09's follow-ups as the next thing of this kind worth mechanising.
+
+---
+
+## ADR-062: The portal shell is the customer plane, and a back-office session is redirected rather than rendered
+
+**Context:** with the buyer roles collapsed, the customer portal serves one role — but `/` was reachable by any authenticated session. `ap_manager` and `ar_manager` hold `dashboard:view`, `order:view`, `invoice:view` and `payment:view` (they are desk reads on their side), so `visibleNavItems(PORTAL_NAV, …)` produced them a four-item buyer sidebar. Every screen behind it reads `session.kunnr`, which a back-office user has never had. The API was never at risk — those handlers are KUNNR-scoped and answer 404 — but the shell rendered.
+
+**Decision:** the portal layout asks `sessionPlane(session)` and sends a `back_office` session to `/admin`. The helper is new in `@cc/domain` and derives the plane from the existing permission-derived plane helpers (ADR-048), so this is not `if (role === …)` wearing a hat: no role identifier appears in `apps/web`. Sharing a leaf permission across planes is legitimate and stays legitimate — what differs is what the read is scoped to — so the question "which app are you" cannot be answered by `hasPermission`, and needed an answer of its own. Mixed-plane sessions resolve to the widest plane, which the seeds and the migration never produce and the domain test pins anyway.
+
+**Consequence:** one redirect, in the layout, rather than a rule repeated per screen; login needs no plane logic because every portal entry path goes through the shell. `/admin` for a `customer` is still middleware's 403, unchanged and in the opposite direction.
+
+---
+
+## ADR-061: The buyer collapse is total — no per-user view-only flag — and the read/write permission split stays
+
+**Context:** doc 10 Phase 7 asks to collapse `buyer_admin`/`buyer_user`/`buyer_view_only` into `customer` and to "decide whether a per-user view-only flag survives; ADR either way".
+
+**Decision:** it does not survive. A flag would be a second authority on what a session may do, living on the user row, next to a registry whose entire purpose is to be the only one — and every guard would then have to consult both or be wrong. The demand it answers is real, so it is answered where authority already lives: the leaf permissions stay split along the read/write seam (`inquiry:view`/`inquiry:create`, `support:view`/`support:create`, `delivery:view`/`delivery:confirm-receipt`, `catalogue:view`/`cart:manage`/`order:create`), and the one `customer` role simply holds both halves. A tenant that later wants a read-only buyer gets a seventh row in `ROLE_PERMISSIONS` holding only the `:view` half — no route re-tagged, no screen re-cut, no migration of a boolean into a role.
+
+**Consequence:** the portal's CTAs keep asking `hasPermission(session, "cart:manage")` and friends rather than becoming unconditional, which reads as redundant today and is the thing that makes the seventh role cheap. Comments across the portal handlers that justified the split by naming a view-only buyer now name the seam instead. Nothing in the customer portal branches on a role.
+
+---
+
 ## ADR-060: The exception tray moves into AP and leaves a redirect, not a tab
 
 **Context:** doc 10 Phase 6 says to "move the exceptions tray here" — into `/admin/ap`. The tray has a live nav item, a screen at `/admin/exceptions`, two retry handlers, and a runbook that names the path.

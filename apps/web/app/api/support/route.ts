@@ -13,9 +13,11 @@ import { handlePortal, requirePortal } from "@/lib/portal-route";
 /**
  * Support tickets (docs/03 Module 8, docs/05 §7.8).
  *
- * `support:view` lists; `support:create` raises. Two permissions because a
- * view-only buyer may follow a query their colleague opened without being
- * able to commit the account to a new one (docs/05 §4.3).
+ * `support:view` lists; `support:create` raises. Both belong to the one
+ * `customer` role now (ADR-061), and stay separate for the same reason as
+ * everywhere else on this plane: following a query and opening one are
+ * different acts, and the split is the registry's, not a screen's
+ * (docs/05 §4.3).
  */
 export const runtime = "nodejs";
 

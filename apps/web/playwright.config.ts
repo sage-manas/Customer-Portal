@@ -33,6 +33,10 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: `pnpm start --port ${PORT}`,
+    // The whole suite signs in from one IP far faster than any person would,
+    // and the middleware's public limit (60/min/IP) is right to refuse that
+    // in production. Raised here rather than exempted anywhere in the app.
+    env: { RATE_LIMIT_PUBLIC: "10000", RATE_LIMIT_TENANT: "100000" },
     url: `http://localhost:${PORT}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
