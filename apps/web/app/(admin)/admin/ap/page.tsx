@@ -15,6 +15,7 @@ import { redirect } from "next/navigation";
 
 import { WorkspaceTabs, resolveTab } from "../WorkspaceTabs";
 
+import { DeskActionButton } from "./DeskActionButton";
 import { ReconciliationTray } from "./ReconciliationTray";
 
 import { getSession } from "@/lib/session";
@@ -28,12 +29,17 @@ import { getSession } from "@/lib/session";
  * holds and which `client_admin` holds by composition (doc 09 §2) — the
  * screen never asks which role is looking.
  *
- * Every view here is a **queue, not a control**. The portal cannot pay a
- * refund (F-58), settle a rebate (VB(7) or release a credit block; those are
- * FI/SD transactions the adapter has no method for, and a button that
- * recorded one anyway would give the desk a second answer to "has this been
- * paid?" (ADR-059). What the desk gets is what is outstanding, how old it is,
- * and where to go and do it.
+ * The two actions here — pay a credit out (F-58) and settle a rebate (VB(7) —
+ * **run the SAP transaction**, and the portal records nothing of its own about
+ * them (ADR-059). SAP's payment document and credit memo request are the
+ * record; the session's user rides onto each as the authoriser, and the queue
+ * re-reads afterwards, so what the desk sees next is SAP's answer rather than
+ * an optimistic row. Both are idempotent on a key derived from the document,
+ * so a double-clicked button is one payout.
+ *
+ * What is deliberately *not* here: releasing a rebate for settlement (VBO2)
+ * and approving a credit limit. The portal performs settlement runs, not the
+ * decisions that authorise them.
  */
 
 export const dynamic = "force-dynamic";
@@ -154,8 +160,9 @@ export default async function AccountsPayablePage({
             Credit notes whose FI item is still open —{" "}
             <Money value={refunds.totalOwed} className="text-[11.5px]" /> owed back across{" "}
             {refunds.refunds.length} document
-            {refunds.refunds.length === 1 ? "" : "s"}. Paying one out is F-58, or it clears against
-            the account&apos;s next invoice; the portal lists them and settles nothing.
+            {refunds.refunds.length === 1 ? "" : "s"}. Paying one here posts the F-58 outgoing
+            payment and clears the FI item; a credit can also disappear from this list by clearing
+            against the account&apos;s next invoice.
           </p>
 
           <div className="overflow-x-auto rounded-md border border-border bg-surface shadow-sm">
@@ -177,12 +184,13 @@ export default async function AccountsPayablePage({
                   <th scope="col" className="px-4 py-2 text-right font-bold">
                     Waiting
                   </th>
+                  <th scope="col" className="px-4 py-2 font-bold" />
                 </tr>
               </thead>
               <tbody>
                 {refunds.refunds.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-text-dim">
+                    <td colSpan={6} className="px-4 py-12 text-center text-text-dim">
                       Nothing owed back. Every credit note has cleared.
                     </td>
                   </tr>
@@ -204,6 +212,17 @@ export default async function AccountsPayablePage({
                       <td className="px-4 py-2.5 text-right tabular-nums text-text-mid">
                         {refund.daysOutstanding} d
                       </td>
+                      <td className="px-4 py-2.5">
+                        <DeskActionButton
+                          endpoint={`/api/admin/ap/refunds/${refund.vbeln}/pay`}
+                          label="Pay out"
+                          busyLabel="Paying…"
+                          tone="destructive"
+                          title={`Pay ${refund.kunnr} back?`}
+                          consequence={`This posts an outgoing payment (F-58) of ${refund.currency} ${refund.openAmount.toLocaleString("en-IN")} in SAP and clears credit note ${refund.vbeln}. Money leaves the tenant's bank account — it can only be reversed by an FI reversal.`}
+                          confirmLabel="Pay it out"
+                        />
+                      </td>
                     </tr>
                   ))
                 )}
@@ -221,7 +240,9 @@ export default async function AccountsPayablePage({
             {rebates.overdueCount > 0
               ? ` · ${rebates.overdueCount} agreement${rebates.overdueCount === 1 ? " has" : "s have"} lapsed unsettled`
               : null}
-            . Accruals are SAP&apos;s own arithmetic (KONA-KAWRT); settlement runs in VB(7.
+            . Accruals are SAP&apos;s own arithmetic (KONA-KAWRT). Settling here runs VB(7 and posts
+            the credit memo request SAP then bills; releasing an agreement *for* settlement stays in
+            VBO2, which is why an open agreement has no button.
           </p>
 
           <div className="overflow-x-auto rounded-md border border-border bg-surface shadow-sm">
@@ -243,12 +264,13 @@ export default async function AccountsPayablePage({
                   <th scope="col" className="px-4 py-2 text-right font-bold">
                     Accrued
                   </th>
+                  <th scope="col" className="px-4 py-2 font-bold" />
                 </tr>
               </thead>
               <tbody>
                 {rebates.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-text-dim">
+                    <td colSpan={6} className="px-4 py-12 text-center text-text-dim">
                       No rebate agreements exist for this tenant.
                     </td>
                   </tr>
@@ -287,6 +309,20 @@ export default async function AccountsPayablePage({
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <Money value={row.agreement.accruedAmount} />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <DeskActionButton
+                          endpoint={`/api/admin/ap/rebates/${row.agreement.agreementNumber}/settle`}
+                          label="Settle"
+                          busyLabel="Settling…"
+                          title={`Settle agreement ${row.agreement.agreementNumber}?`}
+                          consequence={`This runs the VB(7 settlement in SAP: it posts a credit memo request for ${row.agreement.currency} ${row.agreement.accruedAmount.toLocaleString("en-IN")} against ${row.agreement.kunnr} and closes the agreement (KONA-BOSTA = D).`}
+                          confirmLabel="Settle it"
+                          disabled={!row.state.settleable}
+                          disabledReason={
+                            row.state.code === "D" ? "Settled" : "Not released (VBO2)"
+                          }
+                        />
                       </td>
                     </tr>
                   ))

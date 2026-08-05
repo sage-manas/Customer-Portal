@@ -34,6 +34,8 @@ export type { CreditRequestRecord } from "./credit-request-store";
 
 export {
   listRebateSettlements,
+  rebateSettlementReference,
+  settleRebate,
   type RebateQueueFilter,
   type RebateQueueResult,
 } from "./rebate-desk-service";

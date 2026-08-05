@@ -137,6 +137,29 @@ export interface RebateAgreement {
   currency: string;
 }
 
+/**
+ * VB(7 — settling a rebate agreement, which posts the credit memo request
+ * SAP then bills as a credit note (doc 09 §3.4, the AP desk's queue).
+ */
+export interface RebateSettlementInput {
+  agreementNumber: string;
+  /** Idempotency key derived from the agreement, never freshly generated. */
+  reference: string;
+  /** Carried onto the settlement document, so SAP records who authorised it. */
+  initiatedBy?: string;
+  note?: string;
+}
+
+export interface RebateSettlementResult {
+  agreementNumber: string;
+  /** The credit memo request VB(7 creates (VBELN of the B1/B3 document). */
+  creditMemoRequest: string;
+  settledAmount: number;
+  currency: string;
+  /** KONA-BOSTA as it stands after the settlement run. */
+  settlementStatus: string;
+}
+
 /** Shipping address a customer may pick as ship-to (VBPA partner SH). */
 export interface ShipToAddress {
   kunnr: string;

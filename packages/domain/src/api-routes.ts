@@ -719,6 +719,35 @@ const WEB_ROUTES: readonly ApiRoute[] = [
     scope: "tenant",
     note: "Deciding a limit request is `client_admin` only; `ar_manager` holds `credit:release`, which applies the limit that exists rather than changing it.",
   },
+  // The AP and AR desks' three actions (doc 09 §3.4, ADR-059). Each is a SAP
+  // transaction the portal now performs rather than points at — F-58, VB(7
+  // and VKM3 — so each is a POST guarded by the desk's own permission, and
+  // each is idempotent on a key derived from the document rather than the
+  // click (ADR-021's rule).
+  {
+    plane: "web",
+    path: "/api/admin/ap/refunds/[vbeln]/pay",
+    method: "POST",
+    guard: { kind: "permission", permission: "finance:ap" },
+    scope: "tenant",
+    note: "F-58 outgoing payment clearing a credit note. The amount comes from a fresh read of the refund queue, never from the request body — a desk screen is a snapshot.",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/ap/rebates/[agreement]/settle",
+    method: "POST",
+    guard: { kind: "permission", permission: "finance:ap" },
+    scope: "tenant",
+    note: "VB(7 settlement. Refused unless SAP has released the agreement (KONA-BOSTA=C) — releasing is VBO2 and stays there.",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/ar/credit-blocks/[vbeln]/release",
+    method: "POST",
+    guard: { kind: "permission", permission: "credit:release" },
+    scope: "tenant",
+    note: "VKM3, which re-runs the credit check: a 200 with `released: false` is the honest answer for an order still over its limit, not an error.",
+  },
   {
     plane: "web",
     path: "/api/admin/exceptions/outbox/[id]/retry",

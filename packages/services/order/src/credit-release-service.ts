@@ -1,7 +1,8 @@
 import type { FreshnessClass, SapAdapter } from "@cc/adapter-sap";
-import type { CreditBlockedOrderRow } from "@cc/domain";
+import type { CreditBlockedOrderRow, CreditReleaseResult } from "@cc/domain";
 import { creditBlockedQueue } from "@cc/domain";
 
+import { OrderError } from "./errors";
 import { toOrderError } from "./order-service";
 
 /**
@@ -58,4 +59,36 @@ export async function listCreditBlockedOrders(
     freshness: read.freshness,
     syncedAt: read.syncedAt,
   };
+}
+
+// ---- Releasing one (ADR-059) --------------------------------------------
+
+/**
+ * Release a held order (VKM3), which **re-runs the credit check**.
+ *
+ * The result is reported as SAP gives it: `released: false` with the reason is
+ * a successful call and a refused release, not an error, and the screen says
+ * so. Representing it any other way would be the failure this desk exists to
+ * avoid — a warehouse acting on a pick SAP is still blocking.
+ *
+ * No KUNNR anywhere, as everywhere else in this file: the desk legitimately
+ * releases any account's order, which is why it is guarded by `credit:release`
+ * and unreachable from a customer-plane route.
+ */
+export async function releaseCreditBlock(
+  adapter: SapAdapter,
+  input: { vbeln: string; initiatedBy?: string; note?: string },
+): Promise<CreditReleaseResult> {
+  const vbeln = input.vbeln.trim();
+  if (!vbeln) {
+    throw new OrderError("invalid", {
+      issues: [{ field: "vbeln", message: "An order number is required." }],
+    });
+  }
+
+  return adapter
+    .releaseCreditBlock({ vbeln, initiatedBy: input.initiatedBy, note: input.note })
+    .catch((error: unknown) => {
+      throw toOrderError(error, "sales order", vbeln);
+    });
 }

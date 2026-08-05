@@ -4,7 +4,7 @@ import {
   type FreshnessClass,
   type SapAdapter,
 } from "@cc/adapter-sap";
-import type { Invoice, LedgerOpenItem, RefundCandidate } from "@cc/domain";
+import type { Invoice, LedgerOpenItem, OutgoingPaymentResult, RefundCandidate } from "@cc/domain";
 import {
   billingKind,
   daysOverdue,
@@ -14,6 +14,7 @@ import {
   refundCandidates,
 } from "@cc/domain";
 
+import { InvoiceError } from "./errors";
 import { toInvoiceError } from "./invoice-service";
 
 /**
@@ -177,4 +178,71 @@ export async function listRefundQueue(
     freshness: leastFresh([register, ledger]),
     syncedAt: earliestSyncedAt([register, ledger]),
   };
+}
+
+// ---- Paying a refund out (ADR-059) --------------------------------------
+
+/**
+ * The reference every payout for a given credit note carries.
+ *
+ * Derived from the document rather than generated per call, which is what
+ * makes a double-clicked Pay one payout instead of two: SAP dedupes on this
+ * key, so the second call returns the first one's FI document (ADR-021's
+ * three-keys rule, applied to money going the other way).
+ */
+export function refundReference(vbeln: string): string {
+  return `refund:${vbeln}`;
+}
+
+export interface PaidRefund extends OutgoingPaymentResult {
+  vbeln: string;
+  kunnr: string;
+}
+
+/**
+ * Pay a credit note out (F-58) and clear its FI item.
+ *
+ * The queue is **re-read first**, and the payout is bounded by what that read
+ * says is still open — not by an amount the browser sent. A desk screen is a
+ * snapshot, and between rendering it and clicking Pay the credit may have
+ * been cleared against a new invoice; paying from the screen's number would
+ * then send money for an obligation that no longer exists. This is the same
+ * instinct as `cancelOrder` re-reading the order's status before cancelling.
+ *
+ * Nothing is stored. SAP's payment document is the record of what happened,
+ * and `initiatedBy` travels onto its header text so the desk user — not the
+ * portal's technical user — is who SAP shows as having authorised it.
+ */
+export async function payRefund(
+  adapter: SapAdapter,
+  input: { vbeln: string; initiatedBy?: string; note?: string },
+  options: { today?: string } = {},
+): Promise<PaidRefund> {
+  const queue = await listRefundQueue(adapter, options);
+  const candidate = queue.refunds.find((refund) => refund.vbeln === input.vbeln);
+
+  if (!candidate) {
+    // Not found *and* nothing to pay are the same answer on purpose: a credit
+    // that has since cleared is not an error the desk can act on, and saying
+    // which of the two it was would leak whether the document exists.
+    throw new InvoiceError("not_found", {
+      message: `Credit note ${input.vbeln} has nothing outstanding to pay — it may already have been settled.`,
+    });
+  }
+
+  const result = await adapter
+    .postOutgoingPayment({
+      kunnr: candidate.kunnr,
+      documentNumber: candidate.vbeln,
+      amount: candidate.openAmount,
+      currency: candidate.currency,
+      reference: refundReference(candidate.vbeln),
+      initiatedBy: input.initiatedBy,
+      note: input.note,
+    })
+    .catch((error: unknown) => {
+      throw toInvoiceError(error, "credit note", candidate.vbeln);
+    });
+
+  return { ...result, vbeln: candidate.vbeln, kunnr: candidate.kunnr };
 }

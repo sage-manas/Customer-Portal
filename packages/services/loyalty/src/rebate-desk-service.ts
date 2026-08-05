@@ -1,8 +1,9 @@
 import type { FreshnessClass, SapAdapter } from "@cc/adapter-sap";
-import type { RebateSettlementRow } from "@cc/domain";
+import type { RebateSettlementResult, RebateSettlementRow } from "@cc/domain";
 import { rebateSettlementQueue } from "@cc/domain";
 
 import { toLoyaltyError } from "./credit-service";
+import { LoyaltyError } from "./errors";
 
 /**
  * The rebate settlement queue, **AP plane** (`/admin/ap`, doc 09 §3.4).
@@ -73,4 +74,64 @@ export async function listRebateSettlements(
     freshness: read.freshness,
     syncedAt: read.syncedAt,
   };
+}
+
+// ---- Settling one (ADR-059) ---------------------------------------------
+
+/** The idempotency key a given agreement's settlement always carries — derived
+ * from the agreement, so a double-clicked Settle is one credit memo request. */
+export function rebateSettlementReference(agreementNumber: string): string {
+  return `rebate:${agreementNumber}`;
+}
+
+/**
+ * Settle an agreement SAP has released (VB(7).
+ *
+ * The register is re-read first and the row must still be settleable, for the
+ * reason `payRefund` re-reads its queue: a desk screen is a snapshot, and an
+ * agreement settled by the nightly run since it was rendered must not be
+ * settled again from a stale button. SAP refuses that anyway — this turns the
+ * refusal into a sentence the desk can act on rather than a raw message.
+ *
+ * Nothing is stored: the credit memo request VB(7 creates is the record, and
+ * `initiatedBy` rides onto it so SAP shows who authorised the settlement.
+ */
+export async function settleRebate(
+  adapter: SapAdapter,
+  input: { agreementNumber: string; initiatedBy?: string; note?: string },
+  options: { today?: string } = {},
+): Promise<RebateSettlementResult> {
+  const queue = await listRebateSettlements(adapter, options);
+  const row = queue.rows.find((r) => r.agreement.agreementNumber === input.agreementNumber);
+
+  if (!row) {
+    throw new LoyaltyError("not_found", {
+      message: `We couldn't find rebate agreement ${input.agreementNumber}.`,
+    });
+  }
+
+  if (!row.state.settleable) {
+    throw new LoyaltyError("invalid", {
+      issues: [
+        {
+          field: "agreementNumber",
+          message:
+            row.state.code === "D"
+              ? "This agreement has already been settled."
+              : "SAP hasn't released this agreement for settlement yet — that happens in VBO2.",
+        },
+      ],
+    });
+  }
+
+  return adapter
+    .settleRebateAgreement({
+      agreementNumber: row.agreement.agreementNumber,
+      reference: rebateSettlementReference(row.agreement.agreementNumber),
+      initiatedBy: input.initiatedBy,
+      note: input.note,
+    })
+    .catch((error: unknown) => {
+      throw toLoyaltyError(error, `rebate agreement ${input.agreementNumber}`);
+    });
 }

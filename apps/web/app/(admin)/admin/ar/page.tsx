@@ -23,6 +23,7 @@ import {
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { DeskActionButton } from "../ap/DeskActionButton";
 import { WorkspaceTabs, resolveTab } from "../WorkspaceTabs";
 
 import { getSession } from "@/lib/session";
@@ -45,8 +46,11 @@ import { getSession } from "@/lib/session";
  *  - **Re-bucket.** The headline aging bar and the per-account rows are both
  *    `buildAging` — the same function the customer's own statement uses, so
  *    the desk's total and the customer's balance cannot disagree.
- *  - **Release a credit block.** That is VKM3 and no adapter method writes
- *    VBUK-CMGST (ADR-059). The queue is a queue.
+ *  - **Force a credit release.** The Release button runs VKM3, which *re-runs
+ *    the credit check*; an order still over its limit comes back held with
+ *    SAP's reason, and the screen shows that rather than reporting success
+ *    (ADR-059). Changing the limit itself is the credit desk's decision and
+ *    still happens in FD32.
  */
 
 export const dynamic = "force-dynamic";
@@ -406,9 +410,10 @@ export default async function AccountsReceivablePage({
         <section className="flex flex-col gap-3">
           <p className="rounded-md border border-border bg-background px-4 py-2.5 text-[11.5px] text-text-mid">
             SAP is holding {blocked.rows.length} order{blocked.rows.length === 1 ? "" : "s"} worth{" "}
-            <Money value={blocked.blockedValue} className="text-[11.5px]" /> on credit. Releasing
-            one is VKM3 — it re-runs the credit check — so this queue lists them and changes
-            nothing. Days shown are the order&apos;s age; SAP does not date the block itself.
+            <Money value={blocked.blockedValue} className="text-[11.5px]" /> on credit. Release runs
+            VKM3, which <strong className="font-semibold">re-runs the credit check</strong> — an
+            order still over its account&apos;s limit stays held, and you&apos;ll see SAP&apos;s
+            reason. Days shown are the order&apos;s age; SAP does not date the block itself.
           </p>
 
           <div className="overflow-x-auto rounded-md border border-border bg-surface shadow-sm">
@@ -430,12 +435,13 @@ export default async function AccountsReceivablePage({
                   <th scope="col" className="px-4 py-2 text-right font-bold">
                     Net value
                   </th>
+                  <th scope="col" className="px-4 py-2 font-bold" />
                 </tr>
               </thead>
               <tbody>
                 {blocked.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-text-dim">
+                    <td colSpan={6} className="px-4 py-12 text-center text-text-dim">
                       Nothing is held on credit.
                     </td>
                   </tr>
@@ -459,6 +465,22 @@ export default async function AccountsReceivablePage({
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <Money value={row.order.netValue} />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <DeskActionButton
+                          endpoint={`/api/admin/ar/credit-blocks/${row.order.vbeln}/release`}
+                          label="Release"
+                          busyLabel="Releasing…"
+                          title={`Release order ${row.order.vbeln}?`}
+                          consequence={`This runs VKM3 in SAP, which re-runs the credit check on ${row.order.currency} ${row.order.netValue.toLocaleString("en-IN")} for ${row.order.kunnr}. If it passes, the order is released for delivery and the value consumes the account's credit exposure. If it doesn't, SAP keeps holding it and tells you why.`}
+                          confirmLabel="Run the check"
+                          refusal={(result) =>
+                            result.released === false
+                              ? ((result.reason as string) ??
+                                "SAP re-ran the credit check and is still holding this order.")
+                              : null
+                          }
+                        />
                       </td>
                     </tr>
                   ))

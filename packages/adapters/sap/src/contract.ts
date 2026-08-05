@@ -14,6 +14,12 @@ import type {
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  CreditReleaseInput,
+  CreditReleaseResult,
+  OutgoingPaymentInput,
+  OutgoingPaymentResult,
+  RebateSettlementInput,
+  RebateSettlementResult,
   Inquiry,
   Invoice,
   Material,
@@ -108,6 +114,15 @@ export interface SapAdapter {
    * left off (ADR-032). Settling one is VB(7; the portal only lists them.
    */
   getRebateRegister(): Promise<SapRead<RebateAgreement[]>>;
+  /**
+   * VB(7 — settle an agreement SAP has released for settlement, posting the
+   * credit memo request it then bills. A write, so no freshness (ADR-007).
+   *
+   * Idempotent on `reference`: the AP desk clicking Settle twice must not
+   * produce two credit memo requests, and the key is derived from the
+   * agreement rather than generated per call (ADR-021's rule).
+   */
+  settleRebateAgreement(input: RebateSettlementInput): Promise<RebateSettlementResult>;
 
   // ---- Master data: catalogue ------------------------------------------
   /** MARA/MAKT reads · API_PRODUCT_SRV. */
@@ -180,6 +195,13 @@ export interface SapAdapter {
    * that writes VBUK-CMGST (ADR-059).
    */
   getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>>;
+  /**
+   * VKM3 — release an order held on credit. It **re-runs the credit check**
+   * rather than forcing the status, which is what the transaction does and
+   * the only version of it the portal can report honestly: an order still
+   * over an unchanged limit comes back held, with SAP's reason.
+   */
+  releaseCreditBlock(input: CreditReleaseInput): Promise<CreditReleaseResult>;
 
   // ---- Delivery ---------------------------------------------------------
   /**
@@ -228,6 +250,14 @@ export interface SapAdapter {
   getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>>;
   /** F-28 equivalent posting + clearing. Idempotent on `gatewayReference`. */
   postIncomingPayment(input: IncomingPaymentInput): Promise<IncomingPaymentResult>;
+  /**
+   * F-58 / F-53 — pay a credit note out and clear its FI item. The AP desk's
+   * refund action (doc 09 §3.4). A separate method from `postIncomingPayment`
+   * rather than a signed amount on it: money leaving the tenant and money
+   * arriving are different postings, different authorisations and different
+   * mistakes to make. Idempotent on `reference`.
+   */
+  postOutgoingPayment(input: OutgoingPaymentInput): Promise<OutgoingPaymentResult>;
 }
 
 /** Helper for drivers: wrap a value with its freshness metadata. */

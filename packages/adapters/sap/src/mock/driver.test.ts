@@ -809,3 +809,209 @@ describe("desk-plane reads (doc 09 §3.4)", () => {
     }
   });
 });
+
+describe("desk-plane writes (doc 09 §3.4, ADR-059)", () => {
+  describe("postOutgoingPayment (F-58)", () => {
+    /** The seeded credit note and its negative FI item. */
+    const CREDIT_NOTE = "0090002250";
+
+    it("pays a credit out, clears the item and reports the FI document", async () => {
+      const sap = adapter();
+      const before = (await sap.getOpenItems(KUNNR)).data.find(
+        (i) => i.documentNumber === CREDIT_NOTE,
+      );
+      expect(before?.openAmount).toBeLessThan(0);
+
+      const result = await sap.postOutgoingPayment({
+        kunnr: KUNNR,
+        documentNumber: CREDIT_NOTE,
+        amount: Math.abs(before!.openAmount),
+        currency: "INR",
+        reference: `refund:${CREDIT_NOTE}`,
+        initiatedBy: "user-ap-1",
+      });
+
+      expect(result.documentNumber).toMatch(/^\d+$/);
+      expect(result.clearedItems).toEqual([CREDIT_NOTE]);
+
+      const after = (await sap.getOpenItems(KUNNR)).data.find(
+        (i) => i.documentNumber === CREDIT_NOTE,
+      );
+      expect(after?.openAmount).toBe(0);
+      expect(after?.status).toBe("Cleared");
+      expect(after?.clearingDocument).toBe(result.documentNumber);
+    });
+
+    it("pays once for one reference, however many times it is called", async () => {
+      const sap = adapter();
+      const input = {
+        kunnr: KUNNR,
+        documentNumber: CREDIT_NOTE,
+        amount: 14325.2,
+        currency: "INR",
+        reference: `refund:${CREDIT_NOTE}`,
+      };
+
+      const first = await sap.postOutgoingPayment(input);
+      const second = await sap.postOutgoingPayment(input);
+
+      expect(second).toEqual(first);
+      // And the item was not paid twice into a positive balance.
+      const item = (await sap.getOpenItems(KUNNR)).data.find(
+        (i) => i.documentNumber === CREDIT_NOTE,
+      );
+      expect(item?.openAmount).toBe(0);
+    });
+
+    it("refuses a document that is not a credit", async () => {
+      const sap = adapter();
+      const invoice = (await sap.getOpenItems(KUNNR)).data.find((i) => i.openAmount > 0);
+
+      const error = await expectSapError(() =>
+        sap.postOutgoingPayment({
+          kunnr: KUNNR,
+          documentNumber: invoice!.documentNumber,
+          amount: 100,
+          currency: "INR",
+          reference: "refund:wrong-way",
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("refuses more than the open credit", async () => {
+      const error = await expectSapError(() =>
+        adapter().postOutgoingPayment({
+          kunnr: KUNNR,
+          documentNumber: CREDIT_NOTE,
+          amount: 999_999,
+          currency: "INR",
+          reference: "refund:too-much",
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("404s another customer's document rather than admitting it exists", async () => {
+      const error = await expectSapError(() =>
+        adapter().postOutgoingPayment({
+          kunnr: TIGHT_CREDIT_KUNNR,
+          documentNumber: CREDIT_NOTE,
+          amount: 100,
+          currency: "INR",
+          reference: "refund:cross",
+        }),
+      );
+      expect(error.kind).toBe("not_found");
+    });
+  });
+
+  describe("settleRebateAgreement (VB(7)", () => {
+    /** Seeded BOSTA=C — the one agreement SAP has released. */
+    const RELEASED = "0000801288";
+
+    it("settles a released agreement and consumes its accrual", async () => {
+      const sap = adapter();
+      const result = await sap.settleRebateAgreement({
+        agreementNumber: RELEASED,
+        reference: `rebate:${RELEASED}`,
+        initiatedBy: "user-ap-1",
+      });
+
+      expect(result.settlementStatus).toBe("D");
+      expect(result.settledAmount).toBeGreaterThan(0);
+      expect(result.creditMemoRequest).toMatch(/^\d{10}$/);
+
+      const after = (await sap.getRebateRegister()).data.find(
+        (r) => r.agreementNumber === RELEASED,
+      );
+      expect(after?.settlementStatus).toBe("D");
+      expect(after?.accruedAmount).toBe(0);
+    });
+
+    it("settles once per reference", async () => {
+      const sap = adapter();
+      const input = { agreementNumber: RELEASED, reference: `rebate:${RELEASED}` };
+      expect(await sap.settleRebateAgreement(input)).toEqual(
+        await sap.settleRebateAgreement(input),
+      );
+    });
+
+    it("refuses an agreement SAP has not released — it is still accruing", async () => {
+      const sap = adapter();
+      const open = (await sap.getRebateRegister()).data.find((r) => r.settlementStatus === "B");
+
+      const error = await expectSapError(() =>
+        sap.settleRebateAgreement({
+          agreementNumber: open!.agreementNumber,
+          reference: `rebate:${open!.agreementNumber}`,
+        }),
+      );
+      expect(error.kind).toBe("validation");
+      expect(error.message).toContain("VBO2");
+    });
+
+    it("refuses one already settled", async () => {
+      const sap = adapter();
+      const settled = (await sap.getRebateRegister()).data.find((r) => r.settlementStatus === "D");
+
+      const error = await expectSapError(() =>
+        sap.settleRebateAgreement({
+          agreementNumber: settled!.agreementNumber,
+          reference: `rebate:${settled!.agreementNumber}:again`,
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+  });
+
+  describe("releaseCreditBlock (VKM3)", () => {
+    it("releases an order that now fits the limit, and consumes the exposure", async () => {
+      const sap = adapter();
+      const before = await sap.getCreditInfo(TIGHT_CREDIT_KUNNR);
+
+      const result = await sap.releaseCreditBlock({
+        vbeln: "0000004714",
+        initiatedBy: "user-ar-1",
+      });
+
+      expect(result).toMatchObject({ released: true, creditStatus: "Confirmed" });
+      const after = await sap.getCreditInfo(TIGHT_CREDIT_KUNNR);
+      expect(after.data.utilized).toBe(before.data.utilized + 24000);
+      expect((await sap.getOrderStatus("0000004714")).data.creditStatus).toBe("Confirmed");
+    });
+
+    it("re-runs the check rather than forcing it: an order still over the limit stays held", async () => {
+      const sap = adapter();
+      const result = await sap.releaseCreditBlock({ vbeln: "0000004713" });
+
+      expect(result.released).toBe(false);
+      expect(result.creditStatus).toBe("CreditHold");
+      expect(result.reason).toContain("over");
+      // And nothing moved: the order is still in the queue.
+      const queue = await sap.getCreditBlockedOrders();
+      expect(queue.data.items.map((o) => o.vbeln)).toContain("0000004713");
+    });
+
+    it("is idempotent — releasing an order that is already released is a no-op", async () => {
+      const sap = adapter();
+      await sap.releaseCreditBlock({ vbeln: "0000004714" });
+      const before = await sap.getCreditInfo(TIGHT_CREDIT_KUNNR);
+
+      const again = await sap.releaseCreditBlock({ vbeln: "0000004714" });
+
+      expect(again.released).toBe(true);
+      // Exposure is consumed once, not once per click.
+      expect((await sap.getCreditInfo(TIGHT_CREDIT_KUNNR)).data.utilized).toBe(
+        before.data.utilized,
+      );
+    });
+
+    it("404s an unknown order", async () => {
+      const error = await expectSapError(() =>
+        adapter().releaseCreditBlock({ vbeln: "0000009999" }),
+      );
+      expect(error.kind).toBe("not_found");
+    });
+  });
+});

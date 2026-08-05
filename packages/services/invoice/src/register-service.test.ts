@@ -2,7 +2,13 @@ import { MockSapAdapter, SEED_TODAY } from "@cc/adapter-sap";
 import { describe, expect, it } from "vitest";
 
 import { isInvoiceError } from "./errors";
-import { listInvoiceRegister, listNoteRegister, listRefundQueue } from "./register-service";
+import {
+  listInvoiceRegister,
+  listNoteRegister,
+  listRefundQueue,
+  payRefund,
+  refundReference,
+} from "./register-service";
 
 /**
  * The desk-plane registers. Every assertion here is about the boundary as
@@ -68,5 +74,63 @@ describe("listRefundQueue", () => {
     expect(queue.refunds.every((r) => r.openAmount > 0)).toBe(true);
     expect(queue.totalOwed).toBeGreaterThan(0);
     expect(queue.freshness).toBe("live");
+  });
+});
+
+describe("payRefund", () => {
+  it("pays what the live queue says is open, and the queue then empties", async () => {
+    const sap = adapter();
+    const before = await listRefundQueue(sap, { today: SEED_TODAY });
+    const target = before.refunds[0]!;
+
+    const paid = await payRefund(
+      sap,
+      { vbeln: target.vbeln, initiatedBy: "user-ap-1" },
+      { today: SEED_TODAY },
+    );
+
+    expect(paid.paidAmount).toBe(target.openAmount);
+    expect(paid.clearedItems).toContain(target.vbeln);
+    expect(paid.kunnr).toBe(target.kunnr);
+
+    const after = await listRefundQueue(sap, { today: SEED_TODAY });
+    expect(after.refunds.map((r) => r.vbeln)).not.toContain(target.vbeln);
+  });
+
+  it("refuses a second payout because the credit is no longer outstanding", async () => {
+    const sap = adapter();
+    const target = (await listRefundQueue(sap, { today: SEED_TODAY })).refunds[0]!;
+
+    const first = await payRefund(sap, { vbeln: target.vbeln }, { today: SEED_TODAY });
+    // The re-read is what refuses here — the item is cleared, so there is
+    // nothing outstanding to pay. SAP's dedupe on the reference is the second
+    // line of defence and is asserted where it lives, in the driver suite.
+    await expect(payRefund(sap, { vbeln: target.vbeln }, { today: SEED_TODAY })).rejects.toSatisfy(
+      isInvoiceError,
+    );
+    expect(first.paidAmount).toBeGreaterThan(0);
+  });
+
+  it("derives the idempotency key from the document, so two clicks share one", () => {
+    // The property the driver's dedupe depends on: a key that varied per call
+    // would make SAP's protection unreachable, and the two-click case above
+    // would then rest on the re-read alone.
+    // Pinned to the exact string rather than compared to a second call: two
+    // calls a millisecond apart would agree even if the key carried a
+    // timestamp, which is precisely the mistake worth failing on.
+    expect(refundReference("0090002250")).toBe("refund:0090002250");
+    expect(refundReference("0090002251")).toBe("refund:0090002251");
+  });
+
+  it("refuses a document that is not an outstanding credit, without saying which", async () => {
+    const sap = adapter();
+    const invoice = (await listInvoiceRegister(sap, { today: SEED_TODAY })).rows[0]!;
+
+    await expect(payRefund(sap, { vbeln: invoice.vbeln }, { today: SEED_TODAY })).rejects.toSatisfy(
+      isInvoiceError,
+    );
+    await expect(payRefund(sap, { vbeln: "0099999999" }, { today: SEED_TODAY })).rejects.toSatisfy(
+      isInvoiceError,
+    );
   });
 });

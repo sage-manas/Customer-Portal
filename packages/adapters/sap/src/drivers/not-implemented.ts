@@ -14,6 +14,12 @@ import type {
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  CreditReleaseInput,
+  CreditReleaseResult,
+  OutgoingPaymentInput,
+  OutgoingPaymentResult,
+  RebateSettlementInput,
+  RebateSettlementResult,
   Inquiry,
   Invoice,
   Material,
@@ -119,6 +125,15 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   }
   async getRebateRegister(): Promise<SapRead<RebateAgreement[]>> {
     this.fail("getRebateRegister");
+  }
+  async settleRebateAgreement(_input: RebateSettlementInput): Promise<RebateSettlementResult> {
+    this.fail("settleRebateAgreement");
+  }
+  async releaseCreditBlock(_input: CreditReleaseInput): Promise<CreditReleaseResult> {
+    this.fail("releaseCreditBlock");
+  }
+  async postOutgoingPayment(_input: OutgoingPaymentInput): Promise<OutgoingPaymentResult> {
+    this.fail("postOutgoingPayment");
   }
   async createQuotation(_input: CreateQuotationInput): Promise<Quotation> {
     this.fail("createQuotation");
