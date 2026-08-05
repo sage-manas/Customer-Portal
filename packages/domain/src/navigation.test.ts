@@ -48,7 +48,9 @@ describe("visibleNavItems", () => {
     const ap = visibleNavItems(ADMIN_NAV, session("ap_manager")).map((i) => i.key);
     const ar = visibleNavItems(ADMIN_NAV, session("ar_manager")).map((i) => i.key);
     expect(ap).toContain("admin-ap");
-    expect(ap).toContain("admin-exceptions");
+    // The exception tray is a view inside that workspace as of Phase 6
+    // (ADR-060), so AP reaches it without a tab of its own.
+    expect(ADMIN_NAV.map((i) => i.key)).not.toContain("admin-exceptions");
     expect(ap).not.toContain("admin-ar");
     expect(ar).toContain("admin-ar");
     expect(ar).not.toContain("admin-ap");

@@ -97,6 +97,61 @@ jobs:
       - name: Payment flow tests
         run: pnpm --filter @cc/service-payment test:integration
 
+      # Proof of delivery is the one stored thing in the delivery module
+      # (ADR-026): SAP takes the receipt first, then the portal writes its
+      # evidence row and the outbox event in one transaction.
+      - name: Delivery / POD tests
+        run: pnpm --filter @cc/service-delivery test:integration
+
+      # Drafts are the only portal-owned part of the inquiry module (ADR-016);
+      # the suite walks draft -> inquiry -> quotation -> order and covers
+      # validity expiry and the customer/desk plane split (ADR-032).
+      - name: Inquiry / quotation tests
+        run: pnpm --filter @cc/service-inquiry test:integration
+
+      # The one module the portal owns outright (ADR-028): raise -> resolve ->
+      # rate, the transition table, and internal notes being excluded in the
+      # query rather than the screen.
+      - name: Support flow tests
+        run: pnpm --filter @cc/service-support test:integration
+
+      # Credit-limit requests are the module's only stored document (ADR-035);
+      # the tier ladder and credit position are composed per read, so this
+      # suite is what proves a threshold edit re-tiers with nothing to backfill.
+      - name: Loyalty / credit tests
+        run: pnpm --filter @cc/service-loyalty test:integration
+
+      # event -> recipients -> bell rows -> email mirror, including a customer
+      # template with no KUNNR resolving to nobody rather than everybody
+      # (ADR-041).
+      - name: Notification fan-out tests
+        run: pnpm --filter @cc/service-notification test:integration
+
+      # The outbox relay's at-least-once guarantees (ADR-023), the
+      # reconciliation sweep (ADR-044) and the SLA sweep (ADR-029). Needs
+      # Postgres but no Redis — the publisher is faked at the boundary.
+      - name: Worker loop tests
+        run: pnpm --filter @cc/workers test:integration
+
+      # The operator console's write paths: provisioning, the per-tenant SAP
+      # configuration round trip through the envelope vault, and the
+      # append-only trail — including the assertions that a stored secret
+      # never comes back out and that the trail holds no values (ADR-053).
+      - name: Platform console tests
+        run: pnpm --filter @cc/service-platform test:integration
+
+      # The other half of tenant deactivation (ADR-054) *and* of customer
+      # deactivation (ADR-057): both set a flag, and this is what proves
+      # `login` and the account switcher refuse because of it.
+      - name: Deactivation tests (tenant + customer)
+        run: pnpm --filter @cc/service-identity test:integration
+
+      # The tenant's customer directory (ADR-057): the list composed from SAP
+      # per read, the edit that reaches XD02, and the deactivation that
+      # blocks new orders while deleting nothing.
+      - name: Customer directory tests
+        run: pnpm --filter @cc/service-customer test:integration
+
       # Proves the seed still matches the schema and the tenant-scoped
       # writes it performs — it is the fixture every future e2e run needs.
       - name: Seed development data

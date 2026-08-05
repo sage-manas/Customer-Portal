@@ -8,14 +8,23 @@ import type {
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
+  CustomerPatch,
   CustomerPrice,
+  CustomerUpdateResult,
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  CreditReleaseInput,
+  CreditReleaseResult,
+  OutgoingPaymentInput,
+  OutgoingPaymentResult,
+  RebateSettlementInput,
+  RebateSettlementResult,
   Inquiry,
   Invoice,
   Material,
   MaterialQuery,
+  LedgerOpenItem,
   OpenItem,
   OrderSimulation,
   OrderStatusView,
@@ -109,9 +118,16 @@ interface MockStore {
   openItemOwner: Record<string, string>;
   /** gatewayReference -> result, for idempotent payment posting. */
   postedPayments: Map<string, IncomingPaymentResult>;
+  /** reference -> result, for idempotent *outgoing* payment posting (F-58). */
+  paidRefunds: Map<string, OutgoingPaymentResult>;
+  /** reference -> result, for idempotent rebate settlement (VB(7). */
+  settledRebates: Map<string, RebateSettlementResult>;
   /** customerPoRef -> vbeln, for idempotent order creation (docs/02 §4.3). */
   orderIdempotency: Map<string, string>;
   nextOrderNumber: number;
+  /** Credit memo requests from rebate settlement (VB(7) — their own range, so
+   * a settlement never consumes a sales-order number. */
+  nextSettlementNumber: number;
   nextInquiryNumber: number;
   nextQuotationNumber: number;
   nextCustomerNumber: number;
@@ -163,8 +179,14 @@ export class MockSapAdapter implements SapAdapter {
       openItems: clone(SEED_OPEN_ITEMS),
       openItemOwner: clone(SEED_OPEN_ITEM_OWNER),
       postedPayments: new Map(),
+      paidRefunds: new Map(),
+      settledRebates: new Map(),
       orderIdempotency: new Map(),
-      nextOrderNumber: 4714,
+      // 4713 and 4714 are seeded (the two credit-blocked orders), so the
+      // generator starts after them — a created order that collided with a
+      // seeded VBELN would make every read afterwards answer the wrong one.
+      nextOrderNumber: 4715,
+      nextSettlementNumber: 60000001,
       nextInquiryNumber: 10000807,
       nextQuotationNumber: 20000902,
       nextCustomerNumber: 1004,
@@ -251,6 +273,38 @@ export class MockSapAdapter implements SapAdapter {
     });
   }
 
+  async updateCustomer(kunnr: string, patch: CustomerPatch): Promise<CustomerUpdateResult> {
+    return this.call(() => {
+      const existing = this.requireCustomer(kunnr);
+
+      // A patch, applied field by field: what the caller did not send stays
+      // as SAP has it. `undefined` therefore means "leave alone" and never
+      // "clear", which is what makes a portal edit safe to run against a
+      // master somebody is also maintaining in XD02.
+      const previousAddress = clone(existing.address);
+
+      if (patch.tradeName !== undefined) {
+        existing.tradeName = truncateToSapLength("tradeName", patch.tradeName);
+      }
+      if (patch.address) existing.address = clone(patch.address);
+      if (patch.contact) existing.contact = clone(patch.contact);
+
+      // A ship-to that *was* the billing address moves with it, as changing
+      // KNA1 does in ECC; one the tenant maintains separately (a plant, a
+      // warehouse) does not. A mock that moved all of them would hide the
+      // difference, and one that moved none would hide the sync entirely.
+      if (patch.address) {
+        for (const shipTo of this.store.shipTos) {
+          if (shipTo.kunnr !== kunnr) continue;
+          if (JSON.stringify(shipTo.address) !== JSON.stringify(previousAddress)) continue;
+          shipTo.address = clone(existing.address);
+        }
+      }
+
+      return { kunnr, customer: clone(existing) };
+    });
+  }
+
   async getCustomer(kunnr: string): Promise<SapRead<CanonicalCustomer>> {
     return this.call(() => this.read(clone(this.requireCustomer(kunnr))));
   }
@@ -278,6 +332,60 @@ export class MockSapAdapter implements SapAdapter {
       // An account with no agreement is not an error — most accounts have
       // none, and a 404 here would make the loyalty screen fail for them.
       return this.read(clone(this.store.rebates.filter((r) => r.kunnr === kunnr)));
+    });
+  }
+
+  /** Every agreement in the tenant — the AP desk's settlement queue. */
+  async getRebateRegister(): Promise<SapRead<RebateAgreement[]>> {
+    return this.call(() => this.read(clone(this.store.rebates)));
+  }
+
+  /**
+   * VB(7 settlement run for one agreement.
+   *
+   * Only an agreement SAP has *released* (BOSTA=C) can be settled — an open
+   * one is still accruing, and VB(7 refuses it. That refusal is modelled
+   * rather than smoothed over, because it is the thing an AP desk will hit
+   * most often and the screen has to be able to explain it.
+   */
+  async settleRebateAgreement(input: RebateSettlementInput): Promise<RebateSettlementResult> {
+    return this.call(() => {
+      const already = this.store.settledRebates.get(input.reference);
+      if (already) return clone(already);
+
+      const agreement = this.store.rebates.find((r) => r.agreementNumber === input.agreementNumber);
+      if (!agreement) throw sapNotFound("Rebate agreement", input.agreementNumber);
+
+      if (agreement.settlementStatus === "D") {
+        throw sapValidation(
+          `Rebate agreement ${agreement.agreementNumber} has already been settled`,
+          "agreementNumber",
+          "VK/047",
+        );
+      }
+      if (agreement.settlementStatus !== "C") {
+        throw sapValidation(
+          `Rebate agreement ${agreement.agreementNumber} has not been released for settlement — release it in VBO2 first`,
+          "agreementNumber",
+          "VK/046",
+        );
+      }
+
+      const creditMemoRequest = String(this.store.nextSettlementNumber++).padStart(10, "0");
+      const result: RebateSettlementResult = {
+        agreementNumber: agreement.agreementNumber,
+        creditMemoRequest,
+        settledAmount: agreement.accruedAmount,
+        currency: agreement.currency,
+        settlementStatus: "D",
+      };
+
+      // The accrual is consumed by the settlement, exactly as KONA-KAWRT is.
+      agreement.settlementStatus = "D";
+      agreement.accruedAmount = 0;
+      this.store.settledRebates.set(input.reference, result);
+
+      return clone(result);
     });
   }
 
@@ -881,6 +989,77 @@ export class MockSapAdapter implements SapAdapter {
     });
   }
 
+  /**
+   * Orders SAP is holding on credit, tenant-wide (doc 05 §8's release queue).
+   *
+   * Derived from the stored orders' CMGST rather than from a seeded list, so
+   * an order the mock credit-checks into a hold during a demo turns up here
+   * without anybody re-seeding anything.
+   */
+  async getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>> {
+    return this.call(() => {
+      const items = this.store.orders
+        .filter((o) => o.creditStatus === "CreditHold")
+        .sort((a, b) => a.createdOn.localeCompare(b.createdOn));
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
+  /**
+   * VKM3 — release a held order by **re-running the credit check**, which is
+   * what the transaction does. An order still over an unchanged limit comes
+   * back held with SAP's own reason, and the desk sees the truth rather than
+   * a success message the warehouse would act on.
+   *
+   * A released order consumes exposure immediately, exactly as
+   * `createSalesOrder` does for one that was never held — otherwise releasing
+   * two orders in a row would each be checked against the same headroom.
+   */
+  async releaseCreditBlock(input: CreditReleaseInput): Promise<CreditReleaseResult> {
+    return this.call(() => {
+      const order = this.store.orders.find((o) => o.vbeln === input.vbeln);
+      if (!order) throw sapNotFound("Sales order", input.vbeln);
+
+      if (order.creditStatus !== "CreditHold") {
+        // Not an error: a second click on an order somebody else released is
+        // the state the caller wanted, and refusing it would make the desk's
+        // button non-idempotent for no gain.
+        return { vbeln: order.vbeln, released: true, creditStatus: order.creditStatus };
+      }
+
+      const credit = this.store.credit.find((c) => c.kunnr === order.kunnr);
+      const headroom = credit
+        ? credit.creditLimit * this.options.creditToleranceRatio - credit.utilized
+        : Number.POSITIVE_INFINITY;
+
+      if (credit?.blocked) {
+        return {
+          vbeln: order.vbeln,
+          released: false,
+          creditStatus: "CreditHold",
+          reason: `Account ${order.kunnr} is blocked for credit (KNKK-CRBLB); the block has to be lifted in FD32 before any of its orders can be released.`,
+        };
+      }
+
+      if (order.netValue > headroom) {
+        return {
+          vbeln: order.vbeln,
+          released: false,
+          creditStatus: "CreditHold",
+          reason: `The credit check still fails: the order is ${order.currency} ${round2(order.netValue - headroom)} over the account's remaining limit.`,
+        };
+      }
+
+      order.creditStatus = "Confirmed";
+      if (credit) {
+        credit.utilized = round2(credit.utilized + order.netValue);
+        credit.available = round2(credit.creditLimit - credit.utilized);
+      }
+
+      return { vbeln: order.vbeln, released: true, creditStatus: order.creditStatus };
+    });
+  }
+
   // ---- delivery ---------------------------------------------------------
 
   async getDeliveries(kunnr: string): Promise<SapRead<Page<Delivery>>> {
@@ -985,6 +1164,16 @@ export class MockSapAdapter implements SapAdapter {
     });
   }
 
+  /** Every billing document in the tenant — the AP/AR desk registers. */
+  async getBillingRegister(): Promise<SapRead<Page<Invoice>>> {
+    return this.call(() => {
+      const items = [...this.store.invoices].sort((a, b) =>
+        b.billingDate.localeCompare(a.billingDate),
+      );
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
   async getInvoicePdf(vbeln: string): Promise<string> {
     return this.call(() => {
       const invoice = this.store.invoices.find((i) => i.vbeln === vbeln);
@@ -1002,6 +1191,91 @@ export class MockSapAdapter implements SapAdapter {
         (item) => this.store.openItemOwner[item.documentNumber] === kunnr,
       );
       return this.read(clone(items));
+    });
+  }
+
+  /**
+   * The tenant's whole AR ledger, each item carrying its account.
+   *
+   * The owner comes off the same `openItemOwner` map the customer read filters
+   * on, so the desk and the customer cannot disagree about who owes what — a
+   * separate seed of ownership would be a second answer to the question this
+   * mock exists to make one of.
+   */
+  async getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>> {
+    return this.call(() => {
+      const items = this.store.openItems.flatMap((item): LedgerOpenItem[] => {
+        const kunnr = this.store.openItemOwner[item.documentNumber];
+        // An item with no owner is dropped rather than defaulted: a
+        // collections queue that attributed a document to the wrong account
+        // would be worse than one that is short a row.
+        return kunnr ? [{ ...clone(item), kunnr }] : [];
+      });
+      return this.read(items);
+    });
+  }
+
+  /**
+   * F-58 — pay a credit note out and clear its FI item.
+   *
+   * A credit's posting is negative, so "clearing" it means moving its open
+   * amount to zero from below; the mock validates against the magnitude for
+   * the same reason the desk renders one (a payout of −₹14,325 is not a
+   * thing). Three refusals are modelled because each is one an AP desk will
+   * actually meet: a document that is not a credit, one already cleared, and
+   * an amount larger than what is open.
+   */
+  async postOutgoingPayment(input: OutgoingPaymentInput): Promise<OutgoingPaymentResult> {
+    return this.call(() => {
+      const already = this.store.paidRefunds.get(input.reference);
+      if (already) return clone(already);
+
+      this.requireCustomer(input.kunnr);
+
+      const item = this.store.openItems.find((i) => i.documentNumber === input.documentNumber);
+      // Never reveal that another customer's document exists (CLAUDE.md rule 5).
+      if (!item || this.store.openItemOwner[item.documentNumber] !== input.kunnr) {
+        throw sapNotFound("Open item", input.documentNumber);
+      }
+
+      if (item.openAmount >= 0) {
+        throw sapValidation(
+          `Document ${item.documentNumber} is not a credit — there is nothing to pay out`,
+          "documentNumber",
+          "F5/264",
+        );
+      }
+
+      const owed = round2(Math.abs(item.openAmount));
+      const paying = round2(input.amount);
+      if (paying <= 0) {
+        throw sapValidation("A payment amount must be positive", "amount", "F5/263");
+      }
+      if (paying > owed) {
+        throw sapValidation(
+          `Amount exceeds the open credit of document ${item.documentNumber}`,
+          "amount",
+          "F5/263",
+        );
+      }
+
+      const documentNumber = String(this.store.nextFiDocument++);
+      item.openAmount = round2(item.openAmount + paying);
+      if (item.openAmount === 0) {
+        item.status = "Cleared";
+        item.clearingDocument = documentNumber;
+      }
+
+      const result: OutgoingPaymentResult = {
+        documentNumber,
+        clearedItems: item.openAmount === 0 ? [item.documentNumber] : [],
+        paidAmount: paying,
+        currency: input.currency,
+        postingDate: this.options.today,
+      };
+      this.store.paidRefunds.set(input.reference, result);
+
+      return clone(result);
     });
   }
 

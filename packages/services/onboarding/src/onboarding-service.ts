@@ -51,6 +51,27 @@ export interface DraftHandle {
   draftToken: string;
 }
 
+/**
+ * Who is driving an application, and how they proved they may.
+ *
+ * The wizard has two entry points — the applicant's own (`/register`) and the
+ * tenant admin's (`/admin/customers/new`, ADR-056) — and the flow between
+ * them is identical: same registry, same schemas, same SAP write. What
+ * differs is only the credential, so that is the only thing parameterised.
+ * Every shared implementation below takes this as a *required* argument, for
+ * the reason ADR-032 gives for `getInquiries(kunnr)` vs `getInquiryQueue()`:
+ * a check that can be skipped by omitting an argument is not a check.
+ *
+ * The two entry points then live in separate files (`onboarding-service.ts`
+ * here, `back-office-service.ts` next door), so neither app plane can reach
+ * the other's by dropping a parameter.
+ */
+export type ApplicationAccess =
+  /** The applicant, holding the unguessable draft token (ADR-009). */
+  | { kind: "draft"; draftToken: string }
+  /** A tenant admin holding `customer:register`, checked by the route. */
+  | { kind: "back_office" };
+
 export interface StartApplicationResult {
   application: OnboardingApplication;
   /** Returned exactly once, to the applicant. Never included in a mapped application. */
@@ -132,7 +153,9 @@ function newDraftToken(): string {
   return randomBytes(32).toString("base64url");
 }
 
-async function loadRow(applicationId: string): Promise<ApplicationRow & { draftToken: string }> {
+async function loadRow(
+  applicationId: string,
+): Promise<ApplicationRow & { draftToken: string; initiatedByUserId: string | null }> {
   const row = await db.onboardingApplication.findFirst({
     where: { id: applicationId },
     include: INCLUDE,
@@ -144,9 +167,25 @@ async function loadRow(applicationId: string): Promise<ApplicationRow & { draftT
   return row;
 }
 
-async function loadDraft(handle: DraftHandle) {
-  const row = await loadRow(handle.applicationId);
-  if (!tokenMatches(row.draftToken, handle.draftToken)) throw new OnboardingError("not_found");
+/**
+ * Loads an application the caller has proved a right to, and 404s otherwise.
+ *
+ * The back-office arm is narrower than "holds the permission": it may only
+ * reach applications the back office *started*. A tenant admin editing an
+ * applicant's own in-flight draft would be changing statutory details on
+ * somebody's behalf without their knowledge, and there is a queue screen and
+ * a Request-More-Info path for that conversation. Both arms answer 404 on a
+ * refusal, per CLAUDE.md rule 5.
+ */
+async function loadAccessible(applicationId: string, access: ApplicationAccess) {
+  const row = await loadRow(applicationId);
+
+  if (access.kind === "draft") {
+    if (!tokenMatches(row.draftToken, access.draftToken)) throw new OnboardingError("not_found");
+    return row;
+  }
+
+  if (row.initiatedByUserId === null) throw new OnboardingError("not_found");
   return row;
 }
 
@@ -194,26 +233,68 @@ function assertTransition(
 // Applicant-facing
 // ---------------------------------------------------------------------------
 
-/** Starts a blank application and mints its draft token. */
-export async function startApplication(tenantId: string): Promise<StartApplicationResult> {
+/**
+ * Starts a blank application and mints its draft token.
+ *
+ * `initiatedByUserId` is what makes it a back-office registration: the token
+ * is still minted (the column is not nullable and the row is still a draft),
+ * but `startBackOfficeRegistration` never returns it, so the only credential
+ * that reaches such a row is a session holding `customer:register`.
+ *
+ * @internal Shared by both entry points — call `startApplication` or
+ * `startBackOfficeRegistration`, not this.
+ */
+export async function startApplicationCore(
+  tenantId: string,
+  options: { initiatedByUserId?: string } = {},
+): Promise<StartApplicationResult> {
   return runWithTenant(tenantId, async () => {
     const draftToken = newDraftToken();
     const row = await db.onboardingApplication.create({
-      data: { tenantId, data: {}, draftToken, status: "draft" },
+      data: {
+        tenantId,
+        data: {},
+        draftToken,
+        status: "draft",
+        initiatedByUserId: options.initiatedByUserId,
+      },
       include: INCLUDE,
     });
-    await recordEvent(row.id, "Draft");
-    await audit("onboarding.started", row.id);
+    await recordEvent(row.id, "Draft", { actorUserId: options.initiatedByUserId });
+    await audit(
+      options.initiatedByUserId ? "onboarding.started_by_back_office" : "onboarding.started",
+      row.id,
+      { actorUserId: options.initiatedByUserId },
+    );
 
     return { application: toApplication({ ...row, events: [] }), draftToken };
   });
+}
+
+/** Starts an applicant's own application (the public `/register` wizard). */
+export async function startApplication(tenantId: string): Promise<StartApplicationResult> {
+  return startApplicationCore(tenantId);
+}
+
+/** @internal Shared by both entry points. */
+export async function getApplicationCore(
+  tenantId: string,
+  applicationId: string,
+  access: ApplicationAccess,
+): Promise<OnboardingApplication> {
+  return runWithTenant(tenantId, async () =>
+    toApplication(await loadAccessible(applicationId, access)),
+  );
 }
 
 export async function getDraftApplication(
   tenantId: string,
   handle: DraftHandle,
 ): Promise<OnboardingApplication> {
-  return runWithTenant(tenantId, async () => toApplication(await loadDraft(handle)));
+  return getApplicationCore(tenantId, handle.applicationId, {
+    kind: "draft",
+    draftToken: handle.draftToken,
+  });
 }
 
 /**
@@ -224,14 +305,15 @@ export async function getDraftApplication(
  * *merged* draft — GSTIN's state check needs step 1's address, which step 2
  * cannot see.
  */
-export async function saveStep(
+export async function saveStepCore(
   tenantId: string,
-  handle: DraftHandle,
+  applicationId: string,
+  access: ApplicationAccess,
   step: number,
   values: Record<string, unknown>,
 ): Promise<OnboardingApplication> {
   return runWithTenant(tenantId, async () => {
-    const row = await loadDraft(handle);
+    const row = await loadAccessible(applicationId, access);
     const status = toApplication(row).status;
     if (status !== "Draft") throw new OnboardingError("invalid_transition");
 
@@ -269,19 +351,35 @@ export async function saveStep(
   });
 }
 
+export async function saveStep(
+  tenantId: string,
+  handle: DraftHandle,
+  step: number,
+  values: Record<string, unknown>,
+): Promise<OnboardingApplication> {
+  return saveStepCore(
+    tenantId,
+    handle.applicationId,
+    { kind: "draft", draftToken: handle.draftToken },
+    step,
+    values,
+  );
+}
+
 /**
  * Verifies the draft's GSTIN with GSTN and stores the answer as evidence
  * (ADR-010). Never throws for a *verification* result — an unverified GSTIN
  * is a state the wizard renders, not an error. It throws only when the
  * application itself can't be found or has no GSTIN yet.
  */
-export async function verifyApplicationGstin(
+export async function verifyApplicationGstinCore(
   tenantId: string,
-  handle: DraftHandle,
+  applicationId: string,
+  access: ApplicationAccess,
   gstn: GstnAdapter,
 ): Promise<GstinVerification> {
   return runWithTenant(tenantId, async () => {
-    const row = await loadDraft(handle);
+    const row = await loadAccessible(applicationId, access);
     const application = toApplication(row);
     const gstin = application.data.gstin;
     if (typeof gstin !== "string" || gstin.length === 0) {
@@ -302,6 +400,19 @@ export async function verifyApplicationGstin(
 
     return verification;
   });
+}
+
+export async function verifyApplicationGstin(
+  tenantId: string,
+  handle: DraftHandle,
+  gstn: GstnAdapter,
+): Promise<GstinVerification> {
+  return verifyApplicationGstinCore(
+    tenantId,
+    handle.applicationId,
+    { kind: "draft", draftToken: handle.draftToken },
+    gstn,
+  );
 }
 
 async function runVerification(
@@ -373,14 +484,19 @@ export interface UploadDocumentInput {
   body: Uint8Array;
 }
 
-/** Stores an uploaded document and links it to the application. */
-export async function uploadDocument(
+/**
+ * Stores an uploaded document and links it to the application.
+ *
+ * @internal Shared by both entry points.
+ */
+export async function uploadDocumentCore(
   tenantId: string,
-  handle: DraftHandle,
+  applicationId: string,
+  access: ApplicationAccess,
   input: UploadDocumentInput,
 ): Promise<OnboardingApplication> {
   return runWithTenant(tenantId, async () => {
-    const row = await loadDraft(handle);
+    const row = await loadAccessible(applicationId, access);
     if (toApplication(row).status !== "Draft") throw new OnboardingError("invalid_transition");
     if (!ONBOARDING_DOCUMENT_KINDS.includes(input.kind)) {
       throw new OnboardingError("invalid", {
@@ -432,13 +548,28 @@ export async function uploadDocument(
   });
 }
 
-export async function removeDocument(
+export async function uploadDocument(
   tenantId: string,
   handle: DraftHandle,
+  input: UploadDocumentInput,
+): Promise<OnboardingApplication> {
+  return uploadDocumentCore(
+    tenantId,
+    handle.applicationId,
+    { kind: "draft", draftToken: handle.draftToken },
+    input,
+  );
+}
+
+/** @internal Shared by both entry points. */
+export async function removeDocumentCore(
+  tenantId: string,
+  applicationId: string,
+  access: ApplicationAccess,
   kind: OnboardingDocumentKind,
 ): Promise<OnboardingApplication> {
   return runWithTenant(tenantId, async () => {
-    const row = await loadDraft(handle);
+    const row = await loadAccessible(applicationId, access);
     if (toApplication(row).status !== "Draft") throw new OnboardingError("invalid_transition");
 
     const document = row.documents?.find((d) => d.kind === kind);
@@ -449,6 +580,19 @@ export async function removeDocument(
 
     return toApplication(await loadRow(row.id));
   });
+}
+
+export async function removeDocument(
+  tenantId: string,
+  handle: DraftHandle,
+  kind: OnboardingDocumentKind,
+): Promise<OnboardingApplication> {
+  return removeDocumentCore(
+    tenantId,
+    handle.applicationId,
+    { kind: "draft", draftToken: handle.draftToken },
+    kind,
+  );
 }
 
 /**
@@ -485,13 +629,16 @@ export async function readDocument(
  * duplicate guard — and moves the application straight on to
  * `PendingApproval`, which is what "Submitted → Under review" means on the
  * status timeline.
+ *
+ * @internal Shared by both entry points.
  */
-export async function submitApplication(
+export async function submitApplicationCore(
   tenantId: string,
-  handle: DraftHandle,
+  applicationId: string,
+  access: ApplicationAccess,
 ): Promise<OnboardingApplication> {
   return runWithTenant(tenantId, async () => {
-    const row = await loadDraft(handle);
+    const row = await loadAccessible(applicationId, access);
     const application = toApplication(row);
     assertTransition(application.status, "Submitted");
 
@@ -550,6 +697,16 @@ export async function submitApplication(
     await audit("onboarding.submitted", row.id, { metadata: { gstin } });
 
     return toApplication(await loadRow(row.id));
+  });
+}
+
+export async function submitApplication(
+  tenantId: string,
+  handle: DraftHandle,
+): Promise<OnboardingApplication> {
+  return submitApplicationCore(tenantId, handle.applicationId, {
+    kind: "draft",
+    draftToken: handle.draftToken,
   });
 }
 

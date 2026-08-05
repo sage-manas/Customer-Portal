@@ -1,3 +1,4 @@
+import { assertCustomerCanOrder } from "@cc/service-customer";
 import { acceptQuotation, acceptQuotationSchema } from "@cc/service-inquiry";
 import { getSapAdapterForTenant } from "@cc/service-sap";
 import { NextResponse } from "next/server";
@@ -38,6 +39,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ vbe
         { status: 422 },
       );
     }
+
+    // Accepting a quotation creates a sales order, so it is refused for a
+    // deactivated account for the same reason `POST /api/orders` is
+    // (ADR-057) — the second door into the same room.
+    if (session.kunnr) await assertCustomerCanOrder(session.tenantId, session.kunnr);
 
     const sap = await getSapAdapterForTenant(session.tenantId);
     const result = await acceptQuotation(

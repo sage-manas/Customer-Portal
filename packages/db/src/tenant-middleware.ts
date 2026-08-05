@@ -10,6 +10,7 @@ import { getTenantId } from "./tenant-context";
 export const TENANT_SCOPED_MODELS = new Set([
   "User",
   "UserAccountLink",
+  "CustomerAccount",
   "OnboardingApplication",
   "OnboardingDocument",
   "OnboardingEvent",
@@ -34,6 +35,7 @@ export const TENANT_SCOPED_MODELS = new Set([
   "AuditLog",
   "TenantDataKey",
   "TenantCredential",
+  "SapConfigAudit",
 ]);
 
 type Args = Record<string, unknown>;

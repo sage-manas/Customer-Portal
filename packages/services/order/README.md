@@ -11,17 +11,19 @@ Framework-free, like every `packages/services` module: no Next.js imports, every
 
 ## Public API
 
-| Function                                                                | Notes                                                                                                                           |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `listOrders(sap, kunnr, { filter })`                                    | Filters are the customer's vocabulary — `open` · `creditHold` · `completed` — not GBSTK codes.                                  |
-| `getOrder(sap, kunnr, vbeln)`                                           | Order + deliveries + invoices + the `O2CTimeline` stages. Cross-customer is a **404**.                                          |
-| `getOrderFormDefaults(sap, kunnr)`                                      | Ship-to list (VBPA-SH), KNVV-ZTERM, credit position — what the create form needs before anything typed.                         |
-| `checkAvailability(sap, kunnr, input)`                                  | ATP simulate. Writes nothing; returns per-line confirmed qty/date plus `creditBlockExpected`.                                   |
-| `createOrder(sap, kunnr, input)`                                        | VA01. Idempotent on the customer PO reference, so a double-clicked Submit costs nothing.                                        |
-| `cancelOrder(sap, kunnr, vbeln, reason?)`                               | Re-reads the status from SAP first — a stale screen cannot cancel an order that has since shipped.                              |
-| `displayStatus(order)`                                                  | A credit hold outranks GBSTK: it is the status the customer can act on.                                                         |
-| `saveDraft` / `getDraft` / `listDrafts` / `deleteDraft` / `countDrafts` | Scoped to the sold-to account; another account's draft id is a 404.                                                             |
-| `markDraftSubmitted(...)`                                               | Called **after** a successful create, never before — a draft marked submitted for an order that never reached SAP is lost work. |
+| Function                                                                | Notes                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listOrders(sap, kunnr, { filter })`                                    | Filters are the customer's vocabulary — `open` · `creditHold` · `completed` — not GBSTK codes.                                                                                                            |
+| `getOrder(sap, kunnr, vbeln)`                                           | Order + deliveries + invoices + the `O2CTimeline` stages. Cross-customer is a **404**.                                                                                                                    |
+| `getOrderFormDefaults(sap, kunnr)`                                      | Ship-to list (VBPA-SH), KNVV-ZTERM, credit position — what the create form needs before anything typed.                                                                                                   |
+| `checkAvailability(sap, kunnr, input)`                                  | ATP simulate. Writes nothing; returns per-line confirmed qty/date plus `creditBlockExpected`.                                                                                                             |
+| `createOrder(sap, kunnr, input)`                                        | VA01. Idempotent on the customer PO reference, so a double-clicked Submit costs nothing.                                                                                                                  |
+| `cancelOrder(sap, kunnr, vbeln, reason?)`                               | Re-reads the status from SAP first — a stale screen cannot cancel an order that has since shipped.                                                                                                        |
+| `displayStatus(order)`                                                  | A credit hold outranks GBSTK: it is the status the customer can act on.                                                                                                                                   |
+| `saveDraft` / `getDraft` / `listDrafts` / `deleteDraft` / `countDrafts` | Scoped to the sold-to account; another account's draft id is a 404.                                                                                                                                       |
+| `listCreditBlockedOrders(sap)`                                          | **Desk plane, no KUNNR.** Orders SAP is holding on credit, longest-waiting first — doc 05 §8's release queue, guarded by `credit:release`.                                                                |
+| `releaseCreditBlock(sap, { vbeln, initiatedBy })`                       | VKM3. **Re-runs the credit check** rather than forcing CMGST: `released: false` with SAP's reason is a normal result for an order still over its limit, not an error, and the screen prints it (ADR-059). |
+| `markDraftSubmitted(...)`                                               | Called **after** a successful create, never before — a draft marked submitted for an order that never reached SAP is lost work.                                                                           |
 
 ## Rules worth knowing before changing this
 

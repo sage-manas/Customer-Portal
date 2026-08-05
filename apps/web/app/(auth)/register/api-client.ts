@@ -1,26 +1,18 @@
 import type { GstinVerification, OnboardingApplication, OnboardingDocumentKind } from "@cc/domain";
 
+import { WizardApiError, type FieldIssue } from "@/components/onboarding/OnboardingWizard";
+
 /**
  * Thin typed client for the public onboarding endpoints. One place that
  * knows the draft-token header exists, so no component builds a `fetch` by
  * hand and forgets it.
  */
 
-export interface FieldIssue {
-  field: string;
-  message: string;
-}
-
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-    readonly issues: FieldIssue[] = [],
-    readonly code?: string,
-  ) {
-    super(message);
-  }
-}
+/**
+ * The wizard's error type, shared with the back-office client so both planes
+ * put a field issue under the same input (`OnboardingWizard`).
+ */
+export { WizardApiError as ApiError };
 
 const TOKEN_HEADER = "x-draft-token";
 
@@ -29,7 +21,7 @@ async function parse<T>(response: Response): Promise<T> {
     (Partial<T> & { error?: string; issues?: FieldIssue[]; code?: string }) | null;
 
   if (!response.ok) {
-    throw new ApiError(
+    throw new WizardApiError(
       response.status,
       body?.error ?? "Something went wrong. Try again.",
       body?.issues ?? [],

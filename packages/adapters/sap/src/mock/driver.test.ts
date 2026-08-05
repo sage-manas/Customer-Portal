@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isSapError, type SapError } from "../errors";
 
 import { MockSapAdapter } from "./driver";
-import { SEED_DELIVERIES, SEED_TODAY } from "./seed";
+import { SEED_DELIVERIES, SEED_TODAY, shiftDays } from "./seed";
 
 const KUNNR = "0010001001";
 /** Deccan Fabricators — seeded at 98% credit utilisation. */
@@ -319,6 +319,75 @@ describe("customer creation", () => {
     expect(error.kind).toBe("validation");
     expect(error.field).toBe("gstin");
     expect(error.sapMessageId).toBe("F2/018");
+  });
+});
+
+describe("customer change (XD02)", () => {
+  it("applies only the fields the patch carries and leaves the rest alone", async () => {
+    const sap = adapter();
+    const before = await sap.getCustomer(KUNNR);
+
+    const result = await sap.updateCustomer(KUNNR, {
+      contact: { ...before.data.contact, email: "newap@acme.example" },
+    });
+
+    expect(result.customer.contact.email).toBe("newap@acme.example");
+    // Untouched by the patch, so untouched in the master.
+    expect(result.customer.address).toEqual(before.data.address);
+    expect(result.customer.tax).toEqual(before.data.tax);
+    expect(result.customer.legalEntityName).toBe(before.data.legalEntityName);
+
+    const after = await sap.getCustomer(KUNNR);
+    expect(after.data.contact.email).toBe("newap@acme.example");
+  });
+
+  it("truncates to the registry's SAP field length, as the change BAPI does", async () => {
+    const sap = adapter();
+    const result = await sap.updateCustomer(KUNNR, {
+      tradeName: "A trade name far longer than KNA1-NAME2 can hold in any client",
+    });
+    // KNA1-NAME2 is CHAR 35 per the sap-mapping registry.
+    expect(result.customer.tradeName).toHaveLength(35);
+  });
+
+  it("moves the ship-to that was the billing address, and leaves the others alone", async () => {
+    const sap = adapter();
+    const created = await sap.createCustomer({
+      legalEntityName: "Ship To Sync Private Limited",
+      customerType: "Z001",
+      address: {
+        street: "1 Old Road",
+        city: "Mumbai",
+        region: "27",
+        postalCode: "400001",
+        country: "IN",
+      },
+      contact: { contactPerson: "S Sync", email: "s@example.test", phone: "+912200000001" },
+      tax: { pan: "AAACS9876A", gstin: "27AAACS9876A1Z2" },
+    });
+
+    const address = {
+      street: "9 New Road",
+      city: "Nashik",
+      region: "27",
+      postalCode: "422001",
+      country: "IN",
+    };
+    await sap.updateCustomer(created.kunnr, { address });
+
+    const shipTos = await sap.getShipToAddresses(created.kunnr);
+    expect(shipTos.data.map((shipTo) => shipTo.address)).toEqual([address]);
+
+    // The seeded account's separately maintained plants are untouched.
+    const untouched = await sap.getShipToAddresses(KUNNR);
+    expect(untouched.data.length).toBeGreaterThan(1);
+  });
+
+  it("404s an unknown customer", async () => {
+    const error = await expectSapError(() =>
+      adapter().updateCustomer("0000000000", { tradeName: "Nobody" }),
+    );
+    expect(error.kind).toBe("not_found");
   });
 });
 
@@ -663,6 +732,284 @@ describe("inquiry & quotation (Module 3)", () => {
     it("404s an unknown quotation", async () => {
       const error = await expectSapError(() =>
         adapter().convertQuoteToOrder({ quotationVbeln: "0020009999", shipTo: KUNNR }),
+      );
+      expect(error.kind).toBe("not_found");
+    });
+  });
+});
+
+describe("desk-plane reads (doc 09 §3.4)", () => {
+  it("gives the billing register every account's documents, notes included", async () => {
+    const sap = adapter();
+    const register = await sap.getBillingRegister();
+
+    expect(new Set(register.data.items.map((i) => i.kunnr)).size).toBeGreaterThan(1);
+    expect(register.data.items.some((i) => i.billingType === "G2")).toBe(true);
+    // Superset of any one account's list — the desk read and the customer's
+    // must come from the same documents.
+    const mine = await sap.getInvoices(KUNNR);
+    for (const invoice of mine.data.items) {
+      expect(register.data.items.map((i) => i.vbeln)).toContain(invoice.vbeln);
+    }
+  });
+
+  it("carries the owning account on every ledger row", async () => {
+    const sap = adapter();
+    const ledger = await sap.getOpenItemsLedger();
+
+    expect(ledger.data.length).toBeGreaterThan(0);
+    expect(ledger.data.every((item) => item.kunnr.length > 0)).toBe(true);
+    expect(new Set(ledger.data.map((i) => i.kunnr)).size).toBeGreaterThan(1);
+
+    // The same items the customer's own read returns, with the owner added.
+    const mine = await sap.getOpenItems(KUNNR);
+    expect(
+      ledger.data
+        .filter((i) => i.kunnr === KUNNR)
+        .map((i) => i.documentNumber)
+        .sort(),
+    ).toEqual(mine.data.map((i) => i.documentNumber).sort());
+  });
+
+  it("gives the rebate register every agreement, lapsed and settled ones too", async () => {
+    const sap = adapter();
+    const register = await sap.getRebateRegister();
+
+    expect(new Set(register.data.map((r) => r.kunnr)).size).toBeGreaterThan(1);
+    expect(register.data.some((r) => r.settlementStatus === "D")).toBe(true);
+  });
+
+  it("lists credit-blocked orders across the tenant, oldest first", async () => {
+    const blocked = await adapter().getCreditBlockedOrders();
+
+    expect(blocked.data.items.length).toBeGreaterThan(0);
+    expect(blocked.data.items.every((o) => o.creditStatus === "CreditHold")).toBe(true);
+    const dates = blocked.data.items.map((o) => o.createdOn);
+    expect([...dates].sort()).toEqual(dates);
+  });
+
+  it("picks up an order the credit check holds during the session", async () => {
+    const sap = adapter();
+    const before = (await sap.getCreditBlockedOrders()).data.total;
+
+    const order = await sap.createSalesOrder({
+      kunnr: TIGHT_CREDIT_KUNNR,
+      shipTo: TIGHT_CREDIT_KUNNR,
+      customerPoRef: "PO-CREDIT-1",
+      requestedDeliveryDate: shiftDays(SEED_TODAY, 14),
+      lines: [{ material: "MAT-10001", quantity: 500, uom: "EA" }],
+    });
+
+    const after = await sap.getCreditBlockedOrders();
+    if (order.creditStatus === "CreditHold") {
+      expect(after.data.total).toBe(before + 1);
+      expect(after.data.items.map((o) => o.vbeln)).toContain(order.vbeln);
+    } else {
+      expect(after.data.total).toBe(before);
+    }
+  });
+});
+
+describe("desk-plane writes (doc 09 §3.4, ADR-059)", () => {
+  describe("postOutgoingPayment (F-58)", () => {
+    /** The seeded credit note and its negative FI item. */
+    const CREDIT_NOTE = "0090002250";
+
+    it("pays a credit out, clears the item and reports the FI document", async () => {
+      const sap = adapter();
+      const before = (await sap.getOpenItems(KUNNR)).data.find(
+        (i) => i.documentNumber === CREDIT_NOTE,
+      );
+      expect(before?.openAmount).toBeLessThan(0);
+
+      const result = await sap.postOutgoingPayment({
+        kunnr: KUNNR,
+        documentNumber: CREDIT_NOTE,
+        amount: Math.abs(before!.openAmount),
+        currency: "INR",
+        reference: `refund:${CREDIT_NOTE}`,
+        initiatedBy: "user-ap-1",
+      });
+
+      expect(result.documentNumber).toMatch(/^\d+$/);
+      expect(result.clearedItems).toEqual([CREDIT_NOTE]);
+
+      const after = (await sap.getOpenItems(KUNNR)).data.find(
+        (i) => i.documentNumber === CREDIT_NOTE,
+      );
+      expect(after?.openAmount).toBe(0);
+      expect(after?.status).toBe("Cleared");
+      expect(after?.clearingDocument).toBe(result.documentNumber);
+    });
+
+    it("pays once for one reference, however many times it is called", async () => {
+      const sap = adapter();
+      const input = {
+        kunnr: KUNNR,
+        documentNumber: CREDIT_NOTE,
+        amount: 14325.2,
+        currency: "INR",
+        reference: `refund:${CREDIT_NOTE}`,
+      };
+
+      const first = await sap.postOutgoingPayment(input);
+      const second = await sap.postOutgoingPayment(input);
+
+      expect(second).toEqual(first);
+      // And the item was not paid twice into a positive balance.
+      const item = (await sap.getOpenItems(KUNNR)).data.find(
+        (i) => i.documentNumber === CREDIT_NOTE,
+      );
+      expect(item?.openAmount).toBe(0);
+    });
+
+    it("refuses a document that is not a credit", async () => {
+      const sap = adapter();
+      const invoice = (await sap.getOpenItems(KUNNR)).data.find((i) => i.openAmount > 0);
+
+      const error = await expectSapError(() =>
+        sap.postOutgoingPayment({
+          kunnr: KUNNR,
+          documentNumber: invoice!.documentNumber,
+          amount: 100,
+          currency: "INR",
+          reference: "refund:wrong-way",
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("refuses more than the open credit", async () => {
+      const error = await expectSapError(() =>
+        adapter().postOutgoingPayment({
+          kunnr: KUNNR,
+          documentNumber: CREDIT_NOTE,
+          amount: 999_999,
+          currency: "INR",
+          reference: "refund:too-much",
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+
+    it("404s another customer's document rather than admitting it exists", async () => {
+      const error = await expectSapError(() =>
+        adapter().postOutgoingPayment({
+          kunnr: TIGHT_CREDIT_KUNNR,
+          documentNumber: CREDIT_NOTE,
+          amount: 100,
+          currency: "INR",
+          reference: "refund:cross",
+        }),
+      );
+      expect(error.kind).toBe("not_found");
+    });
+  });
+
+  describe("settleRebateAgreement (VB(7)", () => {
+    /** Seeded BOSTA=C — the one agreement SAP has released. */
+    const RELEASED = "0000801288";
+
+    it("settles a released agreement and consumes its accrual", async () => {
+      const sap = adapter();
+      const result = await sap.settleRebateAgreement({
+        agreementNumber: RELEASED,
+        reference: `rebate:${RELEASED}`,
+        initiatedBy: "user-ap-1",
+      });
+
+      expect(result.settlementStatus).toBe("D");
+      expect(result.settledAmount).toBeGreaterThan(0);
+      expect(result.creditMemoRequest).toMatch(/^\d{10}$/);
+
+      const after = (await sap.getRebateRegister()).data.find(
+        (r) => r.agreementNumber === RELEASED,
+      );
+      expect(after?.settlementStatus).toBe("D");
+      expect(after?.accruedAmount).toBe(0);
+    });
+
+    it("settles once per reference", async () => {
+      const sap = adapter();
+      const input = { agreementNumber: RELEASED, reference: `rebate:${RELEASED}` };
+      expect(await sap.settleRebateAgreement(input)).toEqual(
+        await sap.settleRebateAgreement(input),
+      );
+    });
+
+    it("refuses an agreement SAP has not released — it is still accruing", async () => {
+      const sap = adapter();
+      const open = (await sap.getRebateRegister()).data.find((r) => r.settlementStatus === "B");
+
+      const error = await expectSapError(() =>
+        sap.settleRebateAgreement({
+          agreementNumber: open!.agreementNumber,
+          reference: `rebate:${open!.agreementNumber}`,
+        }),
+      );
+      expect(error.kind).toBe("validation");
+      expect(error.message).toContain("VBO2");
+    });
+
+    it("refuses one already settled", async () => {
+      const sap = adapter();
+      const settled = (await sap.getRebateRegister()).data.find((r) => r.settlementStatus === "D");
+
+      const error = await expectSapError(() =>
+        sap.settleRebateAgreement({
+          agreementNumber: settled!.agreementNumber,
+          reference: `rebate:${settled!.agreementNumber}:again`,
+        }),
+      );
+      expect(error.kind).toBe("validation");
+    });
+  });
+
+  describe("releaseCreditBlock (VKM3)", () => {
+    it("releases an order that now fits the limit, and consumes the exposure", async () => {
+      const sap = adapter();
+      const before = await sap.getCreditInfo(TIGHT_CREDIT_KUNNR);
+
+      const result = await sap.releaseCreditBlock({
+        vbeln: "0000004714",
+        initiatedBy: "user-ar-1",
+      });
+
+      expect(result).toMatchObject({ released: true, creditStatus: "Confirmed" });
+      const after = await sap.getCreditInfo(TIGHT_CREDIT_KUNNR);
+      expect(after.data.utilized).toBe(before.data.utilized + 24000);
+      expect((await sap.getOrderStatus("0000004714")).data.creditStatus).toBe("Confirmed");
+    });
+
+    it("re-runs the check rather than forcing it: an order still over the limit stays held", async () => {
+      const sap = adapter();
+      const result = await sap.releaseCreditBlock({ vbeln: "0000004713" });
+
+      expect(result.released).toBe(false);
+      expect(result.creditStatus).toBe("CreditHold");
+      expect(result.reason).toContain("over");
+      // And nothing moved: the order is still in the queue.
+      const queue = await sap.getCreditBlockedOrders();
+      expect(queue.data.items.map((o) => o.vbeln)).toContain("0000004713");
+    });
+
+    it("is idempotent — releasing an order that is already released is a no-op", async () => {
+      const sap = adapter();
+      await sap.releaseCreditBlock({ vbeln: "0000004714" });
+      const before = await sap.getCreditInfo(TIGHT_CREDIT_KUNNR);
+
+      const again = await sap.releaseCreditBlock({ vbeln: "0000004714" });
+
+      expect(again.released).toBe(true);
+      // Exposure is consumed once, not once per click.
+      expect((await sap.getCreditInfo(TIGHT_CREDIT_KUNNR)).data.utilized).toBe(
+        before.data.utilized,
+      );
+    });
+
+    it("404s an unknown order", async () => {
+      const error = await expectSapError(() =>
+        adapter().releaseCreditBlock({ vbeln: "0000009999" }),
       );
       expect(error.kind).toBe("not_found");
     });

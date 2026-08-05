@@ -224,13 +224,13 @@ export const ADMIN_NAV: readonly NavItem[] = [
     key: "admin-customers",
     /** Doc 09 §3.4. Register/edit/deactivate lives behind `customer:register`
      * rather than a coarser `admin:view`: an AP or AR manager holds the shell
-     * and must not see the customer master. Built in Phase 5. */
+     * and must not see the customer master. */
     label: "Customers",
     href: "/admin/customers",
     icon: "Users",
     accent: "onboard",
     permission: "customer:register",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-ap",
@@ -239,7 +239,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Wallet",
     accent: "payment",
     permission: "finance:ap",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-ar",
@@ -248,20 +248,15 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Landmark",
     accent: "invoice",
     permission: "finance:ar",
-    status: "planned",
-  },
-  {
-    key: "admin-exceptions",
-    /** Moves under the AP workspace in Phase 6 (doc 09 §3.4); until that
-     * screen exists it keeps its own tab, now reachable by `ap_manager`
-     * because `exceptions:view` sits in the AP group. */
-    label: "Exceptions",
-    href: "/admin/exceptions",
-    icon: "AlertTriangle",
-    accent: "payment",
-    permission: "exceptions:view",
     status: "live",
   },
+  /**
+   * The Exceptions tab is deliberately gone: the tray is a view inside the AP
+   * workspace as of Phase 6 (doc 09 §3.4, ADR-060), and a nav item pointing
+   * at a screen that only redirects would be a second route to one place.
+   * `exceptions:view` still guards the retry handlers, which is where the
+   * control actually is (CLAUDE.md rule 5).
+   */
   {
     key: "admin-settings",
     label: "Tenant Settings",
@@ -297,7 +292,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/sap/config",
     icon: "PlugZap",
     permission: "platform:sap-config",
-    status: "planned",
+    status: "live",
   },
   {
     key: "ops-sap-health",
@@ -305,7 +300,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/sap/health",
     icon: "Activity",
     permission: "platform:sap-health",
-    status: "planned",
+    status: "live",
   },
   {
     key: "ops-operators",
@@ -313,7 +308,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/operators",
     icon: "Users",
     permission: "platform:operators-manage",
-    status: "planned",
+    status: "live",
   },
   {
     key: "ops-billing",
@@ -321,7 +316,7 @@ export const OPS_NAV: readonly NavItem[] = [
     href: "/billing",
     icon: "Wallet",
     permission: "platform:billing",
-    status: "planned",
+    status: "live",
   },
 ] as const;
 

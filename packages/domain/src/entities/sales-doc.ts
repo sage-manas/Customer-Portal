@@ -311,3 +311,64 @@ export interface IncomingPaymentResult {
   /** Items left partially open after allocation (residual). */
   residualItems: string[];
 }
+
+/**
+ * Money going the other way: the AP desk paying out a credit note (F-58 /
+ * F-53 outgoing payment with clearing). The mirror of `IncomingPaymentInput`,
+ * and separate from it for the reason the planes are separate everywhere else
+ * — a function that could pay *or* collect depending on a sign is one typo
+ * away from moving money in the wrong direction (doc 09 §3.4).
+ */
+export interface OutgoingPaymentInput {
+  kunnr: string;
+  /** The credit note's FI item (BSID-BELNR) being settled. */
+  documentNumber: string;
+  amount: number;
+  currency: string;
+  /**
+   * The idempotency key, minted by the portal from the document being paid
+   * rather than randomly — a double-clicked Pay must be one payout, and a key
+   * the caller generates fresh each time would make it two (ADR-021's rule).
+   */
+  reference: string;
+  /**
+   * Who authorised it, carried onto the FI document's header text (BKPF-BKTXT).
+   * The portal's technical user is what SAP would otherwise record as the
+   * creator, which would lose the only fact worth auditing here.
+   */
+  initiatedBy?: string;
+  note?: string;
+}
+
+export interface OutgoingPaymentResult {
+  /** The FI payment document created by the posting. */
+  documentNumber: string;
+  clearedItems: string[];
+  paidAmount: number;
+  currency: string;
+  /** BKPF-BUDAT, ISO date. */
+  postingDate: string;
+}
+
+/** VKM3 — releasing an order SAP is holding on credit (doc 05 §8). */
+export interface CreditReleaseInput {
+  vbeln: string;
+  initiatedBy?: string;
+  note?: string;
+}
+
+/**
+ * What VKM3 actually does, represented honestly: it **re-runs the credit
+ * check**. An order over a limit that has not moved comes back still held,
+ * and `released: false` with SAP's reason is the truthful answer — a portal
+ * that reported success regardless would have a warehouse expecting a pick
+ * SAP is still blocking.
+ */
+export interface CreditReleaseResult {
+  vbeln: string;
+  released: boolean;
+  /** VBUK-CMGST as it stands after the re-check. */
+  creditStatus: CanonicalStatus;
+  /** Why it is still held, when it is. */
+  reason?: string;
+}

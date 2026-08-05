@@ -19,7 +19,7 @@ import { env } from "./env";
  * `@cc/service-payment`'s captured-but-unposted and initiated-but-unconfirmed
  * payments, `@cc/service-reconciliation`'s failed outbox rows — and gives it
  * another try. Nothing here is a new fact; it is the same idempotent retry a
- * human clicking "Retry" in `/admin/exceptions` would trigger, run on a
+ * human clicking "Retry" in `/admin/ap` (Reconciliation) would trigger, run on a
  * schedule so most exceptions never need a human at all.
  *
  * Sequential per tenant, same reasoning as the relay and the SLA sweep: this
@@ -52,7 +52,7 @@ export async function reconcileOnce(options: { now?: Date } = {}): Promise<Recon
           paymentsRetried += 1;
         } catch {
           // The exception is still there for the next tick, and for a human
-          // reading `/admin/exceptions` — nothing here may crash the sweep
+          // reading `/admin/ap` (Reconciliation) — nothing here may crash the sweep
           // over one payment that still won't post.
         }
       }

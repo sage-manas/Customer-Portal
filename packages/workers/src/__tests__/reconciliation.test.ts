@@ -93,9 +93,13 @@ describe("reconciliation sweep", () => {
       gateway,
     }).catch(() => undefined);
 
-    const result = await reconcileOnce();
+    await reconcileOnce();
 
-    expect(result.paymentsRetried).toBe(0);
+    // Same reason as the outbox case below: `paymentsRetried` counts every
+    // tenant in the database, so `toBe(0)` was asserting that no *other*
+    // suite had left a stale capture behind — a fact this test has no
+    // opinion about and no control over. What it means to assert is that
+    // this payment is still pending, which is what `listPendingSync` says.
     expect(await listPendingSync(tenantA.id, KUNNR)).toHaveLength(1);
   });
 
@@ -132,9 +136,14 @@ describe("reconciliation sweep", () => {
       }),
     );
 
-    const result = await reconcileOnce({ now });
-    expect(result.outboxRequeued).toBe(1);
+    await reconcileOnce({ now });
 
+    // Deliberately not `expect(result.outboxRequeued).toBe(1)`. The sweep is
+    // cross-tenant by design (ADR-044), so its counters describe the whole
+    // database, not this suite's two tenants — a stale failed row left by
+    // any other integration suite makes an exact count wrong, and the whole
+    // point of the test is which of *these two* rows moved. That is what the
+    // reads below assert, and they are strictly stronger than the counter.
     const staleRow = await runWithTenant(tenantA.id, () =>
       db.outboxEvent.findUniqueOrThrow({ where: { id: stale.id } }),
     );

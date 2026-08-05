@@ -83,7 +83,8 @@ export const PERMISSIONS = [
    * mirror of public self-registration. */
   "customer:register",
   "customer:edit",
-  /** Blocks login and new orders; never deletes O2C history (ADR-048). */
+  /** Blocks login and new orders; never deletes O2C history (doc 09 §3.4,
+   * built in Phase 5 — the tenant-level equivalent is ADR-054). */
   "customer:deactivate",
   /** The AP workspace: outgoing money (doc 09 §1 tier 4). */
   "finance:ap",
@@ -350,4 +351,32 @@ export function isBackOfficeRole(role: Role): boolean {
 /** True for the buyer plane. */
 export function isCustomerRole(role: Role): boolean {
   return !isPlatformRole(role) && !isBackOfficeRole(role);
+}
+
+/** The planes a session can belong to, plus the empty answer. */
+export type Plane = "platform" | "back_office" | "customer" | "none";
+
+/**
+ * The plane a *session* belongs to (ADR-062).
+ *
+ * Roles classify into exactly one plane each (the test above this file's
+ * companion asserts it), so a session's plane is its roles' — and the
+ * ordering below only decides what happens to a row that holds two, which
+ * the seeds never produce and the migration cannot create: the widest plane
+ * wins, so such a session is sent to the console rather than shown a portal
+ * it has no KUNNR for.
+ *
+ * This exists so a shell can ask "is this my plane?" without asking which
+ * role it is looking at. `hasPermission` answers "may you do X"; it cannot
+ * answer "which of the three apps are you", because the back office and the
+ * buyer legitimately share leaf permissions (`order:view`, `invoice:view`)
+ * and differ in what those reads are scoped *to* — a KUNNR the back office
+ * does not have.
+ */
+export function sessionPlane(session: Pick<SessionClaims, "roles"> | null | undefined): Plane {
+  const roles = session?.roles ?? [];
+  if (roles.some(isPlatformRole)) return "platform";
+  if (roles.some(isBackOfficeRole)) return "back_office";
+  if (roles.some(isCustomerRole)) return "customer";
+  return "none";
 }

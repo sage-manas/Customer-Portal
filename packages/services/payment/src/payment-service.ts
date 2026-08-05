@@ -76,7 +76,7 @@ interface PaymentRow {
   allocations: Array<{ documentNumber: string; amount: unknown; cleared: boolean }>;
 }
 
-const PAYMENT_SELECT = {
+export const PAYMENT_SELECT = {
   id: true,
   customerKunnr: true,
   amount: true,
@@ -93,7 +93,7 @@ const PAYMENT_SELECT = {
 
 const toNumber = (value: unknown): number => Number(value);
 
-function toPayment(row: PaymentRow): Payment {
+export function toPayment(row: PaymentRow): Payment {
   const allocations = row.allocations.map((a) => ({
     documentNumber: a.documentNumber,
     amount: toNumber(a.amount),

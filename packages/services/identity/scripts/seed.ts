@@ -27,6 +27,27 @@ interface SeedUser {
   kunnrs: string[];
 }
 
+/**
+ * The portal's own record of a customer account (ADR-057). Seeded alongside
+ * the users so `/admin/customers` has a directory on a fresh database — the
+ * name, GSTIN and address on that screen are *not* seeded, because they come
+ * from SAP on every read.
+ */
+async function seedCustomerAccounts(tenantId: string, kunnrs: string[]) {
+  await runWithTenant(tenantId, async () => {
+    for (const sapKunnr of kunnrs) {
+      await db.customerAccount.upsert({
+        where: { tenantId_sapKunnr: { tenantId, sapKunnr } },
+        // Never re-activates: a developer who deactivated one to try the
+        // flow would otherwise have it silently switched back on by a
+        // re-seed.
+        update: {},
+        create: { tenantId, sapKunnr },
+      });
+    }
+  });
+}
+
 async function seedTenantUsers(tenantId: string, passwordHash: string, users: SeedUser[]) {
   // Every write goes through the tenant context, exactly as a request would
   // — the seed gets no privileged path around scoping.
@@ -88,10 +109,14 @@ async function main() {
     { email: "ar@acme.example", roles: ["ar_manager"], kunnrs: [] },
   ]);
 
+  await seedCustomerAccounts(acme.id, ["0010001001", "0010001002"]);
+
   await seedTenantUsers(globex.id, passwordHash, [
     { email: "buyer@globex.example", roles: ["customer"], kunnrs: ["0010001003"] },
     { email: "admin@globex.example", roles: ["client_admin"], kunnrs: [] },
   ]);
+
+  await seedCustomerAccounts(globex.id, ["0010001003"]);
 
   console.log(
     [

@@ -8,14 +8,23 @@ import type {
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
+  CustomerPatch,
   CustomerPrice,
+  CustomerUpdateResult,
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  CreditReleaseInput,
+  CreditReleaseResult,
+  OutgoingPaymentInput,
+  OutgoingPaymentResult,
+  RebateSettlementInput,
+  RebateSettlementResult,
   Inquiry,
   Invoice,
   Material,
   MaterialQuery,
+  LedgerOpenItem,
   OpenItem,
   OrderSimulation,
   OrderStatusView,
@@ -62,6 +71,9 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   async createCustomer(_customer: CanonicalCustomer): Promise<CustomerCreateResult> {
     this.fail("createCustomer");
   }
+  async updateCustomer(_kunnr: string, _patch: CustomerPatch): Promise<CustomerUpdateResult> {
+    this.fail("updateCustomer");
+  }
   async getCustomer(_kunnr: string): Promise<SapRead<CanonicalCustomer>> {
     this.fail("getCustomer");
   }
@@ -101,6 +113,27 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   }
   async getInquiryQueue(): Promise<SapRead<Page<Inquiry>>> {
     this.fail("getInquiryQueue");
+  }
+  async getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>> {
+    this.fail("getCreditBlockedOrders");
+  }
+  async getBillingRegister(): Promise<SapRead<Page<Invoice>>> {
+    this.fail("getBillingRegister");
+  }
+  async getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>> {
+    this.fail("getOpenItemsLedger");
+  }
+  async getRebateRegister(): Promise<SapRead<RebateAgreement[]>> {
+    this.fail("getRebateRegister");
+  }
+  async settleRebateAgreement(_input: RebateSettlementInput): Promise<RebateSettlementResult> {
+    this.fail("settleRebateAgreement");
+  }
+  async releaseCreditBlock(_input: CreditReleaseInput): Promise<CreditReleaseResult> {
+    this.fail("releaseCreditBlock");
+  }
+  async postOutgoingPayment(_input: OutgoingPaymentInput): Promise<OutgoingPaymentResult> {
+    this.fail("postOutgoingPayment");
   }
   async createQuotation(_input: CreateQuotationInput): Promise<Quotation> {
     this.fail("createQuotation");

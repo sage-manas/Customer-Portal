@@ -47,6 +47,11 @@ import {
   completeMockCheckout, // dev/demo: deliver the mock's own signed webhook
   getPaymentGatewayForTenant,
 
+  // AR desk (doc 09 §3.4) — tenant-wide, no KUNNR
+  getTenantLedger, // every open item, aged, plus a per-account rollup
+  listDunningCandidates, // who is worth chasing, most escalated first
+  listPaymentsReceived, // every payment the tenant has taken
+
   // Reconciliation (docs/07 B4) — tenant-wide, admin-plane
   listPaymentExceptions, // every stuck captured/initiated payment in the tenant
   reconcilePayment, // retry the SAP posting, or poll the gateway for a lost webhook
@@ -62,8 +67,12 @@ caller, because a service may not import `@cc/service-sap` — ADR-011.
 `listPaymentExceptions` is deliberately a different function from
 `listPendingSync`, not that function with the `kunnr` left off — a tenant-wide
 read for the reconciliation job and the admin tray must not be reachable from
-a customer-plane call (ADR-032's reasoning, applied to money). `reconcilePayment`
-is what both `@cc/workers`' automatic sweep and the `/admin/exceptions` tray's
+a customer-plane call (ADR-032's reasoning, applied to money). `ledger-service.ts`
+is the same split again for the AR desk: `getStatement(adapter, kunnr)` and
+`getTenantLedger(adapter)` are different functions with different boundaries, and
+the desk's aging is `buildAging` — the very function behind the customer's own
+statement — grouped per account, never a second implementation (ADR-058). `reconcilePayment`
+is what both `@cc/workers`' automatic sweep and the AP workspace's reconciliation tray's
 manual retry call: for a `captured` payment it retries the SAP posting
 (already idempotent, ADR-021); for an `initiated` one with a gateway attempt
 it polls the gateway directly rather than waiting for a webhook that may

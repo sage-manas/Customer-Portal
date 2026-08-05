@@ -9,9 +9,10 @@ import { handlePortal, requirePortal } from "@/lib/portal-route";
  * Proof of delivery (docs/03 Screen 5.2, docs/05 §7.5).
  *
  * `delivery:view` reads the form's defaults; `delivery:confirm-receipt`
- * submits it — the two are separate permissions because signing for goods is
- * a commitment a view-only buyer must not be able to make on the account's
- * behalf (docs/05 §4.3).
+ * submits it. The `customer` role holds both since the collapse (ADR-061),
+ * so the split buys nothing today and is kept anyway: signing for goods is a
+ * commitment, reading a shipment is not, and the seam a narrower buyer role
+ * would need is cheaper to keep than to re-cut (docs/05 §4.3).
  *
  * There is one POST, not two. Doc 05 draws "Confirm Receipt" and "Report
  * Discrepancy" as two buttons, but which one *happened* is decided by the

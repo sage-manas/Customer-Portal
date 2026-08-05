@@ -9,7 +9,8 @@ import { handlePortal, requirePortal } from "@/lib/portal-route";
  *
  * Guarded by `support:create` rather than `support:view`: posting to a thread
  * commits the account to a statement, which is the same kind of act as
- * raising the ticket and not something a view-only login should do.
+ * raising the ticket — so it is guarded by the same permission, not by the
+ * weaker one that merely opens the screen.
  *
  * `internal` is refused by the service for a customer session — not silently
  * dropped. A request asking for one is either a bug or a probe, and writing it

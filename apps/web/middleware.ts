@@ -75,8 +75,30 @@ const REQUEST_ID_HEADER = "x-request-id";
  * an accepted gap for this phase, not a silent one (see the package README).
  */
 const rateLimiter = createRateLimiter();
-const PUBLIC_RATE_LIMIT = { limit: 60, windowMs: 60_000 }; // per IP, unauthenticated
-const TENANT_RATE_LIMIT = { limit: 600, windowMs: 60_000 }; // per tenant, authenticated
+
+/**
+ * The limits are read from the environment with the production values as
+ * defaults, for one caller: the Playwright suite signs in ~60 times in a few
+ * minutes from one IP, which is indistinguishable from a credential-stuffing
+ * run and was being throttled exactly as it should be. Raising the ceiling
+ * for that process is honest; special-casing the test's IP inside the
+ * limiter would not be.
+ */
+function limitFrom(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Read statically, not as `process.env[name]`: the edge bundle inlines the
+// former and cannot see the latter.
+const PUBLIC_RATE_LIMIT = {
+  limit: limitFrom(process.env.RATE_LIMIT_PUBLIC, 60),
+  windowMs: 60_000,
+}; // per IP, unauthenticated
+const TENANT_RATE_LIMIT = {
+  limit: limitFrom(process.env.RATE_LIMIT_TENANT, 600),
+  windowMs: 60_000,
+}; // per tenant, authenticated
 
 function clientIp(request: NextRequest): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";

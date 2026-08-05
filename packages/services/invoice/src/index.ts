@@ -10,4 +10,16 @@ export {
   type InvoiceStatusFilter,
 } from "./invoice-service";
 
+export {
+  listInvoiceRegister,
+  listNoteRegister,
+  listRefundQueue,
+  payRefund,
+  refundReference,
+  type PaidRefund,
+  type RefundQueueResult,
+  type RegisterResult,
+  type RegisterRow,
+} from "./register-service";
+
 export { InvoiceError, isInvoiceError, type InvoiceErrorCode, type InvoiceIssue } from "./errors";

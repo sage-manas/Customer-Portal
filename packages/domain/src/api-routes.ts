@@ -564,6 +564,97 @@ const WEB_ROUTES: readonly ApiRoute[] = [
     scope: "tenant",
     note: "Rejecting is a decision on the application, so it needs the approver's permission, not the reviewer's.",
   },
+  // Customer directory (doc 09 §3.4). Reads are guarded by
+  // `customer:register` — the permission the Customers tab itself declares —
+  // rather than by a `customer:view` that doc 09 §2 does not define. All
+  // three `customer:*` leaves are held by `client_admin` alone, so this is a
+  // naming choice and not a widening: an `ap_manager` holding `admin:view`
+  // is refused by every row below.
+  {
+    plane: "web",
+    path: "/api/admin/customers",
+    method: "GET",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/[kunnr]",
+    method: "GET",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+    note: "The KUNNR is checked against the tenant's own account rows before SAP is read; a miss is 404, not 403.",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/[kunnr]",
+    method: "PATCH",
+    guard: { kind: "permission", permission: "customer:edit" },
+    scope: "tenant",
+    note: "Writes the SAP customer master (XD02), bounded by CUSTOMER_EDITABLE_FIELDS — PAN and GSTIN are not in the schema (ADR-057).",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/[kunnr]/status",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:deactivate" },
+    scope: "tenant",
+    note: "Carries the target state, both directions, no DELETE — the same shape as the console's tenant switch (ADR-054, ADR-057).",
+  },
+  // Back-office registration (ADR-056): the same wizard as `/api/onboarding`,
+  // reached with a session instead of a draft token. Every row guards
+  // `customer:register`, because filling the form on a customer's behalf and
+  // creating them are one capability, not five.
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]",
+    method: "GET",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/step/[step]",
+    method: "PUT",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/gstin-verify",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/documents/[kind]",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/documents/[kind]",
+    method: "DELETE",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/customers/registrations/[id]/complete",
+    method: "POST",
+    guard: { kind: "permission", permission: "customer:register" },
+    scope: "tenant",
+    note: "Submit + approve in one call: the initiator is the approver, so there is no review gate to wait at (ADR-056).",
+  },
   {
     plane: "web",
     path: "/api/admin/quotations",
@@ -628,6 +719,35 @@ const WEB_ROUTES: readonly ApiRoute[] = [
     scope: "tenant",
     note: "Deciding a limit request is `client_admin` only; `ar_manager` holds `credit:release`, which applies the limit that exists rather than changing it.",
   },
+  // The AP and AR desks' three actions (doc 09 §3.4, ADR-059). Each is a SAP
+  // transaction the portal now performs rather than points at — F-58, VB(7
+  // and VKM3 — so each is a POST guarded by the desk's own permission, and
+  // each is idempotent on a key derived from the document rather than the
+  // click (ADR-021's rule).
+  {
+    plane: "web",
+    path: "/api/admin/ap/refunds/[vbeln]/pay",
+    method: "POST",
+    guard: { kind: "permission", permission: "finance:ap" },
+    scope: "tenant",
+    note: "F-58 outgoing payment clearing a credit note. The amount comes from a fresh read of the refund queue, never from the request body — a desk screen is a snapshot.",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/ap/rebates/[agreement]/settle",
+    method: "POST",
+    guard: { kind: "permission", permission: "finance:ap" },
+    scope: "tenant",
+    note: "VB(7 settlement. Refused unless SAP has released the agreement (KONA-BOSTA=C) — releasing is VBO2 and stays there.",
+  },
+  {
+    plane: "web",
+    path: "/api/admin/ar/credit-blocks/[vbeln]/release",
+    method: "POST",
+    guard: { kind: "permission", permission: "credit:release" },
+    scope: "tenant",
+    note: "VKM3, which re-runs the credit check: a 200 with `released: false` is the honest answer for an order still over its limit, not an error.",
+  },
   {
     plane: "web",
     path: "/api/admin/exceptions/outbox/[id]/retry",
@@ -688,6 +808,87 @@ const OPS_ROUTES: readonly ApiRoute[] = [
     path: "/api/tenants/[id]",
     method: "GET",
     guard: { kind: "permission", permission: "platform:tenant-crud" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]",
+    method: "PATCH",
+    guard: { kind: "permission", permission: "platform:tenant-crud" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/status",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:tenant-crud" },
+    scope: "none",
+    note: "Soft deactivate/reactivate (ADR-054). There is no DELETE, here or anywhere — a tenant's O2C history is the portal's side of documents SAP has posted.",
+  },
+
+  // SAP configuration — the screens both platform roles share, and the
+  // reason `sap_manager` is a role rather than a restriction. These are
+  // `platform:sap-config`, deliberately *not* `platform:tenant-crud`: a SAP
+  // manager configures every tenant's connection and creates none of them.
+  {
+    plane: "ops",
+    path: "/api/sap/tenants",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+    note: "The per-tenant picker the SAP screens need — id/name/slug/driver only, which is why it is its own route rather than `/api/tenants`, the CRUD index.",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/sap-config",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+    note: "Returns non-secret connection values and whether each secret is set — never a stored secret's value (ADR-053).",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/sap-config",
+    method: "PUT",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/tenants/[id]/sap-config/test",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:sap-config" },
+    scope: "none",
+    note: "Resolves the adapter through @cc/service-sap and hands it to @cc/service-platform — a service may not import another service (ADR-011).",
+  },
+  {
+    plane: "ops",
+    path: "/api/sap/health",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:sap-health" },
+    scope: "none",
+  },
+
+  // Operator management & billing — `super_admin` alone (doc 09 §2).
+  {
+    plane: "ops",
+    path: "/api/operators",
+    method: "GET",
+    guard: { kind: "permission", permission: "platform:operators-manage" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/operators",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:operators-manage" },
+    scope: "none",
+  },
+  {
+    plane: "ops",
+    path: "/api/operators/[id]/status",
+    method: "POST",
+    guard: { kind: "permission", permission: "platform:operators-manage" },
     scope: "none",
   },
 ];

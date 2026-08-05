@@ -43,6 +43,7 @@ describe("tenant isolation", () => {
   afterAll(async () => {
     await runWithTenant(tenantA.id, async () => {
       await db.notification.deleteMany();
+      await db.sapConfigAudit.deleteMany();
       await db.tenantCredential.deleteMany();
       await db.tenantDataKey.deleteMany();
       await db.outboxEvent.deleteMany();
@@ -60,16 +61,19 @@ describe("tenant isolation", () => {
       await db.cart.deleteMany();
       await db.onboardingEvent.deleteMany();
       await db.onboardingApplication.deleteMany();
+      await db.customerAccount.deleteMany();
       await db.user.deleteMany();
     });
     await runWithTenant(tenantB.id, async () => {
       await db.notification.deleteMany();
+      await db.sapConfigAudit.deleteMany();
       await db.tenantCredential.deleteMany();
       await db.tenantDataKey.deleteMany();
       await db.outboxEvent.deleteMany();
       await db.creditLimitRequest.deleteMany();
       await db.loyaltyTierSetting.deleteMany();
       await db.ticketCounter.deleteMany();
+      await db.customerAccount.deleteMany();
       await db.user.deleteMany();
     });
     await db.tenant.deleteMany({ where: { id: { in: [tenantA.id, tenantB.id] } } });
@@ -499,6 +503,64 @@ describe("tenant isolation", () => {
       db.tenantCredential.findFirst({ where: { system: "sap" } }),
     );
     expect(asSeenByTenantB?.tenantId).toBe(tenantB.id);
+  });
+
+  it("scopes the SAP config trail (Phase 4): tenant A's configuration history is invisible to tenant B", async () => {
+    const auditA = await runWithTenant(tenantA.id, () =>
+      db.sapConfigAudit.create({
+        data: {
+          tenantId: tenantA.id,
+          operatorId: `op-${runId}`,
+          operatorEmail: "operator@platform.example",
+          action: "connection.updated",
+          changedFields: ["endpoint", "password"],
+        },
+      }),
+    );
+
+    // The console is cross-tenant by nature, which is exactly why this row
+    // is scoped: an operator reading tenant B's trail must not be shown
+    // which fields somebody changed on tenant A's connection.
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.sapConfigAudit.findUnique({ where: { id: auditA.id } }),
+    );
+    expect(asSeenByTenantB).toBeNull();
+
+    const tenantBTrail = await runWithTenant(tenantB.id, () => db.sapConfigAudit.findMany());
+    expect(tenantBTrail.some((row) => row.id === auditA.id)).toBe(false);
+
+    // Never values, only names (ADR-053) — asserted on the row itself so a
+    // future writer that starts storing a before/after pair fails here.
+    expect(auditA.changedFields).toEqual(["endpoint", "password"]);
+  });
+
+  it("scopes customer accounts (ADR-057): two tenants may hold the same KUNNR without seeing each other's", async () => {
+    // The same customer number legitimately exists in two tenants' SAP
+    // systems, so this row's unique key is (tenantId, sapKunnr) rather than
+    // the KUNNR alone — and a deactivation by one tenant must be invisible
+    // to, and have no effect on, the other's account of the same number.
+    const sharedKunnr = `00100${runId.slice(0, 5)}`;
+
+    const accountA = await runWithTenant(tenantA.id, () =>
+      db.customerAccount.create({
+        data: { tenantId: tenantA.id, sapKunnr: sharedKunnr, isActive: false },
+      }),
+    );
+    const accountB = await runWithTenant(tenantB.id, () =>
+      db.customerAccount.create({ data: { tenantId: tenantB.id, sapKunnr: sharedKunnr } }),
+    );
+    expect(accountA.id).not.toBe(accountB.id);
+
+    const asSeenByTenantB = await runWithTenant(tenantB.id, () =>
+      db.customerAccount.findUnique({ where: { id: accountA.id } }),
+    );
+    expect(asSeenByTenantB).toBeNull();
+
+    // Tenant B's own row for the same KUNNR is untouched by A's decision —
+    // the check `login` and order creation run reads this one.
+    const tenantBRows = await runWithTenant(tenantB.id, () => db.customerAccount.findMany());
+    expect(tenantBRows).toHaveLength(1);
+    expect(tenantBRows[0]?.isActive).toBe(true);
   });
 
   it("scopes payments (ADR-019/ADR-044): a payment captured for tenant A is invisible to tenant B", async () => {

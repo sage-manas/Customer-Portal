@@ -11,6 +11,7 @@ export type AuthErrorCode =
   | "invalid_credentials"
   | "account_inactive"
   | "tenant_not_found"
+  | "tenant_inactive"
   | "session_invalid"
   | "session_expired"
   | "forbidden"
@@ -20,6 +21,8 @@ const MESSAGES: Record<AuthErrorCode, string> = {
   invalid_credentials: "That email and password combination didn't work. Check both and try again.",
   account_inactive: "This account is inactive. Contact your administrator to have it re-enabled.",
   tenant_not_found: "We couldn't find a portal at this address.",
+  tenant_inactive:
+    "This portal has been deactivated. Contact your account manager to have it re-enabled.",
   session_invalid: "Your session isn't valid. Sign in again to continue.",
   session_expired: "Your session has expired. Sign in again to continue.",
   forbidden: "You don't have permission to do that. Contact your administrator if you need access.",
@@ -44,6 +47,10 @@ const STATUS: Record<AuthErrorCode, number> = {
   account_inactive: 403,
   // Never 404-with-detail on a tenant probe; the copy above stays vague.
   tenant_not_found: 404,
+  // 403, not 404: the portal exists and the person signing in is a customer
+  // of it. Hiding that would send them to their IT department to debug DNS
+  // for a decision an operator made deliberately (ADR-054).
+  tenant_inactive: 403,
   session_invalid: 401,
   session_expired: 401,
   forbidden: 403,

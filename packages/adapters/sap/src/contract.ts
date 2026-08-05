@@ -8,14 +8,23 @@ import type {
   CreateSalesOrderInput,
   CreditInfo,
   CustomerCreateResult,
+  CustomerPatch,
   CustomerPrice,
+  CustomerUpdateResult,
   Delivery,
   IncomingPaymentInput,
   IncomingPaymentResult,
+  CreditReleaseInput,
+  CreditReleaseResult,
+  OutgoingPaymentInput,
+  OutgoingPaymentResult,
+  RebateSettlementInput,
+  RebateSettlementResult,
   Inquiry,
   Invoice,
   Material,
   MaterialQuery,
+  LedgerOpenItem,
   OpenItem,
   OrderSimulation,
   OrderStatusView,
@@ -74,6 +83,19 @@ export interface SapAdapter {
   // ---- Master data: customer -------------------------------------------
   /** ECC: BAPI_CUSTOMER_CREATEFROMDATA1 · S/4: Business Partner API. */
   createCustomer(customer: CanonicalCustomer): Promise<CustomerCreateResult>;
+  /**
+   * ECC: BAPI_CUSTOMER_CHANGEFROMDATA1 · S/4: Business Partner PATCH.
+   *
+   * A *partial* change of an existing master, which is why it takes a patch
+   * rather than a whole `CanonicalCustomer`: sending the full record back
+   * would make every read-modify-write a chance to overwrite a field a user
+   * in XD02 changed in between with a stale value the portal happened to be
+   * holding. The patch's shape is bounded by the portal's own registry
+   * (`CUSTOMER_EDITABLE_FIELDS` in @cc/domain), which excludes PAN and GSTIN
+   * — those carry verification evidence and drive tax determination, and
+   * changing them is not a thing a web form gets to do (ADR-057).
+   */
+  updateCustomer(kunnr: string, patch: CustomerPatch): Promise<CustomerUpdateResult>;
   getCustomer(kunnr: string): Promise<SapRead<CanonicalCustomer>>;
   getShipToAddresses(kunnr: string): Promise<SapRead<ShipToAddress[]>>;
   /** KNKK / credit management API. */
@@ -86,6 +108,21 @@ export interface SapAdapter {
    * second computation of money owed to a customer is a second answer.
    */
   getRebateAgreements(kunnr: string): Promise<SapRead<RebateAgreement[]>>;
+  /**
+   * Every rebate agreement in the tenant — the AP desk's settlement queue
+   * (doc 09 §3.4). Its own method, not `getRebateAgreements` with the account
+   * left off (ADR-032). Settling one is VB(7; the portal only lists them.
+   */
+  getRebateRegister(): Promise<SapRead<RebateAgreement[]>>;
+  /**
+   * VB(7 — settle an agreement SAP has released for settlement, posting the
+   * credit memo request it then bills. A write, so no freshness (ADR-007).
+   *
+   * Idempotent on `reference`: the AP desk clicking Settle twice must not
+   * produce two credit memo requests, and the key is derived from the
+   * agreement rather than generated per call (ADR-021's rule).
+   */
+  settleRebateAgreement(input: RebateSettlementInput): Promise<RebateSettlementResult>;
 
   // ---- Master data: catalogue ------------------------------------------
   /** MARA/MAKT reads · API_PRODUCT_SRV. */
@@ -147,6 +184,24 @@ export interface SapAdapter {
   cancelSalesOrder(vbeln: string, reason?: string): Promise<SalesOrderResult>;
   getOrderStatus(vbeln: string): Promise<SapRead<OrderStatusView>>;
   getOrders(kunnr: string): Promise<SapRead<Page<OrderStatusView>>>;
+  /**
+   * Orders SAP is holding on credit across the tenant — doc 05 §8's release
+   * queue, read by the AR desk (doc 09 §3.4).
+   *
+   * A method of its own rather than a filter argument on `getOrders`, for the
+   * reason `getInquiryQueue` is one: the customer-plane read must not be one
+   * dropped argument away from every account's orders. Read-only by design —
+   * releasing a block is VKM3, and there is deliberately no adapter method
+   * that writes VBUK-CMGST (ADR-059).
+   */
+  getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>>;
+  /**
+   * VKM3 — release an order held on credit. It **re-runs the credit check**
+   * rather than forcing the status, which is what the transaction does and
+   * the only version of it the portal can report honestly: an order still
+   * over an unchanged limit comes back held, with SAP's reason.
+   */
+  releaseCreditBlock(input: CreditReleaseInput): Promise<CreditReleaseResult>;
 
   // ---- Delivery ---------------------------------------------------------
   /**
@@ -172,12 +227,37 @@ export interface SapAdapter {
   getInvoice(vbeln: string): Promise<SapRead<Invoice>>;
   /** Returns a URL/stream reference to the rendered billing document. */
   getInvoicePdf(vbeln: string): Promise<string>;
+  /**
+   * Every billing document in the tenant — the AR desk's invoice register and
+   * the AP desk's note register are two filters over this one read (doc 09
+   * §3.4). Separate from `getInvoices(kunnr)` for ADR-032's reason.
+   */
+  getBillingRegister(): Promise<SapRead<Page<Invoice>>>;
 
   // ---- Accounts receivable ----------------------------------------------
   /** BAPI_AR_ACC_GETOPENITEMS. */
   getOpenItems(kunnr: string): Promise<SapRead<OpenItem[]>>;
+  /**
+   * The tenant's whole AR ledger, each item carrying the account it belongs
+   * to (`LedgerOpenItem`) — aging, dunning and the collections queue are all
+   * derived from this one read (doc 09 §3.4).
+   *
+   * The KUNNR travels on the row rather than being looked up per document:
+   * ADR-025's rule, that an ownership boundary is one comparison rather than
+   * a second read that can fail open, applies to a desk read as much as to a
+   * customer's.
+   */
+  getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>>;
   /** F-28 equivalent posting + clearing. Idempotent on `gatewayReference`. */
   postIncomingPayment(input: IncomingPaymentInput): Promise<IncomingPaymentResult>;
+  /**
+   * F-58 / F-53 — pay a credit note out and clear its FI item. The AP desk's
+   * refund action (doc 09 §3.4). A separate method from `postIncomingPayment`
+   * rather than a signed amount on it: money leaving the tenant and money
+   * arriving are different postings, different authorisations and different
+   * mistakes to make. Idempotent on `reference`.
+   */
+  postOutgoingPayment(input: OutgoingPaymentInput): Promise<OutgoingPaymentResult>;
 }
 
 /** Helper for drivers: wrap a value with its freshness metadata. */

@@ -44,7 +44,8 @@ export interface ProductCardProps {
   /** Why there is no price — rendered instead of the amount. */
   priceUnavailableReason?: string;
 
-  /** Omitted for a view-only buyer: no CTA, per docs/05 §4.3. */
+  /** Omitted when the session lacks `cart:manage`: no CTA, per docs/05 §4.3.
+   * The card is told, never asks — it holds no permission check of its own. */
   onAddToCart?: (quantity: number) => void | Promise<void>;
   onRequestQuote?: (quantity: number) => void;
   adding?: boolean;

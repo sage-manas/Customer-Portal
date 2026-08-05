@@ -18,6 +18,12 @@ export {
 } from "./order-service";
 
 export {
+  listCreditBlockedOrders,
+  releaseCreditBlock,
+  type CreditReleaseQueueResult,
+} from "./credit-release-service";
+
+export {
   countDrafts,
   deleteDraft,
   getDraft,

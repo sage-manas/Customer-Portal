@@ -1,6 +1,7 @@
 import type { Permission, SessionClaims } from "@cc/domain";
 import { captureException, getLogger, runWithContext, setContextTenant } from "@cc/observability";
 import { isCatalogueError } from "@cc/service-catalogue";
+import { isCustomerError } from "@cc/service-customer";
 import { isDeliveryError } from "@cc/service-delivery";
 import { AuthError, requirePermission } from "@cc/service-identity";
 import { isInquiryError } from "@cc/service-inquiry";
@@ -41,6 +42,10 @@ export function toPortalErrorResponse(error: unknown): NextResponse {
   }
   if (
     isCatalogueError(error) ||
+    // Reaches this plane through `assertCustomerCanOrder` (ADR-057): a
+    // deactivated account is a 409 with the domain's own wording, and was a
+    // 500 until this line existed. No `upstreamMessage` here — see above.
+    isCustomerError(error) ||
     isOrderError(error) ||
     isDeliveryError(error) ||
     isInquiryError(error) ||

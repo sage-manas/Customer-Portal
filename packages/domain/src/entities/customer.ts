@@ -74,6 +74,29 @@ export interface CustomerCreateResult {
 }
 
 /**
+ * A partial change to an existing customer master (XD02 / BP PATCH).
+ *
+ * Everything is optional and the tax identifiers are absent entirely: what
+ * may be changed from the portal is the tenant-facing registry
+ * `CUSTOMER_EDITABLE_FIELDS` (entities/customer-account.ts), and this type is
+ * the adapter-side statement of the same boundary — a driver cannot be asked
+ * to write a GSTIN because there is nowhere to put one.
+ */
+export interface CustomerPatch {
+  /** KNA1-NAME2 */
+  tradeName?: string;
+  address?: CanonicalAddress;
+  contact?: CanonicalContact;
+}
+
+/** Result of a change-customer write. */
+export interface CustomerUpdateResult {
+  kunnr: string;
+  /** Echo of what SAP stored after applying the patch, truncation included. */
+  customer: CanonicalCustomer;
+}
+
+/**
  * Credit position (KNKK). `available` is computed, not read — SAP exposes
  * limit and exposure; the portal derives the rest (docs/03 Screen 9.1).
  */
@@ -112,6 +135,29 @@ export interface RebateAgreement {
   /** KONA-BOSTA — B open, C released for settlement, D settled. */
   settlementStatus?: string;
   currency: string;
+}
+
+/**
+ * VB(7 — settling a rebate agreement, which posts the credit memo request
+ * SAP then bills as a credit note (doc 09 §3.4, the AP desk's queue).
+ */
+export interface RebateSettlementInput {
+  agreementNumber: string;
+  /** Idempotency key derived from the agreement, never freshly generated. */
+  reference: string;
+  /** Carried onto the settlement document, so SAP records who authorised it. */
+  initiatedBy?: string;
+  note?: string;
+}
+
+export interface RebateSettlementResult {
+  agreementNumber: string;
+  /** The credit memo request VB(7 creates (VBELN of the B1/B3 document). */
+  creditMemoRequest: string;
+  settledAmount: number;
+  currency: string;
+  /** KONA-BOSTA as it stands after the settlement run. */
+  settlementStatus: string;
 }
 
 /** Shipping address a customer may pick as ship-to (VBPA partner SH). */

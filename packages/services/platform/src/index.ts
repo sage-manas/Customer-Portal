@@ -26,6 +26,41 @@ export {
   type TenantListItem,
 } from "./tenant-provisioning";
 
+export {
+  setTenantActive,
+  updateTenant,
+  type SetTenantActiveResult,
+  type UpdateTenantInput,
+} from "./tenant-admin";
+
+export {
+  createOperator,
+  listOperators,
+  setOperatorActive,
+  type CreateOperatorInput,
+  type CreateOperatorResult,
+  type OperatorListItem,
+} from "./operator-admin";
+
+export {
+  getTenantSapConfig,
+  testSapConnection,
+  updateTenantSapConfig,
+  type SapConnectionFieldState,
+  type SapConnectionTestResult,
+  type SapHealthProbe,
+  type TenantSapConfig,
+  type UpdateSapConfigInput,
+  type UpdateSapConfigResult,
+} from "./tenant-sap-config";
+
+export {
+  listSapConfigAudit,
+  recordSapConfigAudit,
+  type RecordSapConfigAuditInput,
+  type SapConfigAuditEntry,
+} from "./sap-config-audit";
+
 export { getTenantHealth, type SapConnectivityStatus, type TenantHealth } from "./tenant-health";
 
 export { getTenantUsage, type TenantUsage } from "./tenant-usage";

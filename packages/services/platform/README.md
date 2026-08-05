@@ -30,6 +30,30 @@ Framework-free, like every service (ADR-002).
   a read-model rather than a projection table for the same reason.
 - `getTenantBilling` — the plan comparison, behind `@cc/adapter-billing`'s
   mock driver until a real provider exists.
+- `updateTenant`, `setTenantActive` — tenant editing and **soft**
+  deactivation. There is no delete and there will not be one (ADR-054): a
+  tenant's O2C rows are the portal's side of documents SAP has posted.
+  Deactivation is a flag; `@cc/service-identity`'s `login` is what refuses
+  the sign-in, because that is identity's decision to make (rule 1).
+- `listOperators`, `createOperator`, `setOperatorActive` — console-login
+  management. The plane constraint is enforced here for the third time
+  (after the token parse and `operatorLogin`, ADR-051): a tenant role is
+  refused at the _write_, not just at the read. `setOperatorActive` will not
+  deactivate the caller, nor the last active operator holding
+  `platform:operators-manage` — the console has no way back in from either.
+- `getTenantSapConfig`, `updateTenantSapConfig`, `testSapConnection` — the
+  per-tenant SAP connection (ADR-053). Fields come from
+  `SAP_CONNECTION_FIELDS` in `@cc/domain`, values from the B1 envelope vault
+  (ADR-042), and **secrets are write-only**: a read returns whether one is
+  set, never what it is. `testSapConnection` takes a structural
+  `{ health() }` probe rather than building an adapter, because
+  `@cc/service-sap` owns resolution and a service may not import another —
+  the ops route handler sequences the two (ADR-011).
+- `recordSapConfigAudit`, `listSapConfigAudit` — the append-only
+  configuration trail. Field _names_ only, never values: an audit table is
+  read more widely than the vault and is not encrypted at rest. Append-only
+  is a property of this module exporting no mutation, not a database
+  constraint.
 
 ## Why this package exists rather than extending `@cc/service-identity`
 
@@ -44,6 +68,6 @@ code below is a deliberate copy rather than a shared import.
 
 ```
 pnpm --filter @cc/service-platform test              # password/JWT units + the ops route×role matrix, no database
-pnpm --filter @cc/service-platform test:integration   # provisioning + health/usage, needs Postgres
+pnpm --filter @cc/service-platform test:integration   # provisioning, health/usage, SAP config + trail, needs Postgres
 pnpm --filter @cc/service-platform db:seed            # dev operator logins (one per platform role)
 ```

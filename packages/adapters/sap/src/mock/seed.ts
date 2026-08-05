@@ -833,6 +833,45 @@ export const SEED_ORDERS: OrderStatusView[] = [
       },
     ],
   },
+  /**
+  /**
+   * A second held order for the same account, and deliberately a *releasable*
+   * one: at 24,000 it fits inside 0010001002's 35,000 of remaining headroom,
+   * so the AR desk's Release button succeeds against it while 0000004713 above
+   * — 445k against that same headroom — is refused by the re-run credit check.
+   * One of each is what makes the release queue demoable, since VKM3 re-checks
+   * rather than forces (ADR-059).
+   *
+   * It hangs off 0010001002 rather than the demo account for the same reason
+   * the released rebate does not: 0010001001 is the fixture for "a customer
+   * with no credit hold", asserted by name in the dashboard's suite, and a
+   * seed that quietly gave it one would make that test a lie about the
+   * landscape rather than about the code.
+   */
+  {
+    vbeln: "0000004714",
+    kunnr: "0010001002",
+    createdOn: shiftDays(SEED_TODAY, -4),
+    customerPoRef: "DF/2026/341",
+    orderStatus: "Open",
+    creditStatus: "CreditHold",
+    netValue: 24000,
+    currency: "INR",
+    lines: [
+      {
+        lineNo: 10,
+        material: "MAT-10003",
+        description: 'Ball Valve 2" SS316',
+        quantity: 10,
+        uom: "EA",
+        netPrice: 2400,
+        netValue: 24000,
+        plant: "1000",
+        confirmedQty: 0,
+        confirmedDate: shiftDays(SEED_TODAY, 10),
+      },
+    ],
+  },
   ...HISTORIC_ORDERS,
 ];
 
@@ -1372,6 +1411,25 @@ export const SEED_REBATES: RebateAgreement[] = [
     validTo: "2026-03-31",
     accruedAmount: 96500,
     settlementStatus: "D",
+    currency: "INR",
+  },
+  /**
+   * Released for settlement (KONA-BOSTA = C) — the one row the AP desk can
+   * actually settle. Without it the settlement queue would be permanently
+   * unactionable in a demo, which is the same gap the seeded credit note
+   * exists to close on the notes tab. It hangs off 0010001001 rather than
+   * 0010001002, which is deliberately the account with no agreements at all —
+   * that is the rebate card's empty state, and it has a test by name.
+   */
+  {
+    agreementNumber: "0000801288",
+    kunnr: "0010001001",
+    agreementType: "0002",
+    description: "Annual volume rebate — pumps and valves",
+    validFrom: "2025-04-01",
+    validTo: "2026-03-31",
+    accruedAmount: 74250,
+    settlementStatus: "C",
     currency: "INR",
   },
   {
