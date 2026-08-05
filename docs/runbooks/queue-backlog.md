@@ -14,7 +14,7 @@ ever touches BullMQ. A "queue backlog" always means one of two things:
 
 ## Diagnosing which
 
-- `/admin/exceptions` (`exceptions:view`) shows outbox rows in `failed`
+- the AP workspace's Reconciliation tab (`/admin/ap?tab=reconciliation`, `exceptions:view`) shows outbox rows in `failed`
   state — a row lands there only after exhausting `OUTBOX_MAX_ATTEMPTS`
   (default 5), so a _growing_ `failed` count means handlers are erroring,
   not just running slowly.
@@ -57,7 +57,7 @@ is the entire point of the outbox pattern (ADR-023). Specifically:
 2. **`failed` rows**: `requeueOutboxEvent`/`requeueStaleFailedOutboxEvents`
    (`@cc/service-reconciliation`) give a row exactly one more attempt
    without resetting its `attempts` counter (ADR-044's reasoning) — either
-   via `/admin/exceptions`'s manual retry or the automatic sweep on
+   via `/admin/ap` (Reconciliation)'s manual retry or the automatic sweep on
    `RECONCILIATION_INTERVAL_MS`. If the same event keeps failing after a
    requeue, the underlying handler has a real bug — read `lastError` on the
    row, don't just keep requeuing it.
@@ -72,4 +72,4 @@ is the entire point of the outbox pattern (ADR-023). Specifically:
 Do not delete `pending`/`failed` outbox rows to "clear" a backlog metric.
 A deleted row is a notification, an auto-ticket, or a payment-posting retry
 that silently never happens — worse than a visible backlog, which at least
-shows up in `/admin/exceptions` and this runbook's diagnostics.
+shows up in `/admin/ap` (Reconciliation) and this runbook's diagnostics.

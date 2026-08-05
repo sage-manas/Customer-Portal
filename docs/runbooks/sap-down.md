@@ -19,7 +19,7 @@ stale copy:
 - Payments: `postCapturedPayment` (the SAP-posting half of a captured
   payment) starts failing; `Payment.state` stays `captured` and the
   **payment itself is not lost** — see the reconciliation section below.
-- `/admin/exceptions` (`exceptions:view`, `tenant_admin`) starts showing
+- the AP workspace's Reconciliation tab (`/admin/ap?tab=reconciliation`, `exceptions:view` — `ap_manager` or `client_admin`) starts showing
   `payment_posting_overdue` rows once captures have waited past 15 minutes
   with no successful posting (ADR-044's threshold).
 
@@ -46,7 +46,7 @@ tenant is actually on.
    (`OUTBOX_MAX_ATTEMPTS`, default 5, then `failed`). Everything else is a
    read that simply fails per-request — there is no queued write to SAP
    anywhere in this codebase to worry about losing.
-2. **Watch `/admin/exceptions`.** It is the one screen that surfaces the
+2. **Watch `/admin/ap` (Reconciliation).** It is the one screen that surfaces the
    consequence of a SAP outage that outlives the automatic retry window:
    payments stuck `captured`. Once SAP recovers, `reconcilePayment`'s next
    scheduled pass (or a manual "Retry" click) clears them without any
@@ -62,7 +62,7 @@ tenant is actually on.
 
 ## After SAP recovers
 
-- Confirm `/admin/exceptions` drains — `payment_posting_overdue` rows
+- Confirm `/admin/ap` (Reconciliation) drains — `payment_posting_overdue` rows
   should clear within one `RECONCILIATION_INTERVAL_MS` window, or a manual
   retry immediately.
 - No backfill is needed for any SAP-owned read (orders, deliveries,

@@ -62,7 +62,7 @@ The interval is minutes, not seconds (`SLA_SWEEP_INTERVAL_MS`, default 60s). An 
 
 ## Reconciliation — the third kind of background work (docs/07 B4)
 
-The relay publishes; the SLA sweep discovers; reconciliation **retries**. Every tick, `reconcileOnce` asks `@cc/service-payment` for every payment stuck `captured` (SAP hasn't confirmed the posting) or `initiated` with a gateway attempt (the webhook never arrived), and `@cc/service-reconciliation` for every outbox row the relay has already given up on. Both retries are the same idempotent operations a human clicking "Retry" in `/admin/exceptions` would trigger — `postCapturedPayment`/`getPayment` polling for a payment, `state: "pending"` for an outbox row — run on a schedule so most exceptions resolve themselves.
+The relay publishes; the SLA sweep discovers; reconciliation **retries**. Every tick, `reconcileOnce` asks `@cc/service-payment` for every payment stuck `captured` (SAP hasn't confirmed the posting) or `initiated` with a gateway attempt (the webhook never arrived), and `@cc/service-reconciliation` for every outbox row the relay has already given up on. Both retries are the same idempotent operations a human clicking "Retry" in `/admin/ap` (Reconciliation) would trigger — `postCapturedPayment`/`getPayment` polling for a payment, `state: "pending"` for an outbox row — run on a schedule so most exceptions resolve themselves.
 
 Two services, not one, because a service may not import another (ADR-011, ADR-027): `@cc/service-payment` owns the payment half, `@cc/service-reconciliation` owns the outbox half, and this worker is what sequences both (ADR-044).
 

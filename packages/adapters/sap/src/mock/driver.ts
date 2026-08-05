@@ -18,6 +18,7 @@ import type {
   Invoice,
   Material,
   MaterialQuery,
+  LedgerOpenItem,
   OpenItem,
   OrderSimulation,
   OrderStatusView,
@@ -313,6 +314,11 @@ export class MockSapAdapter implements SapAdapter {
       // none, and a 404 here would make the loyalty screen fail for them.
       return this.read(clone(this.store.rebates.filter((r) => r.kunnr === kunnr)));
     });
+  }
+
+  /** Every agreement in the tenant — the AP desk's settlement queue. */
+  async getRebateRegister(): Promise<SapRead<RebateAgreement[]>> {
+    return this.call(() => this.read(clone(this.store.rebates)));
   }
 
   private requireCustomer(kunnr: string): CanonicalCustomer {
@@ -915,6 +921,22 @@ export class MockSapAdapter implements SapAdapter {
     });
   }
 
+  /**
+   * Orders SAP is holding on credit, tenant-wide (doc 05 §8's release queue).
+   *
+   * Derived from the stored orders' CMGST rather than from a seeded list, so
+   * an order the mock credit-checks into a hold during a demo turns up here
+   * without anybody re-seeding anything.
+   */
+  async getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>> {
+    return this.call(() => {
+      const items = this.store.orders
+        .filter((o) => o.creditStatus === "CreditHold")
+        .sort((a, b) => a.createdOn.localeCompare(b.createdOn));
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
   // ---- delivery ---------------------------------------------------------
 
   async getDeliveries(kunnr: string): Promise<SapRead<Page<Delivery>>> {
@@ -1019,6 +1041,16 @@ export class MockSapAdapter implements SapAdapter {
     });
   }
 
+  /** Every billing document in the tenant — the AP/AR desk registers. */
+  async getBillingRegister(): Promise<SapRead<Page<Invoice>>> {
+    return this.call(() => {
+      const items = [...this.store.invoices].sort((a, b) =>
+        b.billingDate.localeCompare(a.billingDate),
+      );
+      return this.read({ items: clone(items), total: items.length });
+    });
+  }
+
   async getInvoicePdf(vbeln: string): Promise<string> {
     return this.call(() => {
       const invoice = this.store.invoices.find((i) => i.vbeln === vbeln);
@@ -1036,6 +1068,27 @@ export class MockSapAdapter implements SapAdapter {
         (item) => this.store.openItemOwner[item.documentNumber] === kunnr,
       );
       return this.read(clone(items));
+    });
+  }
+
+  /**
+   * The tenant's whole AR ledger, each item carrying its account.
+   *
+   * The owner comes off the same `openItemOwner` map the customer read filters
+   * on, so the desk and the customer cannot disagree about who owes what — a
+   * separate seed of ownership would be a second answer to the question this
+   * mock exists to make one of.
+   */
+  async getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>> {
+    return this.call(() => {
+      const items = this.store.openItems.flatMap((item): LedgerOpenItem[] => {
+        const kunnr = this.store.openItemOwner[item.documentNumber];
+        // An item with no owner is dropped rather than defaulted: a
+        // collections queue that attributed a document to the wrong account
+        // would be worse than one that is short a row.
+        return kunnr ? [{ ...clone(item), kunnr }] : [];
+      });
+      return this.read(items);
     });
   }
 

@@ -22,6 +22,15 @@ export {
   type StatementResult,
 } from "./statement-service";
 
+export {
+  getTenantLedger,
+  listDunningCandidates,
+  listPaymentsReceived,
+  type DunningResult,
+  type PaymentsReceivedResult,
+  type TenantLedgerResult,
+} from "./ledger-service";
+
 export { getPaymentGatewayForTenant } from "./adapters";
 
 export { PaymentError, isPaymentError, type PaymentErrorCode, type PaymentIssue } from "./errors";

@@ -35,8 +35,19 @@ import {
   getInvoicePdfUrl, // re-checks ownership; a URL is shareable
   InvoiceError, // not_found | no_account | upstream_unavailable
   isInvoiceError,
+  // desk plane — no KUNNR anywhere; guarded by `finance:ar` / `finance:ap`
+  listInvoiceRegister, // every F2 in the tenant (AR workspace)
+  listNoteRegister, // every G2/L2 in the tenant (AP workspace)
+  listRefundQueue, // credit notes whose FI item is still open
 } from "@cc/service-invoice";
 ```
+
+`register-service.ts` is a separate file from `invoice-service.ts` for ADR-032's
+reason: the desk's read is a different function, not the customer's with the
+account left off. It reads through `getBillingRegister()`, likewise its own
+adapter method. `listRefundQueue` composes two reads — the note is VBRK, whether
+it has been settled is BSID — and settles nothing: paying a credit out is F-58
+(ADR-059).
 
 Callers pass the `SapAdapter` in (resolved from `@cc/service-sap`), because a
 service may not import another service — ADR-011.

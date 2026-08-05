@@ -18,6 +18,7 @@ import type {
   Invoice,
   Material,
   MaterialQuery,
+  LedgerOpenItem,
   OpenItem,
   OrderSimulation,
   OrderStatusView,
@@ -106,6 +107,18 @@ export abstract class NotImplementedSapAdapter implements SapAdapter {
   }
   async getInquiryQueue(): Promise<SapRead<Page<Inquiry>>> {
     this.fail("getInquiryQueue");
+  }
+  async getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>> {
+    this.fail("getCreditBlockedOrders");
+  }
+  async getBillingRegister(): Promise<SapRead<Page<Invoice>>> {
+    this.fail("getBillingRegister");
+  }
+  async getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>> {
+    this.fail("getOpenItemsLedger");
+  }
+  async getRebateRegister(): Promise<SapRead<RebateAgreement[]>> {
+    this.fail("getRebateRegister");
   }
   async createQuotation(_input: CreateQuotationInput): Promise<Quotation> {
     this.fail("createQuotation");

@@ -4,6 +4,44 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-060: The exception tray moves into AP and leaves a redirect, not a tab
+
+**Context:** doc 10 Phase 6 says to "move the exceptions tray here" — into `/admin/ap`. The tray has a live nav item, a screen at `/admin/exceptions`, two retry handlers, and a runbook that names the path.
+
+**Decision:** the tray becomes a _view_ of the AP workspace (`/admin/ap?tab=reconciliation`), rendered by a `ReconciliationTray` server component that keeps its two-service composition exactly as ADR-044 left it. The nav item is removed rather than re-pointed: it would be a second route to one place, and the workspace tab strip is where AP's views are listed. The old path stays as a redirect — it is in bookmarks and runbooks, and a 404 for an operator chasing a stuck payment is a worse outcome than a hop. `exceptions:view` is untouched and still guards the two retry handlers, which is where the control has always been (CLAUDE.md rule 5); what moved is presentation.
+
+**Consequence:** the nav test asserts the key is gone rather than that AP cannot see it, because "AP reaches the tray" is now a fact about the AP page, not about the sidebar.
+
+---
+
+## ADR-059: The AP and AR workspaces are queues, not controls — the portal lists what is owed and moves no money
+
+**Context:** doc 09 §3.4 asks the AP desk for "refunds queue, rebate settlements" and the AR desk for a "credit release queue". Each of those reads, in SAP terms, as an _action_: pay a credit out (F-58), settle a rebate (VB(7), release a credit block (VKM3). The open question was whether the portal should offer any of them.
+
+**Decision — none of the three gets a button, and each screen says where the transaction lives.** The adapter has no method that pays, settles or releases, and none is added: `getRebateRegister()` and `getCreditBlockedOrders()` are reads, exactly as `getRebateAgreements(kunnr)` has been since A5. This is ADR-035's rule generalised. Approving a credit-limit request _records a decision_ rather than writing KNKK-KLIMK, because a portal that claimed to have raised a limit SAP had not raised would give a customer a number they could not order against. The same failure is available three more times here, and it is worse each time — a desk that marked a refund "paid" would leave a customer chasing money nobody sent, and an order marked "released" would have a warehouse expecting a pick that SAP is still holding.
+
+What the desks get instead is the part the portal is genuinely better at than SAP: the _conjunction_ nobody has in one place. A refund candidate is a G2 billing document **and** an uncleared FI item — two reads, one queue, sorted oldest-first. A rebate row is KONA-BOSTA **and** the validity date compared to today, so "released for settlement" and "lapsed unsettled" are separable, which BOSTA alone cannot tell you (SAP leaves a lapsed agreement's status alone, exactly as it leaves a lapsed quotation's — ADR-031's reasoning, applied to KONA). A credit-release row carries the order's age, and the screen states that this is the _order's_ age rather than the block's, because SAP does not date the block.
+
+**Decision, part two — "refund" is a reading, not a state.** There is no portal-owned refund table and no refund status. The one thing that could have justified storing anything — the window ADR-019 grants payments, where the gateway has taken money nothing in FI accounts for — does not exist in the other direction: a credit note _is_ the FI document, from the moment it is raised. So `refundCandidates` derives the queue on every read, and a credit whose item has cleared simply leaves the list, whether it was paid out or offset against the next invoice. The portal never has to know which, and cannot be wrong about it.
+
+**Consequence:** a credit's FI posting is negative (BSEG posting key 15), so "still open" is a non-zero balance rather than a positive one, and the queue reports the magnitude — a payables desk asking how much is owed should not be shown the sign of a receivable. The aging bar keeps ignoring credits entirely: a credit reduces what a customer owes and is not chaseable. Both are asserted against the seeded G2, which is the one document in the mock where getting the sign wrong is visible.
+
+---
+
+## ADR-058: A desk read is a different method, not a customer's with the account left off — four times over
+
+**Context:** the AP and AR workspaces need what no customer-plane read can give them: every account's billing documents, every account's open items, every rebate agreement, every credit-blocked order. Five KUNNR-scoped adapter methods already return four of those shapes for one account.
+
+**Decision:** four new adapter methods that take no account — `getBillingRegister()`, `getOpenItemsLedger()`, `getRebateRegister()`, `getCreditBlockedOrders()` — mirroring `getInquiryQueue()` and for the identical reason (ADR-032): a customer-plane read must not be one forgotten argument away from returning the tenant. An optional `kunnr?` on the existing five would have been less code and would have made every one of them a boundary that holds only while every caller remembers something. Each is implemented in the mock first (CLAUDE.md rule 2) and left `not_implemented` in ecc/s4, and each is consumed by a **separate service file** beside the customer-plane one — `register-service.ts`, `ledger-service.ts`, `rebate-desk-service.ts`, `credit-release-service.ts` — so the file a reader opens tells them which plane they are in before they read a line of it. `listPaymentsReceived(tenantId)` follows the same rule on the portal-owned side, where `listPaymentExceptions` already did.
+
+**Decision, part two — the ledger carries its owner on the row.** `OpenItem` has no KUNNR, because the customer-plane read is already bounded by one. A tenant-wide read has no such argument, so `LedgerOpenItem` adds it and the mock fills it from the same ownership map `getOpenItems` filters on. Looking the owner up afterwards, per document, would be a second read that can fail open — ADR-025's rule about the delivery's KUNNR, applied to a ledger.
+
+**Decision, part three — the desks re-derive nothing.** The AR headline aging bar and its per-account rows are both `buildAging`, the function the customer's own statement uses; `agingByCustomer` groups and calls it, and never buckets anything itself. The desk's total is therefore the sum of the rows beneath it by construction rather than by two implementations happening to agree — and, more importantly, a customer disputing their balance and the desk looking at it are reading one answer. Dunning levels, rebate settlement states and the credit-blocked queue are registries and derivations in `@cc/domain/entities/finance-desk.ts` for the same reason (CLAUDE.md rule 3); the screens render what they are given.
+
+**Consequence:** the dunning level comes from the _oldest_ overdue item rather than the largest, because escalation is about how long the tenant has been waiting — an account paying its new invoices while a 200-day item sits there is precisely the one a level derived from amount would hide. Nothing on either desk is stored or cached: every figure but the receipts is composed per read and carries its freshness (ADR-016), and a stale read says so rather than being quietly served as fact.
+
+---
+
 ## ADR-057: A customer account stores one boolean, the master stays SAP's, and deactivation blocks the two doors that create obligations
 
 **Context:** doc 09 §3.4 asks for `/admin/customers` with list, detail, edit and deactivate, where "deactivation blocks login + new orders, never deletes O2C history". Four things were open: what the portal is allowed to _store_ about a customer when ADR-016 says SAP owns the master; where a portal-only "may they use the portal" flag can live at all; what an "edit" writes; and where the two consequences are enforced.

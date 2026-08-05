@@ -19,11 +19,11 @@ two distinct failures with different symptoms:
    portal). This is the one that needs action: a `Payment` row sits in
    `initiated` with a `gatewayReference` set, and — per ADR-044's
    threshold — becomes a `payment_capture_unconfirmed` exception in
-   `/admin/exceptions` after 30 minutes.
+   `/admin/ap` (Reconciliation) after 30 minutes.
 
 ## Confirming which one you're looking at
 
-- `/admin/exceptions` → any `payment_capture_unconfirmed` rows: shape 2.
+- `/admin/ap` (Reconciliation) → any `payment_capture_unconfirmed` rows: shape 2.
   `listPaymentExceptions` (`@cc/service-payment`) is what populates this;
   each row shows the account, amount and how long it's been waiting.
 - No exceptions, but customers reporting checkout failures: shape 1 — check
@@ -35,7 +35,7 @@ two distinct failures with different symptoms:
 
 `reconcilePayment` (`@cc/service-payment`) is what both the automatic sweep
 (`packages/workers/src/reconciliation.ts`, `RECONCILIATION_INTERVAL_MS`) and
-a human's "Retry" click in `/admin/exceptions` call. For an `initiated`
+a human's "Retry" click in `/admin/ap` (Reconciliation) call. For an `initiated`
 payment it does **not** wait for the webhook a second time — it polls the
 gateway directly (`PaymentGateway.getPayment`), which is safe precisely
 because that call is authenticated by the tenant's own resolved
@@ -51,7 +51,7 @@ the correct, honest answer, not a bug to work around.
 - **`captured` payments waiting on a SAP posting** are a _different_
   exception (`payment_posting_overdue`) with a different cause (SAP down,
   not the gateway) — see `sap-down.md`. Don't confuse the two when triaging
-  `/admin/exceptions`; the row's `label` tells you which.
+  `/admin/ap` (Reconciliation); the row's `label` tells you which.
 - **Idempotency.** A webhook that eventually arrives late, or arrives twice,
   is a no-op the second time — `Payment.lastEventId` is the dedupe key
   (ADR-021), and there is no code path that would double-apply a delayed
@@ -63,4 +63,4 @@ Do not manually set a `Payment.state` to `posted` in the database to "clear"
 an exception. `postedAt`/`fiDocumentNumber` are the _record_ of a real SAP
 posting (ADR-019) — writing them by hand creates a payment that claims money
 was posted to SAP when it wasn't, which is a worse state than a visible,
-honest exception in `/admin/exceptions`.
+honest exception in `/admin/ap` (Reconciliation).

@@ -31,3 +31,9 @@ export {
 } from "./credit-desk-service";
 
 export type { CreditRequestRecord } from "./credit-request-store";
+
+export {
+  listRebateSettlements,
+  type RebateQueueFilter,
+  type RebateQueueResult,
+} from "./rebate-desk-service";

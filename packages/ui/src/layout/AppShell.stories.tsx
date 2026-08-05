@@ -85,7 +85,7 @@ export const AccountsPayableDesk: Story = {
     userEmail: "ap@acme.example",
     accounts: [],
     navItems: visibleNavItems([...ADMIN_NAV], { roles: ["ap_manager"] }),
-    pathname: "/admin/exceptions",
+    pathname: "/admin/ap",
     children: (
       <PageHeader
         title="Invoices"

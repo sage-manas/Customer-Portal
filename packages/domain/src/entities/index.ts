@@ -17,3 +17,4 @@ export * from "./loyalty";
 export * from "./reporting";
 export * from "./notification";
 export * from "./reconciliation";
+export * from "./finance-desk";

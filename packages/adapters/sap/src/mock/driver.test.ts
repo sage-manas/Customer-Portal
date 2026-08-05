@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { isSapError, type SapError } from "../errors";
 
 import { MockSapAdapter } from "./driver";
-import { SEED_DELIVERIES, SEED_TODAY } from "./seed";
+import { SEED_DELIVERIES, SEED_TODAY, shiftDays } from "./seed";
 
 const KUNNR = "0010001001";
 /** Deccan Fabricators — seeded at 98% credit utilisation. */
@@ -735,5 +735,77 @@ describe("inquiry & quotation (Module 3)", () => {
       );
       expect(error.kind).toBe("not_found");
     });
+  });
+});
+
+describe("desk-plane reads (doc 09 §3.4)", () => {
+  it("gives the billing register every account's documents, notes included", async () => {
+    const sap = adapter();
+    const register = await sap.getBillingRegister();
+
+    expect(new Set(register.data.items.map((i) => i.kunnr)).size).toBeGreaterThan(1);
+    expect(register.data.items.some((i) => i.billingType === "G2")).toBe(true);
+    // Superset of any one account's list — the desk read and the customer's
+    // must come from the same documents.
+    const mine = await sap.getInvoices(KUNNR);
+    for (const invoice of mine.data.items) {
+      expect(register.data.items.map((i) => i.vbeln)).toContain(invoice.vbeln);
+    }
+  });
+
+  it("carries the owning account on every ledger row", async () => {
+    const sap = adapter();
+    const ledger = await sap.getOpenItemsLedger();
+
+    expect(ledger.data.length).toBeGreaterThan(0);
+    expect(ledger.data.every((item) => item.kunnr.length > 0)).toBe(true);
+    expect(new Set(ledger.data.map((i) => i.kunnr)).size).toBeGreaterThan(1);
+
+    // The same items the customer's own read returns, with the owner added.
+    const mine = await sap.getOpenItems(KUNNR);
+    expect(
+      ledger.data
+        .filter((i) => i.kunnr === KUNNR)
+        .map((i) => i.documentNumber)
+        .sort(),
+    ).toEqual(mine.data.map((i) => i.documentNumber).sort());
+  });
+
+  it("gives the rebate register every agreement, lapsed and settled ones too", async () => {
+    const sap = adapter();
+    const register = await sap.getRebateRegister();
+
+    expect(new Set(register.data.map((r) => r.kunnr)).size).toBeGreaterThan(1);
+    expect(register.data.some((r) => r.settlementStatus === "D")).toBe(true);
+  });
+
+  it("lists credit-blocked orders across the tenant, oldest first", async () => {
+    const blocked = await adapter().getCreditBlockedOrders();
+
+    expect(blocked.data.items.length).toBeGreaterThan(0);
+    expect(blocked.data.items.every((o) => o.creditStatus === "CreditHold")).toBe(true);
+    const dates = blocked.data.items.map((o) => o.createdOn);
+    expect([...dates].sort()).toEqual(dates);
+  });
+
+  it("picks up an order the credit check holds during the session", async () => {
+    const sap = adapter();
+    const before = (await sap.getCreditBlockedOrders()).data.total;
+
+    const order = await sap.createSalesOrder({
+      kunnr: TIGHT_CREDIT_KUNNR,
+      shipTo: TIGHT_CREDIT_KUNNR,
+      customerPoRef: "PO-CREDIT-1",
+      requestedDeliveryDate: shiftDays(SEED_TODAY, 14),
+      lines: [{ material: "MAT-10001", quantity: 500, uom: "EA" }],
+    });
+
+    const after = await sap.getCreditBlockedOrders();
+    if (order.creditStatus === "CreditHold") {
+      expect(after.data.total).toBe(before + 1);
+      expect(after.data.items.map((o) => o.vbeln)).toContain(order.vbeln);
+    } else {
+      expect(after.data.total).toBe(before);
+    }
   });
 });

@@ -18,6 +18,7 @@ import type {
   Invoice,
   Material,
   MaterialQuery,
+  LedgerOpenItem,
   OpenItem,
   OrderSimulation,
   OrderStatusView,
@@ -101,6 +102,12 @@ export interface SapAdapter {
    * second computation of money owed to a customer is a second answer.
    */
   getRebateAgreements(kunnr: string): Promise<SapRead<RebateAgreement[]>>;
+  /**
+   * Every rebate agreement in the tenant — the AP desk's settlement queue
+   * (doc 09 §3.4). Its own method, not `getRebateAgreements` with the account
+   * left off (ADR-032). Settling one is VB(7; the portal only lists them.
+   */
+  getRebateRegister(): Promise<SapRead<RebateAgreement[]>>;
 
   // ---- Master data: catalogue ------------------------------------------
   /** MARA/MAKT reads · API_PRODUCT_SRV. */
@@ -162,6 +169,17 @@ export interface SapAdapter {
   cancelSalesOrder(vbeln: string, reason?: string): Promise<SalesOrderResult>;
   getOrderStatus(vbeln: string): Promise<SapRead<OrderStatusView>>;
   getOrders(kunnr: string): Promise<SapRead<Page<OrderStatusView>>>;
+  /**
+   * Orders SAP is holding on credit across the tenant — doc 05 §8's release
+   * queue, read by the AR desk (doc 09 §3.4).
+   *
+   * A method of its own rather than a filter argument on `getOrders`, for the
+   * reason `getInquiryQueue` is one: the customer-plane read must not be one
+   * dropped argument away from every account's orders. Read-only by design —
+   * releasing a block is VKM3, and there is deliberately no adapter method
+   * that writes VBUK-CMGST (ADR-059).
+   */
+  getCreditBlockedOrders(): Promise<SapRead<Page<OrderStatusView>>>;
 
   // ---- Delivery ---------------------------------------------------------
   /**
@@ -187,10 +205,27 @@ export interface SapAdapter {
   getInvoice(vbeln: string): Promise<SapRead<Invoice>>;
   /** Returns a URL/stream reference to the rendered billing document. */
   getInvoicePdf(vbeln: string): Promise<string>;
+  /**
+   * Every billing document in the tenant — the AR desk's invoice register and
+   * the AP desk's note register are two filters over this one read (doc 09
+   * §3.4). Separate from `getInvoices(kunnr)` for ADR-032's reason.
+   */
+  getBillingRegister(): Promise<SapRead<Page<Invoice>>>;
 
   // ---- Accounts receivable ----------------------------------------------
   /** BAPI_AR_ACC_GETOPENITEMS. */
   getOpenItems(kunnr: string): Promise<SapRead<OpenItem[]>>;
+  /**
+   * The tenant's whole AR ledger, each item carrying the account it belongs
+   * to (`LedgerOpenItem`) — aging, dunning and the collections queue are all
+   * derived from this one read (doc 09 §3.4).
+   *
+   * The KUNNR travels on the row rather than being looked up per document:
+   * ADR-025's rule, that an ownership boundary is one comparison rather than
+   * a second read that can fail open, applies to a desk read as much as to a
+   * customer's.
+   */
+  getOpenItemsLedger(): Promise<SapRead<LedgerOpenItem[]>>;
   /** F-28 equivalent posting + clearing. Idempotent on `gatewayReference`. */
   postIncomingPayment(input: IncomingPaymentInput): Promise<IncomingPaymentResult>;
 }

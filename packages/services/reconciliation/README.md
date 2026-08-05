@@ -19,7 +19,7 @@ import {
 } from "@cc/service-reconciliation";
 ```
 
-- `listOutboxExceptions(tenantId, now?)` — every `failed` row in the tenant, oldest first, for the `/admin/exceptions` tray.
+- `listOutboxExceptions(tenantId, now?)` — every `failed` row in the tenant, oldest first, for the `/admin/ap` (Reconciliation) tray.
 - `requeueOutboxEvent(tenantId, eventId)` — a human's manual retry: moves one `failed` row back to `pending` for the relay's next sweep. Returns `false` if the row wasn't `failed`.
 - `requeueStaleFailedOutboxEvents(tenantId, { now?, cooldownMs? })` — the automatic half, called by `@cc/workers`' reconciliation loop: requeues every `failed` row older than the cooldown (default 30 minutes), on the theory that the upstream outage that failed it may have resolved since.
 

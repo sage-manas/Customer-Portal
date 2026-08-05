@@ -239,7 +239,7 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Wallet",
     accent: "payment",
     permission: "finance:ap",
-    status: "planned",
+    status: "live",
   },
   {
     key: "admin-ar",
@@ -248,20 +248,15 @@ export const ADMIN_NAV: readonly NavItem[] = [
     icon: "Landmark",
     accent: "invoice",
     permission: "finance:ar",
-    status: "planned",
-  },
-  {
-    key: "admin-exceptions",
-    /** Moves under the AP workspace in Phase 6 (doc 09 §3.4); until that
-     * screen exists it keeps its own tab, now reachable by `ap_manager`
-     * because `exceptions:view` sits in the AP group. */
-    label: "Exceptions",
-    href: "/admin/exceptions",
-    icon: "AlertTriangle",
-    accent: "payment",
-    permission: "exceptions:view",
     status: "live",
   },
+  /**
+   * The Exceptions tab is deliberately gone: the tray is a view inside the AP
+   * workspace as of Phase 6 (doc 09 §3.4, ADR-060), and a nav item pointing
+   * at a screen that only redirects would be a second route to one place.
+   * `exceptions:view` still guards the retry handlers, which is where the
+   * control actually is (CLAUDE.md rule 5).
+   */
   {
     key: "admin-settings",
     label: "Tenant Settings",

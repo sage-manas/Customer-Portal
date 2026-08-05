@@ -31,7 +31,7 @@ const schema = z.object({
   /**
    * How often the reconciliation sweep retries stuck payments and failed
    * outbox rows (docs/07 B4). Minutes, not seconds: every exception it would
-   * retry is already visible in `/admin/exceptions`, so a tighter tick only
+   * retry is already visible in `/admin/ap` (Reconciliation), so a tighter tick only
    * adds load against SAP and the gateway.
    */
   RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),

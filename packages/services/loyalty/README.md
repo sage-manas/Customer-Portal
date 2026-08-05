@@ -41,6 +41,8 @@ import {
   getCreditRequestForDesk,
   decideCreditRequest, // approve (optionally for less) or decline
   getCreditPositionForDesk, // the position of the account being decided on
+  // AP desk — no KUNNR, guarded by `finance:ap`
+  listRebateSettlements, // KONA across the tenant: releasable, lapsed, settled
   // tenant settings
   getTierThresholds, // registry defaults + this tenant's overrides
   saveTierThresholds, // validated as a whole ladder, never field by field
@@ -53,7 +55,7 @@ Domain logic it consumes rather than reimplements (`@cc/domain`): `creditPositio
 
 ## Two planes, two files
 
-`credit-service.ts`, `loyalty-service.ts` and `credit-request-service.ts` are the customer's; `credit-desk-service.ts` is the back office's. Separate files with separate entry points rather than one set of functions with a flag — ADR-028's rule, and the reason the desk's queue cannot be reached by a customer-plane call that forgot to pass an account (ADR-032, applied here to the portal's own rows rather than to a SAP read).
+`credit-service.ts`, `loyalty-service.ts` and `credit-request-service.ts` are the customer's; `credit-desk-service.ts` and `rebate-desk-service.ts` are the back office's — the latter reads `getRebateRegister()` for the AP workspace and settles nothing, because settlement is VB(7 (ADR-059). Separate files with separate entry points rather than one set of functions with a flag — ADR-028's rule, and the reason the desk's queue cannot be reached by a customer-plane call that forgot to pass an account (ADR-032, applied here to the portal's own rows rather than to a SAP read).
 
 ## Events
 

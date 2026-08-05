@@ -17,6 +17,8 @@ export {
   type OrderStatusFilter,
 } from "./order-service";
 
+export { listCreditBlockedOrders, type CreditReleaseQueueResult } from "./credit-release-service";
+
 export {
   countDrafts,
   deleteDraft,
