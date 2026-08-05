@@ -1,4 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { gstinChecksumChar } from "@cc/domain";
+import { expect, test } from "@playwright/test";
+
+import { DEV_PASSWORD, fillByLabel, signIn } from "./helpers";
 
 /**
  * Doc 09 §5, third acceptance criterion, end to end on mocks:
@@ -10,20 +13,6 @@ import { expect, test, type Page } from "@playwright/test";
  * entry point*: session-authenticated, no draft token, no review queue, and
  * an assignment decision made on the last step by the person filling it in.
  */
-
-const PASSWORD = "portal-dev-password";
-
-const BASE36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-/** The published GSTN check-digit algorithm — same one @cc/domain validates with. */
-function gstinCheckDigit(first14: string): string {
-  let sum = 0;
-  for (let index = 0; index < 14; index++) {
-    const product = BASE36.indexOf(first14[index]!) * (index % 2 === 0 ? 1 : 2);
-    sum += Math.floor(product / 36) + (product % 36);
-  }
-  return BASE36[(36 - (sum % 36)) % 36]!;
-}
 
 /** A fresh customer per run: the GSTIN duplicate guard is not skipped for the
  * back office, which is the point of ADR-056 and would make a reused one pass
@@ -37,21 +26,8 @@ function uniqueCustomer() {
     legalEntityName: `Sahyadri Castings ${digits} Pvt Ltd`,
     email: `accounts${digits}@sahyadricastings.example`,
     pan,
-    gstin: `${body}${gstinCheckDigit(body)}`,
+    gstin: `${body}${gstinChecksumChar(body)}`,
   };
-}
-
-async function fillByLabel(page: Page, label: string, value: string) {
-  await page.getByLabel(label, { exact: true }).fill(value);
-}
-
-async function signIn(page: Page, email: string, password: string) {
-  await page.context().clearCookies();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
 }
 
 test.describe("back-office customer registration", () => {
@@ -59,7 +35,7 @@ test.describe("back-office customer registration", () => {
     const customer = uniqueCustomer();
 
     // --- The desk fills the wizard on the customer's behalf ---------------
-    await signIn(page, "admin@acme.example", PASSWORD);
+    await signIn(page, "admin@acme.example", DEV_PASSWORD);
 
     await page.goto("/admin/customers");
     await page.getByRole("link", { name: "Register customer" }).click();

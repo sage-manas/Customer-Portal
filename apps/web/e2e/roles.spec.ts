@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { signIn } from "./helpers";
+
 /**
  * Doc 09 §5, the first two acceptance criteria, asserted per role:
  * "each role's nav shows only permitted tabs" and "the API returns 403/404
@@ -17,17 +19,6 @@ import { expect, test, type Page } from "@playwright/test";
  * app with a separate session, and their equivalent assertions are the
  * `apps/ops` authz sweep and ADR-052's two.
  */
-
-const PASSWORD = "portal-dev-password";
-
-async function signIn(page: Page, email: string) {
-  await page.context().clearCookies();
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL((url) => !url.pathname.startsWith("/login"));
-}
 
 /**
  * The sidebar's items in order, planned ones included — a "Soon" module is a
@@ -101,35 +92,38 @@ test.describe("role model (doc 09 §5)", () => {
     expect(await apiStatus(page, "/api/admin/customers/0010001003")).toBe(404);
   });
 
-  test("ap_manager sees the overview and its own desk, nothing else", async ({ page }) => {
-    await signIn(page, "ap@acme.example");
-    await page.goto("/admin");
+  // Same shape for both desks: overview plus one tab, none of the other
+  // desk's screens, and no `customer:register`. `deniedPaths` covers the
+  // permissions each desk conspicuously lacks — always the customer master,
+  // plus (for AR) `credit:decide-limit` vs its own `credit:release`.
+  const desks: Array<{ email: string; tab: string; deniedPaths: string[] }> = [
+    { email: "ap@acme.example", tab: "Accounts Payable", deniedPaths: ["/api/admin/customers"] },
+    {
+      email: "ar@acme.example",
+      tab: "Accounts Receivable",
+      deniedPaths: ["/api/admin/credit/requests", "/api/admin/customers"],
+    },
+  ];
 
-    expect(await navLabels(page)).toEqual(["Overview", "Accounts Payable"]);
+  for (const { email, tab, deniedPaths } of desks) {
+    test(`${tab} desk sees the overview and its own desk, nothing else`, async ({ page }) => {
+      await signIn(page, email);
+      await page.goto("/admin");
 
-    // Holds `admin:view`, so the shell is theirs; holds no `customer:register`,
-    // so the customer master is not.
-    expect(await apiStatus(page, "/api/admin/customers")).toBe(403);
+      expect(await navLabels(page)).toEqual(["Overview", tab]);
 
-    // The buyer plane is not theirs either: they hold `order:view` as a desk
-    // read and have no KUNNR, so the portal shell sends them back to their
-    // own (ADR-062) rather than rendering a nav over an account they lack.
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/admin$/);
-  });
+      // Holds `admin:view`, so the shell is theirs; holds neither
+      // `customer:register` nor the other desk's permission, so those are not.
+      for (const path of deniedPaths) {
+        expect(await apiStatus(page, path)).toBe(403);
+      }
 
-  test("ar_manager sees the overview and its own desk, nothing else", async ({ page }) => {
-    await signIn(page, "ar@acme.example");
-    await page.goto("/admin");
-
-    expect(await navLabels(page)).toEqual(["Overview", "Accounts Receivable"]);
-
-    // AR releases a credit-blocked order (`credit:release`) but does not
-    // decide a customer's limit (`credit:decide-limit`) — the two are
-    // separate permissions precisely so this line can be true.
-    expect(await apiStatus(page, "/api/admin/credit/requests")).toBe(403);
-
-    // Nor is the AP tray theirs.
-    expect(await apiStatus(page, "/api/admin/customers")).toBe(403);
-  });
+      // The buyer plane is not theirs either: they hold `order:view`/
+      // `invoice:view` as desk reads and have no KUNNR, so the portal shell
+      // sends them back to their own (ADR-062) rather than rendering a nav
+      // over an account they lack.
+      await page.goto("/");
+      await expect(page).toHaveURL(/\/admin$/);
+    });
+  }
 });
