@@ -1,0 +1,2005 @@
+openapi: 3.1.0
+
+info:
+  title: Customer Portal — SAP Integration Service
+  version: 1.0.0
+  description: |
+    The contract the tenant's SAP-side service must implement so the Customer
+    Portal can read from and write to SAP.
+
+    This document is generated from the portal's own adapter contract
+    (`packages/adapters/sap/src/contract.ts`) and its canonical domain types
+    (`packages/domain/src/entities/*`). Those files are the source of truth; if
+    this spec and they ever disagree, they win.
+
+    ## Direction of traffic
+
+    Outbound only. The portal is the client, this service is the server. SAP
+    never calls the portal, so no inbound firewall rule and no public portal URL
+    are required.
+
+    ## Three rules that are not negotiable
+
+    1. **Every read is wrapped** in `{ data, freshness, syncedAt }`. The portal
+       renders freshness to the user, so it must not be guessed — see
+       `SapRead` below.
+    2. **Every write is idempotent** on a caller-supplied key. The portal derives
+       these keys from the document, never randomly, so a retry or a
+       double-clicked button carries the same key and must produce the same
+       single posting.
+    3. **Canonical statuses only.** Raw SAP status codes (VBUK-GBSTK, CMGST,
+       WBSTK) are translated on this side into the `CanonicalStatus` enum. The
+       portal contains no `switch` on a SAP code and will not gain one.
+
+    ## What this service must never do
+
+    - Compute GST. CGST/SGST/IGST come off KONV exactly as SAP calculated them.
+    - Return raw BAPIRET2 or OData error payloads. Errors use the `Error` schema.
+    - Accept a customer identifier on a tenant-wide endpoint, or omit one on a
+      customer-scoped endpoint. The paired endpoints (`/customers/{kunnr}/orders`
+      vs `/credit-blocked-orders`) are deliberately separate routes so that a
+      customer-scoped read cannot become a tenant-wide one by dropping an
+      argument.
+    - Write KNKK-KLIMK. Credit masters are maintained in FD32. The portal records
+      credit decisions; it does not raise limits.
+
+servers:
+  - url: https://{host}/sap/v1
+    description: Tenant SAP integration service
+    variables:
+      host:
+        default: sap-integration.example.com
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Connection
+  - name: Customer master
+  - name: Catalogue
+  - name: Pre-sales
+  - name: Sales orders
+  - name: Delivery
+  - name: Billing
+  - name: Accounts receivable
+
+paths:
+  # ---------------------------------------------------------------- Connection
+  /health:
+    get:
+      tags: [Connection]
+      operationId: health
+      summary: Liveness probe
+      description: |
+        Cheap probe backing the portal's stale-data banner and the ops console's
+        "Test Connection" button. Must not call SAP expensively — a session ping
+        is enough. Should answer in under two seconds even when SAP is down,
+        reporting `reachable: false` rather than hanging.
+      responses:
+        "200":
+          description: Probe result. Returns 200 even when SAP is unreachable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SapConnectionHealth" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ----------------------------------------------------------- Customer master
+  /customers:
+    post:
+      tags: [Customer master]
+      operationId: createCustomer
+      summary: Create a customer master record
+      description: |
+        ECC: `BAPI_CUSTOMER_CREATEFROMDATA1` + `BAPI_TRANSACTION_COMMIT`.
+        S/4: Business Partner API (`A_BusinessPartner`).
+
+        Called once when the back office approves an onboarding application.
+        The response echoes what SAP actually stored *after its own field
+        truncation* — the portal displays that echo rather than what it sent, so
+        a name SAP cut to 35 characters is shown cut.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CanonicalCustomer" }
+      responses:
+        "201":
+          description: Customer created.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerCreateResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /customers/{kunnr}:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Customer master]
+      operationId: getCustomer
+      summary: Read a customer master record
+      description: "KNA1 / KNVV / ADR6 read. S/4: `A_BusinessPartner`."
+      responses:
+        "200":
+          description: The customer, with freshness.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CanonicalCustomer" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+    patch:
+      tags: [Customer master]
+      operationId: updateCustomer
+      summary: Partially update a customer master record
+      description: |
+        ECC: `BAPI_CUSTOMER_CHANGEFROMDATA1`. S/4: Business Partner PATCH.
+
+        A **partial** change, deliberately. Sending a whole record back would
+        make every read-modify-write a chance to overwrite a field someone
+        changed in XD02 in between with a stale value the portal was holding.
+
+        The request schema contains **no PAN and no GSTIN**. Those carry
+        verification evidence and drive tax determination, so no path exists from
+        a web form to a changed tax identifier. Do not add them to this endpoint;
+        the portal will never send them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CustomerPatch" }
+      responses:
+        "200":
+          description: Updated. Echoes what SAP stored, truncation included.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CustomerUpdateResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /customers/{kunnr}/ship-to:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Customer master]
+      operationId: getShipToAddresses
+      summary: Ship-to addresses available to this account
+      description: VBPA partner function SH, resolved to addresses.
+      responses:
+        "200":
+          description: Addresses the customer may pick at checkout.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/ShipToAddress" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /customers/{kunnr}/credit:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Customer master]
+      operationId: getCreditInfo
+      summary: Credit limit and exposure
+      description: |
+        KNKK read. Return `creditLimit` (KLIMK), `utilized` (SKFOR) and
+        `blocked` (CTLPC) as SAP holds them. `available` is
+        `creditLimit - utilized`; send it computed so the portal and SAP cannot
+        disagree about the subtraction.
+
+        Read-only. There is no endpoint that writes KNKK-KLIMK anywhere in this
+        contract, and there must not be one.
+      responses:
+        "200":
+          description: The account's credit position.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CreditInfo" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /customers/{kunnr}/rebate-agreements:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Customer master]
+      operationId: getRebateAgreements
+      summary: One account's rebate agreements
+      description: |
+        KONA read. Agreements are created in VBO1 and settled in VBO2; the
+        accrual (KAWRT) is SAP's own arithmetic over the billing documents.
+        The portal never recomputes it — a second computation of money owed to a
+        customer is a second answer.
+      responses:
+        "200":
+          description: The account's agreements and what has accrued.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RebateAgreement" }
+
+  /rebate-agreements:
+    get:
+      tags: [Customer master]
+      operationId: getRebateRegister
+      summary: Every rebate agreement in the tenant (AP desk queue)
+      description: |
+        Tenant-wide read backing the AP desk's settlement queue.
+
+        A route of its own, **not** `/customers/{kunnr}/rebate-agreements` with
+        the account left off. Accepts no customer filter.
+      responses:
+        "200":
+          description: All agreements, each carrying its KUNNR.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/RebateAgreement" }
+
+  /rebate-agreements/{agreementNumber}/settle:
+    parameters:
+      - name: agreementNumber
+        in: path
+        required: true
+        description: KONA-KNUMA.
+        schema: { type: string }
+    post:
+      tags: [Customer master]
+      operationId: settleRebateAgreement
+      summary: Settle a rebate agreement
+      description: |
+        VB(7 — settles an agreement SAP has released for settlement (BOSTA = C),
+        posting the credit memo request SAP then bills as a credit note.
+
+        **Idempotent on `reference`**, which the portal derives from the
+        agreement rather than generating per call. The AP desk clicking Settle
+        twice must produce one credit memo request, not two.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RebateSettlementInput" }
+      responses:
+        "200":
+          description: Settled, or the prior result replayed for the same reference.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RebateSettlementResult" }
+        "400":
+          description: |
+            Agreement not in a settleable state (BOSTA not C), or validation
+            failure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # ---------------------------------------------------------------- Catalogue
+  /materials:
+    get:
+      tags: [Catalogue]
+      operationId: getMaterials
+      summary: Search the material master
+      description: MARA / MAKT reads. S/4:`API_PRODUCT_SRV`.
+      parameters:
+        - name: search
+          in: query
+          description: Free text over MATNR and MAKTX.
+          schema: { type: string }
+        - name: materialGroup
+          in: query
+          description: MARA-MATKL.
+          schema: { type: string }
+        - name: plant
+          in: query
+          description: MARC-WERKS.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 24 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        "200":
+          description: |
+            A page of materials. `total` is the full match count, not the page
+            length — the portal paginates on it.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, total]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: "#/components/schemas/Material" }
+                          total: { type: integer }
+
+  /materials/{material}:
+    parameters:
+      - $ref: "#/components/parameters/Material"
+    get:
+      tags: [Catalogue]
+      operationId: getMaterial
+      summary: Read one material
+      responses:
+        "200":
+          description: The material.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Material" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /materials/{material}/stock:
+    parameters:
+      - $ref: "#/components/parameters/Material"
+    get:
+      tags: [Catalogue]
+      operationId: getStock
+      summary: Free stock by plant
+      description: |
+        MARD-LABST or the ATP API. A real-time class read: **always answer
+        `live`**, never from a cache. A stock figure served stale is the one
+        number that causes an order the warehouse cannot fill.
+      parameters:
+        - name: plant
+          in: query
+          description: MARC-WERKS. Omitted means all plants the account may see.
+          schema: { type: string }
+      responses:
+        "200":
+          description: One entry per plant.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/StockLevel" }
+
+  /customers/{kunnr}/materials/{material}/price:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+      - $ref: "#/components/parameters/Material"
+    get:
+      tags: [Catalogue]
+      operationId: getCustomerPrice
+      summary: Customer-specific price for a quantity
+      description: |
+        VK13 condition reads or a pricing simulation. `listPrice` is PR00;
+        `netPrice` is after customer conditions (K007 / K005) are applied.
+
+        **`netPrice` is ex-GST.** The portal never adds tax to it.
+      parameters:
+        - name: quantity
+          in: query
+          required: true
+          description: Scale prices depend on it, so it is not optional.
+          schema: { type: number, exclusiveMinimum: 0 }
+      responses:
+        "200":
+          description: The price this account pays for this quantity.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/CustomerPrice" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ----------------------------------------------------------------- Pre-sales
+  /inquiries:
+    post:
+      tags: [Pre-sales]
+      operationId: createInquiry
+      summary: Create an inquiry
+      description: |
+        VA11 / `BAPI_INQUIRY_CREATEFROMDATA2` (AUART = IN).
+
+        Note there is no price on an inquiry line: the inquiry is the customer's
+        question, and the quotation is where sales answers it.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateInquiryInput" }
+      responses:
+        "201":
+          description: The created inquiry. A write, so no freshness envelope.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Inquiry" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /customers/{kunnr}/inquiries:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Pre-sales]
+      operationId: getInquiries
+      summary: One account's inquiries
+      responses:
+        "200":
+          description: A page of the account's inquiries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InquiryPage" }
+
+  /inquiries/{vbeln}:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Pre-sales]
+      operationId: getInquiry
+      summary: Read one inquiry
+      description: |
+        Include `quotation` (from VBFA) when sales has answered — its presence
+        is what "Quotation received" means on the portal's list. The portal keeps
+        no flag of its own for it.
+      responses:
+        "200":
+          description: The inquiry.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Inquiry" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /inquiry-queue:
+    get:
+      tags: [Pre-sales]
+      operationId: getInquiryQueue
+      summary: Unanswered inquiries across the tenant (back-office workbench)
+      description: |
+        Inquiries no quotation references yet (VBUK-GBSTK = A with no VBFA
+        successor).
+
+        A route of its own, **not** `/customers/{kunnr}/inquiries` with the
+        account left off. Accepts no customer filter. A boundary that depends on
+        a caller remembering to pass a parameter is not a boundary.
+      responses:
+        "200":
+          description: The tenant-wide queue.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InquiryPage" }
+
+  /quotations:
+    post:
+      tags: [Pre-sales]
+      operationId: createQuotation
+      summary: Issue a quotation against an inquiry
+      description: |
+        VA21 / `BAPI_QUOTATION_CREATEFROMDATA2` (AUART = AG), created with
+        reference to the inquiry so VBAK-VGBEL is populated.
+
+        Lines omitted from the request are priced from condition records.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateQuotationInput" }
+      responses:
+        "201":
+          description: The created quotation.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quotation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404":
+          description: The referenced inquiry does not exist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /customers/{kunnr}/quotations:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Pre-sales]
+      operationId: getQuotations
+      summary: One account's quotations
+      responses:
+        "200":
+          description: A page of the account's quotations.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/QuotationPage" }
+
+  /quotations/{vbeln}:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Pre-sales]
+      operationId: getQuotation
+      summary: Read one quotation
+      description: |
+        **Do not invent an "expired" status.** SAP leaves a lapsed quotation at
+        GBSTK = A forever, and the portal derives validity from `validUntil`
+        (VBAK-BNDDT, inclusive of the last day) on every read. Report GBSTK as
+        it stands and send BNDDT accurately; the portal decides what "expired"
+        means.
+      responses:
+        "200":
+          description: The quotation.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Quotation" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /quotations/{vbeln}/revision-request:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    post:
+      tags: [Pre-sales]
+      operationId: requestQuotationRevision
+      summary: Ask for a quotation to be reworked or revalidated
+      description: |
+        Appended to the document as header sales text (STXH/STXL). A message
+        about a SAP document belongs on the document, not in a portal table.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comment]
+              properties:
+                comment: { type: string, maxLength: 2000 }
+      responses:
+        "200":
+          description: The quotation, with the request appended to revisionRequests.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Quotation" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /quotations/{vbeln}/convert:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    post:
+      tags: [Pre-sales]
+      operationId: convertQuoteToOrder
+      summary: Accept a quotation, creating the sales order
+      description: |
+        VA01 with reference to the quotation (copy control).
+
+        Returns exactly what `createSalesOrder` returns, because that is what it
+        is — the reference is how the order was created, not a different kind of
+        document. A credit block here is a normal outcome, not an error.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConvertQuotationInput" }
+      responses:
+        "201":
+          description: The resulting sales order.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesOrderResult" }
+        "400":
+          description: Quotation expired, already converted, or otherwise rejected.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  # -------------------------------------------------------------- Sales orders
+  /orders/simulate:
+    post:
+      tags: [Sales orders]
+      operationId: simulateOrder
+      summary: Price and ATP-check an order without creating it
+      description: |
+        `BAPI_SALESORDER_CREATEFROMDAT2` in SIMULATE mode.
+
+        **Must create nothing.** The portal calls this on the checkout screen
+        while the customer is still deciding, so it may be called many times for
+        one eventual order. Report `creditBlockExpected` so the portal can warn
+        before submission rather than after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSalesOrderInput" }
+      responses:
+        "200":
+          description: Confirmed quantities, dates and the credit outlook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrderSimulation" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /orders:
+    post:
+      tags: [Sales orders]
+      operationId: createSalesOrder
+      summary: Create a sales order
+      description: |
+        `BAPI_SALESORDER_CREATEFROMDAT2` + `BAPI_TRANSACTION_COMMIT`.
+        S/4: `API_SALES_ORDER_SRV`.
+
+        **Idempotent on `customerPoRef`** when supplied, otherwise on the
+        `Idempotency-Key` header. A retry after a timeout must return the
+        original order, never create a second one.
+
+        **A credit block is a success, not an error.** SAP creates the order and
+        holds it; return 201 with `creditStatus: CreditHold`. Do not return an
+        error — the portal shows the customer a held order, which is the truth.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSalesOrderInput" }
+      responses:
+        "201":
+          description: Order created (possibly held on credit).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesOrderResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /orders/{vbeln}:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Sales orders]
+      operationId: getOrderStatus
+      summary: Read one order
+      description: |
+        Include `kunnr` — the portal compares it to the signed-in account and
+        answers 404 on a mismatch, because SAP reads a sales order by VBELN
+        alone and the account is the security boundary.
+      responses:
+        "200":
+          description: The order and its status.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/OrderStatusView" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /customers/{kunnr}/orders:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Sales orders]
+      operationId: getOrders
+      summary: One account's orders
+      responses:
+        "200":
+          description: A page of the account's orders.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/OrderPage" }
+
+  /orders/{vbeln}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    post:
+      tags: [Sales orders]
+      operationId: cancelSalesOrder
+      summary: Withdraw an order
+      description: |
+        VA02 rejection — `BAPI_SALESORDER_CHANGE` setting VBAP-ABGRU on every
+        item.
+
+        Only an order SAP still reports as fully open may be withdrawn. Once a
+        delivery exists, reject with 400: the customer has to ask, not cancel.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, description: Rejection reason text. }
+      responses:
+        "200":
+          description: The order after rejection.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SalesOrderResult" }
+        "400":
+          description: Not cancellable — a delivery already exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /credit-blocked-orders:
+    get:
+      tags: [Sales orders]
+      operationId: getCreditBlockedOrders
+      summary: Orders held on credit across the tenant (AR desk queue)
+      description: |
+        VBUK-CMGST = B, tenant-wide. Backs the AR desk's release queue.
+
+        A route of its own, **not** `/customers/{kunnr}/orders` with a filter.
+        Accepts no customer parameter.
+      responses:
+        "200":
+          description: Every held order, each carrying its KUNNR.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/OrderPage" }
+
+  /orders/{vbeln}/release-credit:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    post:
+      tags: [Sales orders]
+      operationId: releaseCreditBlock
+      summary: Release an order held on credit
+      description: |
+        VKM3.
+
+        **This re-runs the credit check; it does not force the status.** An order
+        still over an unchanged limit comes back held, and the honest answer is
+        `released: false` with SAP's reason — reporting success regardless would
+        leave a warehouse expecting a pick SAP is still blocking.
+
+        Return 200 in both cases. A refused release is a result, not an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreditReleaseInput" }
+      responses:
+        "200":
+          description: The outcome of the re-check, released or not.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreditReleaseResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ------------------------------------------------------------------ Delivery
+  /customers/{kunnr}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Delivery]
+      operationId: getDeliveries
+      summary: One account's shipments
+      description: LIKP / LIPS keyed by LIKP-KUNAG.
+      responses:
+        "200":
+          description: A page of the account's deliveries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/DeliveryPage" }
+
+  /orders/{vbeln}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Delivery]
+      operationId: getDeliveriesForOrder
+      summary: Deliveries created from one sales order
+      description: LIKP-VGBEL = the sales order.
+      responses:
+        "200":
+          description: The order's deliveries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/Delivery" }
+
+  /deliveries/{vbeln}:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Delivery]
+      operationId: getDelivery
+      summary: Read one delivery note
+      description: |
+        LIKP / LIPS plus VBUK-WBSTK.
+
+        `kunnr` (LIKP-KUNAG) **must be on the document itself**. It is the
+        ownership boundary, and a boundary that needs a second SAP read is one
+        that fails open when SAP is slow.
+
+        WBSTK alone cannot distinguish Picked from Packed from InTransit. If you
+        have the picking and packing confirmations, use them to report the finer
+        status; if you only have WBSTK, report the coarse one. Do not guess.
+      responses:
+        "200":
+          description: The delivery.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Delivery" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /deliveries/{vbeln}/pod:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    post:
+      tags: [Delivery]
+      operationId: confirmPod
+      summary: Confirm proof of delivery
+      description: |
+        VLPOD — posts LIKP-KOQUK and any LIPS-LFIMG quantity differences.
+
+        "Confirm Receipt" and "Report Discrepancy" are the **same call**: the
+        portal decides which happened by comparing received to dispatched
+        quantities. Set `discrepancy: true` when SAP recorded a difference on at
+        least one line.
+
+        The portal calls this *before* writing its own evidence row, so a
+        failure here must leave nothing posted.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConfirmPodInput" }
+      responses:
+        "200":
+          description: POD posted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfirmPodResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ------------------------------------------------------------------- Billing
+  /customers/{kunnr}/invoices:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Billing]
+      operationId: getInvoices
+      summary: One account's billing documents
+      description: |
+        VBRK / VBRP. Include credit notes (FKART = G2) and debit notes (L2) —
+        the portal filters them out of the invoice list and gives them their own
+        screen, so they must be present and correctly typed via `billingType`.
+      responses:
+        "200":
+          description: A page of the account's billing documents.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InvoicePage" }
+
+  /invoices/{vbeln}:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Billing]
+      operationId: getInvoice
+      summary: Read one billing document
+      description: |
+        **Tax comes off KONV exactly as SAP calculated it.** Populate `cgst` and
+        `sgst` for intra-state, `igst` for inter-state, and leave the others
+        zero. The portal reads *which* fields you populated to decide intra- vs
+        inter-state; it never computes GST and never checks your arithmetic.
+      responses:
+        "200":
+          description: The billing document.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/Invoice" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /invoices/{vbeln}/pdf:
+    parameters:
+      - $ref: "#/components/parameters/Vbeln"
+    get:
+      tags: [Billing]
+      operationId: getInvoicePdf
+      summary: Get a link to the rendered invoice PDF
+      description: |
+        Returns a **URL**, not the bytes. A short-lived pre-signed link is ideal;
+        the portal streams the user to it rather than proxying the file.
+      responses:
+        "200":
+          description: A URL the portal can redirect to.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: { type: string, format: uri }
+                  expiresAt: { type: string, format: date-time }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /billing-register:
+    get:
+      tags: [Billing]
+      operationId: getBillingRegister
+      summary: Every billing document in the tenant (AR/AP desks)
+      description: |
+        Tenant-wide VBRK read. The AR desk's invoice register and the AP desk's
+        credit-note register are two filters the portal applies over this one
+        response.
+
+        A route of its own, not `/customers/{kunnr}/invoices` with the account
+        left off.
+      responses:
+        "200":
+          description: All billing documents, each carrying its KUNNR.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data: { $ref: "#/components/schemas/InvoicePage" }
+
+  # ------------------------------------------------------- Accounts receivable
+  /customers/{kunnr}/open-items:
+    parameters:
+      - $ref: "#/components/parameters/Kunnr"
+    get:
+      tags: [Accounts receivable]
+      operationId: getOpenItems
+      summary: One account's open FI items
+      description: |
+        `BAPI_AR_ACC_GETOPENITEMS` (BSID).
+
+        This read is the answer to "what does the customer owe?" — the portal's
+        statement and aging are derived from it on every request and stored
+        nowhere.
+      responses:
+        "200":
+          description: The account's open items.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/OpenItem" }
+
+  /open-items-ledger:
+    get:
+      tags: [Accounts receivable]
+      operationId: getOpenItemsLedger
+      summary: The tenant's whole AR ledger (collections queue)
+      description: |
+        Every open BSID item in the tenant, **each row carrying its KUNNR**.
+        Aging, dunning and the collections queue are all derived by the portal
+        from this one response.
+
+        The account travels on the row rather than being looked up per document:
+        an ownership boundary must be one comparison, never a second read.
+      responses:
+        "200":
+          description: The full ledger.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SapRead"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/LedgerOpenItem" }
+
+  /payments/incoming:
+    post:
+      tags: [Accounts receivable]
+      operationId: postIncomingPayment
+      summary: Post and clear an incoming customer payment
+      description: |
+        F-28 equivalent posting with clearing.
+
+        **Idempotent on `gatewayReference`** (BSEG-KIDNO). This is the most
+        important idempotency key in the contract: it is called from a payment
+        webhook that the gateway will retry, and a duplicate posting is real
+        money misapplied. The same reference must return the same FI document
+        number, not post a second one.
+
+        Partial allocation is supported — an item left partly open comes back in
+        `residualItems`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IncomingPaymentInput" }
+      responses:
+        "200":
+          description: Posted, or the prior posting replayed for the same reference.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncomingPaymentResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/Unavailable" }
+
+  /payments/outgoing:
+    post:
+      tags: [Accounts receivable]
+      operationId: postOutgoingPayment
+      summary: Pay out a credit note and clear its FI item
+      description: |
+        F-58 / F-53 outgoing payment with clearing — the AP desk's refund action.
+
+        A **separate endpoint** from `/payments/incoming` rather than a signed
+        amount on it, deliberately: money leaving the tenant and money arriving
+        are different postings, different authorisations, and different mistakes
+        to make. One endpoint that could do either depending on a sign is one
+        typo away from moving money the wrong way.
+
+        **Idempotent on `reference`**, which the portal derives from the document
+        being paid. Carry `initiatedBy` onto the FI header text (BKPF-BKTXT) —
+        otherwise SAP records the portal's technical user as the creator and the
+        only fact worth auditing here is lost.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OutgoingPaymentInput" }
+      responses:
+        "200":
+          description: Paid, or the prior posting replayed for the same reference.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OutgoingPaymentResult" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+# ============================================================== components ====
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Per-tenant shared secret. The portal stores it encrypted and sends it on
+        every request. Swap for OAuth 2.0 client credentials or mTLS if the
+        tenant's security policy requires it — the portal holds credentials as
+        an opaque map, so a different scheme is a configuration change on both
+        sides, not a code change.
+
+  parameters:
+    Kunnr:
+      name: kunnr
+      in: path
+      required: true
+      description: KNA1-KUNNR, the sold-to account.
+      schema: { type: string, maxLength: 10 }
+    Vbeln:
+      name: vbeln
+      in: path
+      required: true
+      description: SAP document number.
+      schema: { type: string, maxLength: 10 }
+    Material:
+      name: material
+      in: path
+      required: true
+      description: MARA-MATNR.
+      schema: { type: string, maxLength: 40 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Fallback idempotency key for writes that have no natural business key.
+        Where a body field is documented as the key (`gatewayReference`,
+        `reference`, `customerPoRef`), that field wins.
+      schema: { type: string, maxLength: 128 }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: |
+        The record does not exist. Also the correct answer when it exists but
+        belongs to another account — never confirm that another customer's data
+        exists.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: SAP rejected the payload.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unavailable:
+      description: SAP unreachable or timed out. The portal will retry.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    # ---- Envelopes -------------------------------------------------------
+    SapRead:
+      type: object
+      required: [data, freshness, syncedAt]
+      description: |
+        The wrapper around **every read** in this contract.
+
+        The portal renders freshness to the user through a sync indicator, so it
+        must be reported honestly rather than hard-coded to `live`. A response
+        served from your own cache while SAP was unreachable is `stale`, and
+        `syncedAt` must then be when the data was **originally** read from SAP —
+        not now. That timestamp is the whole point: it is what lets the portal
+        tell a user "this is 40 minutes old" instead of quietly showing an old
+        number as current.
+      properties:
+        data:
+          description: The payload. Shape depends on the endpoint.
+        freshness:
+          type: string
+          enum: [live, cached, stale]
+          description: |
+            `live` — you actually called SAP for this response.
+            `cached` — served from your cache while SAP was healthy.
+            `stale` — served from cache *because* SAP was unreachable.
+        syncedAt:
+          type: string
+          format: date-time
+          description: When the underlying data was read from SAP.
+
+    Error:
+      type: object
+      required: [kind, message]
+      description: |
+        The only error shape this service returns. Never return a raw BAPIRET2
+        structure or an OData error envelope — the portal maps `kind` to
+        user-facing copy and logs the rest.
+      properties:
+        kind:
+          type: string
+          enum: [validation, not_found, authorization, unavailable, not_implemented, unknown]
+        message:
+          type: string
+          description: Plain-English summary, safe to log.
+        sapMessage:
+          type: string
+          description: Raw BAPIRET2-MESSAGE / OData message. Logged and shown on admin screens only.
+        sapMessageId:
+          type: string
+          description: BAPIRET2 ID + NUMBER, e.g. "V1/302".
+          examples: ["V1/302"]
+        field:
+          type: string
+          description: The request field at fault, when determinable.
+        retryable:
+          type: boolean
+          description: True when a retry might succeed. Always true for `unavailable`.
+
+    CanonicalStatus:
+      type: string
+      description: |
+        The portal's status vocabulary. Translate SAP codes into these on this
+        side — the portal has no mapping table and will not gain one.
+
+        Order (VBUK-GBSTK): A→Open, B→PartiallyDelivered, C→Closed.
+        Credit (VBUK-CMGST): A→Open, B→CreditHold, C→Confirmed.
+        Pre-sales (GBSTK on IN/AG): A→Open, B→InProcess, C→Closed.
+        Delivery (VBUK-WBSTK): C→Delivered, B→PartiallyDelivered,
+        A→InTransit/Packed/Picked/Open depending on the PGI events you have.
+
+        There is deliberately no `Expired`. A lapsed quotation stays GBSTK = A
+        and the portal derives expiry from BNDDT.
+      enum:
+        - Draft
+        - Submitted
+        - PendingApproval
+        - Approved
+        - Rejected
+        - Open
+        - Confirmed
+        - CreditHold
+        - InProcess
+        - Picked
+        - Packed
+        - InTransit
+        - Delivered
+        - PartiallyDelivered
+        - Invoiced
+        - Overdue
+        - Paid
+        - Cleared
+        - Disputed
+        - Resolved
+        - Closed
+
+    SapConnectionHealth:
+      type: object
+      required: [reachable, driver, circuit, checkedAt]
+      properties:
+        reachable: { type: boolean }
+        driver:
+          type: string
+          enum: [mock, ecc, s4]
+          description: Which backend this service is talking to.
+        circuit:
+          type: string
+          enum: [closed, open, half-open]
+          description: Circuit-breaker state. `closed` means healthy.
+        checkedAt: { type: string, format: date-time }
+
+    # ---- Customer --------------------------------------------------------
+    CanonicalAddress:
+      type: object
+      required: [street, city, region, postalCode, country]
+      properties:
+        street: { type: string, description: KNA1-STRAS }
+        city: { type: string, description: KNA1-ORT01 }
+        region:
+          type: string
+          description: KNA1-REGIO (T005S). Drives GST place of supply, so it is required.
+        postalCode: { type: string, description: KNA1-PSTLZ }
+        country: { type: string, description: KNA1-LAND1, examples: ["IN"] }
+
+    CanonicalContact:
+      type: object
+      required: [contactPerson, email, phone]
+      properties:
+        contactPerson: { type: string, description: KNA1-ANSPK }
+        email:
+          type: string
+          format: email
+          description: ADR6-SMTP_ADDR. Also the portal login id.
+        phone: { type: string, description: KNA1-TELF1 }
+
+    CanonicalTaxIds:
+      type: object
+      required: [pan, gstin]
+      properties:
+        pan: { type: string, description: KNA1-STCD3 }
+        gstin: { type: string, description: KNA1-STCD2 }
+        gstRegistrationType: { type: string, description: J_1IMOCUST-J_1IGSTIN_REGTP }
+        cin: { type: string, description: KNA1-STCD1 }
+        tan: { type: string, description: KNA1-STCD4 }
+        udyam: { type: string, description: KNA1-STCD5 }
+
+    CanonicalCustomer:
+      type: object
+      required: [legalEntityName, customerType, address, contact, tax]
+      properties:
+        kunnr:
+          type: string
+          description: KNA1-KUNNR. Absent when not yet created in SAP.
+        legalEntityName: { type: string, description: KNA1-NAME1 }
+        tradeName: { type: string, description: KNA1-NAME2 }
+        customerType: { type: string, description: "KNA1-KTOKD — the account group." }
+        address: { $ref: "#/components/schemas/CanonicalAddress" }
+        contact: { $ref: "#/components/schemas/CanonicalContact" }
+        tax: { $ref: "#/components/schemas/CanonicalTaxIds" }
+        salesOrg: { type: string, description: KNVV-VKORG }
+        distributionChannel: { type: string, description: KNVV-VTWEG }
+        paymentTerms: { type: string, description: KNVV-ZTERM }
+
+    CustomerPatch:
+      type: object
+      description: |
+        Note what is absent: **no tax identifiers**. PAN and GSTIN are not
+        editable from the portal by design, so this schema has nowhere to put
+        one. Do not extend it.
+      properties:
+        tradeName: { type: string, description: KNA1-NAME2 }
+        address: { $ref: "#/components/schemas/CanonicalAddress" }
+        contact: { $ref: "#/components/schemas/CanonicalContact" }
+
+    CustomerCreateResult:
+      type: object
+      required: [kunnr, customer]
+      properties:
+        kunnr: { type: string }
+        customer:
+          allOf: [{ $ref: "#/components/schemas/CanonicalCustomer" }]
+          description: Echo of what SAP stored, after its own field truncation.
+
+    CustomerUpdateResult:
+      type: object
+      required: [kunnr, customer]
+      properties:
+        kunnr: { type: string }
+        customer:
+          allOf: [{ $ref: "#/components/schemas/CanonicalCustomer" }]
+          description: Echo of what SAP stored after applying the patch.
+
+    ShipToAddress:
+      type: object
+      required: [kunnr, label, address]
+      properties:
+        kunnr: { type: string }
+        label: { type: string, description: Human-readable name for the picker. }
+        address: { $ref: "#/components/schemas/CanonicalAddress" }
+
+    CreditInfo:
+      type: object
+      required: [kunnr, creditLimit, utilized, available, blocked, currency]
+      properties:
+        kunnr: { type: string }
+        creditLimit: { type: number, description: KNKK-KLIMK }
+        utilized: { type: number, description: KNKK-SKFOR — open orders plus open AR }
+        available: { type: number, description: "creditLimit - utilized, computed here" }
+        blocked: { type: boolean, description: KNKK-CTLPC }
+        currency: { type: string, examples: ["INR"] }
+
+    RebateAgreement:
+      type: object
+      required: [agreementNumber, kunnr, description, validFrom, validTo, accruedAmount, currency]
+      properties:
+        agreementNumber: { type: string, description: KONA-KNUMA }
+        kunnr: { type: string }
+        agreementType: { type: string, description: KONA-BOART }
+        description: { type: string }
+        validFrom: { type: string, format: date, description: KONA-BODAT }
+        validTo: { type: string, format: date, description: KONA-BODBE }
+        accruedAmount:
+          type: number
+          description: KONA-KAWRT — accrued to date, not yet settled. SAP's arithmetic.
+        settlementStatus:
+          type: string
+          description: "KONA-BOSTA: B open, C released for settlement, D settled."
+        currency: { type: string }
+
+    RebateSettlementInput:
+      type: object
+      required: [agreementNumber, reference]
+      properties:
+        agreementNumber: { type: string }
+        reference:
+          type: string
+          description: Idempotency key, derived from the agreement. Never freshly generated.
+        initiatedBy: { type: string, description: Carried onto the settlement document. }
+        note: { type: string }
+
+    RebateSettlementResult:
+      type: object
+      required: [agreementNumber, creditMemoRequest, settledAmount, currency, settlementStatus]
+      properties:
+        agreementNumber: { type: string }
+        creditMemoRequest: { type: string, description: VBELN of the B1/B3 document VB(7 creates. }
+        settledAmount: { type: number }
+        currency: { type: string }
+        settlementStatus: { type: string, description: KONA-BOSTA after the settlement run. }
+
+    # ---- Catalogue -------------------------------------------------------
+    Material:
+      type: object
+      required: [material, description, materialGroup, uom, minimumOrderQty]
+      properties:
+        material: { type: string, description: MARA-MATNR }
+        description: { type: string, description: MAKT-MAKTX }
+        materialGroup: { type: string, description: MARA-MATKL }
+        uom: { type: string, description: MARA-MEINS }
+        minimumOrderQty: { type: number, description: MVKE-MINBM }
+        imageUrl: { type: string, format: uri, description: Portal-managed or GOS-linked. }
+        specSheetUrl: { type: string, format: uri }
+
+    StockLevel:
+      type: object
+      required: [material, plant, quantity, uom]
+      properties:
+        material: { type: string }
+        plant: { type: string, description: MARC-WERKS }
+        quantity: { type: number, description: MARD-LABST — free stock. }
+        uom: { type: string }
+        leadTimeDays: { type: integer, description: MARC-WEBAZ }
+
+    CustomerPrice:
+      type: object
+      required: [material, kunnr, quantity, uom, listPrice, netPrice, discountPercent, currency]
+      properties:
+        material: { type: string }
+        kunnr: { type: string }
+        quantity: { type: number, description: The quantity this price was scaled for. }
+        uom: { type: string }
+        listPrice: { type: number, description: "KONP-KBETR, condition PR00." }
+        netPrice: { type: number, description: After K007/K005. Ex-GST. }
+        discountPercent: { type: number }
+        currency: { type: string }
+        conditionRecord: { type: string, description: KONH-KNUMH }
+        validFrom: { type: string, format: date, description: KONH-DATAB }
+        validTo: { type: string, format: date, description: KONH-DATBI }
+
+    # ---- Sales document lines -------------------------------------------
+    SalesDocLine:
+      type: object
+      required: [lineNo, material, quantity, uom, netPrice, netValue]
+      properties:
+        lineNo: { type: integer }
+        material: { type: string, description: VBAP-MATNR }
+        description: { type: string }
+        quantity: { type: number, description: VBAP-KWMENG }
+        uom: { type: string, description: VBAP-VRKME }
+        netPrice: { type: number, description: VBAP-NETPR — ex-GST. }
+        netValue: { type: number, description: Extended net value for the line. }
+        plant: { type: string, description: VBAP-WERKS }
+        confirmedQty: { type: number, description: "VBEP-BMENG, once ATP has run." }
+        confirmedDate: { type: string, format: date, description: VBEP-EDATU }
+
+    RequestedLine:
+      type: object
+      required: [material, quantity, uom]
+      properties:
+        material: { type: string }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        uom: { type: string }
+
+    # ---- Pre-sales -------------------------------------------------------
+    CreateInquiryInput:
+      type: object
+      required: [kunnr, requiredDeliveryDate, lines]
+      properties:
+        kunnr: { type: string }
+        requiredDeliveryDate: { type: string, format: date, description: VBAK-VDATU }
+        validityDays: { type: integer, description: VBAK-ANGDT — how long the quote must stand. }
+        notes: { type: string, description: STXH-TDLINE header sales text. }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: "#/components/schemas/RequestedLine" }
+
+    Inquiry:
+      type: object
+      required: [vbeln, kunnr, createdOn, requiredDeliveryDate, status, lines]
+      properties:
+        vbeln: { type: string, description: VBAK-VBELN }
+        kunnr: { type: string }
+        createdOn: { type: string, format: date, description: VBAK-ERDAT }
+        requiredDeliveryDate: { type: string, format: date }
+        validityDays: { type: integer }
+        notes: { type: string }
+        status: { $ref: "#/components/schemas/CanonicalStatus" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/SalesDocLine" }
+        quotation:
+          type: string
+          description: |
+            VBFA — the quotation raised against this inquiry. Its presence is
+            what "Quotation received" means in the portal.
+
+    InquiryPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Inquiry" }
+        total: { type: integer }
+
+    CreateQuotationInput:
+      type: object
+      required: [inquiryVbeln, validUntil]
+      properties:
+        inquiryVbeln: { type: string, description: Becomes VBAK-VGBEL on the quotation. }
+        validUntil: { type: string, format: date, description: VBAK-BNDDT }
+        lines:
+          type: array
+          description: Per-line net price. Omitted lines are priced from condition records.
+          items:
+            type: object
+            required: [lineNo, netPrice]
+            properties:
+              lineNo: { type: integer }
+              netPrice: { type: number }
+
+    Quotation:
+      type: object
+      required:
+        [
+          vbeln,
+          kunnr,
+          createdOn,
+          validUntil,
+          status,
+          lines,
+          netValue,
+          cgst,
+          sgst,
+          igst,
+          grossValue,
+          currency,
+        ]
+      properties:
+        vbeln: { type: string, description: VBAK-VBELN }
+        kunnr: { type: string }
+        createdOn: { type: string, format: date, description: VBAK-ERDAT }
+        validUntil:
+          type: string
+          format: date
+          description: |
+            VBAK-BNDDT. The portal derives expiry from this, inclusive of the
+            last day. Accuracy matters — it is what blocks acceptance.
+        inquiry: { type: string, description: "VBAK-VGBEL, when it answers one." }
+        status: { $ref: "#/components/schemas/CanonicalStatus" }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/SalesDocLine" }
+        taxCode: { type: string, description: VBAP-MWSK1 }
+        netValue: { type: number, description: VBAK-NETWR — net of tax. }
+        cgst: { type: number, description: KONV-KBETR for JOCG. }
+        sgst: { type: number, description: KONV-KBETR for JOSG. }
+        igst: { type: number, description: KONV-KBETR for JOIG. }
+        grossValue: { type: number, description: "Net plus tax, as SAP computed it." }
+        currency: { type: string }
+        salesOrder: { type: string, description: "The order this became, once accepted." }
+        revisionRequests:
+          type: array
+          items:
+            type: object
+            required: [requestedOn, comment]
+            properties:
+              requestedOn: { type: string, format: date-time }
+              comment: { type: string }
+
+    QuotationPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Quotation" }
+        total: { type: integer }
+
+    ConvertQuotationInput:
+      type: object
+      required: [quotationVbeln, shipTo]
+      properties:
+        quotationVbeln: { type: string }
+        customerPoRef: { type: string, description: VBKD-BSTNK for the resulting order. }
+        requestedDeliveryDate:
+          type: string
+          format: date
+          description: VBAK-VDATU. Defaults to the quotation's own required date.
+        shipTo: { type: string, description: VBPA-KUNNR partner SH. }
+
+    # ---- Sales orders ----------------------------------------------------
+    CreateSalesOrderInput:
+      type: object
+      required: [kunnr, requestedDeliveryDate, shipTo, lines]
+      properties:
+        kunnr: { type: string }
+        customerPoRef:
+          type: string
+          description: VBKD-BSTNK. Also the idempotency key when present.
+        requestedDeliveryDate: { type: string, format: date, description: VBAK-VDATU }
+        shipTo: { type: string, description: "VBPA-KUNNR, partner function SH." }
+        paymentTerms: { type: string, description: VBKD-ZTERM }
+        incoterms: { type: string, description: VBKD-INCO1 }
+        deliveryPriority: { type: string, description: VBAK-LPRIO }
+        referenceQuotation: { type: string, description: Set when converting a quotation. }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            allOf:
+              - $ref: "#/components/schemas/RequestedLine"
+              - type: object
+                properties:
+                  netPrice:
+                    type: number
+                    description: Optional. Omit to price from condition records.
+
+    SalesOrderResult:
+      type: object
+      required: [vbeln, orderStatus, creditStatus, lines, netValue, currency]
+      properties:
+        vbeln: { type: string, description: VBAK-VBELN }
+        orderStatus: { $ref: "#/components/schemas/CanonicalStatus" }
+        creditStatus:
+          allOf: [{ $ref: "#/components/schemas/CanonicalStatus" }]
+          description: "`CreditHold` here is a normal outcome, not a failure."
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/SalesDocLine" }
+        netValue: { type: number }
+        currency: { type: string }
+
+    OrderSimulation:
+      type: object
+      required: [lines, netValue, currency, creditBlockExpected]
+      properties:
+        lines:
+          type: array
+          items:
+            type: object
+            required: [lineNo, material, requestedQty, confirmedQty, confirmedDate, partial]
+            properties:
+              lineNo: { type: integer }
+              material: { type: string }
+              requestedQty: { type: number }
+              confirmedQty: { type: number }
+              confirmedDate: { type: string, format: date }
+              partial:
+                type: boolean
+                description: True when SAP could not confirm the full requested quantity.
+        netValue: { type: number }
+        currency: { type: string }
+        creditBlockExpected:
+          type: boolean
+          description: Would this order breach the credit limit if submitted?
+
+    OrderStatusView:
+      type: object
+      required: [vbeln, kunnr, createdOn, orderStatus, creditStatus, lines, netValue, currency]
+      properties:
+        vbeln: { type: string }
+        kunnr:
+          type: string
+          description: |
+            Required. The portal compares this to the signed-in account and
+            answers 404 on a mismatch.
+        createdOn: { type: string, format: date, description: VBAK-ERDAT }
+        customerPoRef: { type: string }
+        orderStatus:
+          allOf: [{ $ref: "#/components/schemas/CanonicalStatus" }]
+          description: From VBUK-GBSTK.
+        creditStatus:
+          allOf: [{ $ref: "#/components/schemas/CanonicalStatus" }]
+          description: From VBUK-CMGST.
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/SalesDocLine" }
+        netValue: { type: number }
+        currency: { type: string }
+        confirmationPdfUrl: { type: string, format: uri, description: NAST/BA00 output. }
+        rejectionReason: { type: string, description: "VBAP-ABGRU text, when cancelled." }
+
+    OrderPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OrderStatusView" }
+        total: { type: integer }
+
+    CreditReleaseInput:
+      type: object
+      required: [vbeln]
+      properties:
+        vbeln: { type: string }
+        initiatedBy: { type: string }
+        note: { type: string }
+
+    CreditReleaseResult:
+      type: object
+      required: [vbeln, released, creditStatus]
+      properties:
+        vbeln: { type: string }
+        released:
+          type: boolean
+          description: False when the re-run credit check still holds the order.
+        creditStatus:
+          allOf: [{ $ref: "#/components/schemas/CanonicalStatus" }]
+          description: VBUK-CMGST as it stands after the re-check.
+        reason: { type: string, description: "Why it is still held, when it is." }
+
+    # ---- Delivery --------------------------------------------------------
+    Delivery:
+      type: object
+      required: [vbeln, salesOrder, kunnr, status, lines]
+      properties:
+        vbeln: { type: string, description: LIKP-VBELN }
+        salesOrder: { type: string, description: LIKP-VGBEL }
+        kunnr:
+          type: string
+          description: |
+            LIKP-KUNAG. Required, and carried on the document itself — it is the
+            ownership boundary, and a check needing a second SAP read fails open
+            when SAP is slow.
+        status:
+          allOf: [{ $ref: "#/components/schemas/CanonicalStatus" }]
+          description: From VBUK-WBSTK plus PGI events where available.
+        plannedGoodsIssue: { type: string, format: date, description: LIKP-WADAT }
+        actualGoodsIssue: { type: string, format: date, description: LIKP-WADAT_IST }
+        carrier: { type: string, description: LIKP-TDLNR }
+        trackingNumber: { type: string, description: LIKP-TRAID }
+        ewayBillNumber:
+          type: string
+          description: J_1IEXCHDR-J_1IEWB_NO. Mandatory above Rs 50,000.
+        podConfirmed: { type: boolean, description: LIKP-KOQUK. SAP owns this flag. }
+        podReceiptDate: { type: string, format: date }
+        lines:
+          type: array
+          items: { $ref: "#/components/schemas/SalesDocLine" }
+
+    DeliveryPage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Delivery" }
+        total: { type: integer }
+
+    ConfirmPodInput:
+      type: object
+      required: [deliveryVbeln, receiptDate, lines]
+      properties:
+        deliveryVbeln: { type: string }
+        receiptDate: { type: string, format: date, description: When the goods were received. }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [lineNo, receivedQty]
+            properties:
+              lineNo: { type: integer }
+              receivedQty:
+                type: number
+                description: LIPS-LFIMG as received. May differ from dispatched.
+
+    ConfirmPodResult:
+      type: object
+      required: [deliveryVbeln, status, discrepancy]
+      properties:
+        deliveryVbeln: { type: string }
+        status: { $ref: "#/components/schemas/CanonicalStatus" }
+        discrepancy:
+          type: boolean
+          description: True when SAP recorded a quantity difference on at least one line.
+
+    # ---- Billing ---------------------------------------------------------
+    Invoice:
+      type: object
+      required:
+        [
+          vbeln,
+          billingDate,
+          kunnr,
+          taxableAmount,
+          cgst,
+          sgst,
+          igst,
+          grossAmount,
+          currency,
+          dueDate,
+          status,
+        ]
+      properties:
+        vbeln: { type: string, description: VBRK-VBELN }
+        billingDate: { type: string, format: date, description: VBRK-FKDAT }
+        reference: { type: string, description: VBRP-VGBEL — preceding delivery or order. }
+        kunnr: { type: string }
+        billingType:
+          type: string
+          description: |
+            VBRK-FKART. F2 invoice, G2 credit note, L2 debit note. The portal
+            excludes notes from the invoice list and gives them their own screen,
+            so this must be accurate.
+          examples: ["F2"]
+        reasonCode: { type: string, description: VBRP-MGAGR — why a note was raised. }
+        taxableAmount: { type: number, description: VBRP-NETWR — ex-GST. }
+        cgst: { type: number, description: KONV-KBETR JOCG. Zero on inter-state. }
+        sgst: { type: number, description: KONV-KBETR JOSG. Zero on inter-state. }
+        igst: { type: number, description: KONV-KBETR JOIG. Zero on intra-state. }
+        grossAmount: { type: number }
+        currency: { type: string }
+        dueDate: { type: string, format: date, description: BSID-ZFBDT plus terms. }
+        status: { $ref: "#/components/schemas/CanonicalStatus" }
+        irn: { type: string, maxLength: 64, description: J_1IEXCHDR-J_1I_IRN }
+        pdfUrl: { type: string, format: uri }
+
+    InvoicePage:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Invoice" }
+        total: { type: integer }
+
+    # ---- Accounts receivable --------------------------------------------
+    OpenItem:
+      type: object
+      required:
+        [documentNumber, documentType, postingDate, dueDate, amount, openAmount, currency, status]
+      properties:
+        documentNumber: { type: string, description: BSID-BELNR }
+        documentType:
+          type: string
+          description: "BKPF-BLART: RV invoice, DZ payment, G2 credit note."
+        postingDate: { type: string, format: date, description: BKPF-BUDAT }
+        dueDate: { type: string, format: date }
+        amount: { type: number, description: BSID-DMBTR }
+        openAmount: { type: number, description: Still outstanding after any partial clearing. }
+        currency: { type: string }
+        status: { $ref: "#/components/schemas/CanonicalStatus" }
+        clearingDocument: { type: string, description: "BSEG-AUGBL, set once cleared." }
+
+    LedgerOpenItem:
+      allOf:
+        - $ref: "#/components/schemas/OpenItem"
+        - type: object
+          required: [kunnr]
+          properties:
+            kunnr:
+              type: string
+              description: |
+                BSID-KUNNR. Required on the tenant-wide ledger only. The
+                customer-scoped read omits it because the account is already the
+                path parameter.
+
+    IncomingPaymentInput:
+      type: object
+      required: [kunnr, amount, currency, gatewayReference, allocations]
+      properties:
+        kunnr: { type: string }
+        amount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string }
+        gatewayReference:
+          type: string
+          description: |
+            BSEG-KIDNO. **The idempotency key.** Called from a gateway webhook
+            that retries, so the same reference must never post twice.
+        allocations:
+          type: array
+          minItems: 1
+          description: Which open items to clear, and how much to apply to each.
+          items:
+            type: object
+            required: [documentNumber, amount]
+            properties:
+              documentNumber: { type: string }
+              amount: { type: number, exclusiveMinimum: 0 }
+
+    IncomingPaymentResult:
+      type: object
+      required: [documentNumber, clearedItems, residualItems]
+      properties:
+        documentNumber: { type: string, description: The FI document the posting created. }
+        clearedItems:
+          type: array
+          items: { type: string }
+        residualItems:
+          type: array
+          description: Items left partially open after allocation.
+          items: { type: string }
+
+    OutgoingPaymentInput:
+      type: object
+      required: [kunnr, documentNumber, amount, currency, reference]
+      properties:
+        kunnr: { type: string }
+        documentNumber: { type: string, description: The credit note's FI item (BSID-BELNR). }
+        amount: { type: number, exclusiveMinimum: 0 }
+        currency: { type: string }
+        reference:
+          type: string
+          description: Idempotency key, minted from the document being paid.
+        initiatedBy:
+          type: string
+          description: |
+            Who authorised it. Carry onto BKPF-BKTXT — otherwise SAP records the
+            portal's technical user and the only auditable fact is lost.
+        note: { type: string }
+
+    OutgoingPaymentResult:
+      type: object
+      required: [documentNumber, clearedItems, paidAmount, currency, postingDate]
+      properties:
+        documentNumber: { type: string, description: The FI payment document created. }
+        clearedItems:
+          type: array
+          items: { type: string }
+        paidAmount: { type: number }
+        currency: { type: string }
+        postingDate: { type: string, format: date, description: BKPF-BUDAT }
