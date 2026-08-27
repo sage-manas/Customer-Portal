@@ -4,7 +4,9 @@ import { getSapAdapterForTenant } from "@cc/service-sap";
 import {
   DocumentNumber,
   PageHeader,
+  Pager,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -14,6 +16,7 @@ import { redirect } from "next/navigation";
 
 import { InquiryFilterChips } from "./InquiryFilterChips";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -28,6 +31,7 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const FILTERS: readonly InquiryFilter[] = ["all", "awaiting", "quoted"];
+const PAGE_SIZE = 10;
 
 export default async function InquiriesPage({
   searchParams,
@@ -40,6 +44,8 @@ export default async function InquiriesPage({
   const params = await searchParams;
   const requested = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const filter = FILTERS.find((f) => f === requested) ?? "all";
+  const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
+  const offset = Math.max(0, Number(pageParam ?? 1) - 1) * PAGE_SIZE;
 
   const canCreate = hasPermission(session, "inquiry:create");
 
@@ -58,10 +64,26 @@ export default async function InquiriesPage({
   const sap = await getSapAdapterForTenant(session.tenantId);
   const context = { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId };
 
-  const [result, drafts] = await Promise.all([
-    listInquiries(sap, context, { filter }),
-    countDrafts(session.tenantId, session.kunnr),
-  ]);
+  const read = await safeRead(() =>
+    Promise.all([
+      listInquiries(sap, context, { filter, limit: PAGE_SIZE, offset }),
+      countDrafts(session.tenantId, session.kunnr),
+    ]),
+  );
+
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Inquiries"
+          subtitle={`Price requests raised for account ${session.kunnr}.`}
+        />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const [result, drafts] = read.data;
 
   return (
     <>
@@ -177,6 +199,18 @@ export default async function InquiriesPage({
           </tbody>
         </table>
       </div>
+
+      <Pager
+        total={result.total}
+        pageSize={PAGE_SIZE}
+        offset={offset}
+        hrefFor={(next) =>
+          `/inquiries?${new URLSearchParams({
+            ...(filter !== "all" ? { filter } : {}),
+            page: String(Math.floor(next / PAGE_SIZE) + 1),
+          })}`
+        }
+      />
     </>
   );
 }

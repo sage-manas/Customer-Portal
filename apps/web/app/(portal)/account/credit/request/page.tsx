@@ -1,12 +1,13 @@
 import { hasPermission } from "@cc/domain";
 import { getCreditPosition, listCreditRequests } from "@cc/service-loyalty";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { CreditGauge, PageHeader } from "@cc/ui";
+import { CreditGauge, PageHeader, SapUnavailable } from "@cc/ui";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CreditIncreaseForm } from "./CreditIncreaseForm";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -34,10 +35,23 @@ export default async function RequestCreditIncreasePage() {
   const context = { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId };
   const sap = await getSapAdapterForTenant(session.tenantId);
 
-  const [credit, requests] = await Promise.all([
-    getCreditPosition(sap, context),
-    listCreditRequests(context),
-  ]);
+  const result = await safeRead(() =>
+    Promise.all([getCreditPosition(sap, context), listCreditRequests(context)]),
+  );
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Request a credit limit increase"
+          subtitle="Our credit team reviews this. Your limit changes when they apply it in our system, not when they approve here."
+        />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const [credit, requests] = result.data;
 
   // One open ask per account, enforced in the service. Sending the customer
   // back rather than drawing a form that is going to be refused.

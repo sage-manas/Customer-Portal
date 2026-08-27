@@ -249,7 +249,6 @@ export function PodForm({
 
         <FileUpload
           label="Signed POD"
-          hint="Optional — a photo or scan of the signed delivery note."
           state={
             uploadState === "uploaded"
               ? "uploaded"

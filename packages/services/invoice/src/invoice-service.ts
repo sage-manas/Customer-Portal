@@ -22,6 +22,7 @@ import {
   dueInDays,
   invoiceTax,
   isCreditOrDebitNote,
+  page,
 } from "@cc/domain";
 
 import { InvoiceError } from "./errors";
@@ -146,7 +147,13 @@ function isoToday(now: Date = new Date()): string {
 export async function listInvoices(
   adapter: SapAdapter,
   kunnr: string | undefined,
-  options: { filter?: InvoiceStatusFilter; includeNotes?: boolean; today?: string } = {},
+  options: {
+    filter?: InvoiceStatusFilter;
+    includeNotes?: boolean;
+    today?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<InvoiceListResult> {
   const account = requireKunnr(kunnr);
   const today = options.today ?? isoToday();
@@ -168,9 +175,9 @@ export async function listInvoices(
   const reads = openItems ? [read, openItems] : [read];
 
   return {
-    invoices,
-    // The filtered count, which is what the list's own "n invoices" line
-    // reports — the unfiltered total there would be a lie.
+    invoices: page(invoices, options),
+    // The filtered count, which is what the list's own "n invoices" line and
+    // the pager report — the unfiltered total there would be a lie.
     total: invoices.length,
     aging: openItems ? buildAging(openItems.data, today) : null,
     freshness: leastFresh(reads),

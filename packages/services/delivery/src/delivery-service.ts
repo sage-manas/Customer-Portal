@@ -13,6 +13,7 @@ import {
   deliveryStageIndex,
   ewayBillExpected,
   isPodConfirmable,
+  page,
   podDefaultLines,
   podDiscrepancy,
 } from "@cc/domain";
@@ -48,6 +49,8 @@ export interface DeliveryListItem extends Delivery {
 export interface DeliveryListResult {
   deliveries: DeliveryListItem[];
   total: number;
+  /** Awaiting-POD count across the whole filtered set, not just this page. */
+  awaitingCount: number;
   freshness: FreshnessClass;
   syncedAt: string;
 }
@@ -159,7 +162,7 @@ function decorate(delivery: Delivery): DeliveryListItem {
 export async function listDeliveries(
   adapter: SapAdapter,
   kunnr: string | undefined,
-  options: { filter?: DeliveryStatusFilter } = {},
+  options: { filter?: DeliveryStatusFilter; limit?: number; offset?: number } = {},
 ): Promise<DeliveryListResult> {
   const account = requireKunnr(kunnr);
 
@@ -173,10 +176,12 @@ export async function listDeliveries(
     .sort(byProgressThenDate);
 
   return {
-    deliveries,
+    deliveries: page(deliveries, options),
     // The filtered count, which is what the list's own "n deliveries" line
-    // reports — the unfiltered total there would be a lie.
+    // and the pager report — the unfiltered total there would be a lie.
     total: deliveries.length,
+    // Counted before paging, for the same reason.
+    awaitingCount: deliveries.filter((delivery) => delivery.awaitingPod).length,
     freshness: read.freshness,
     syncedAt: read.syncedAt,
   };

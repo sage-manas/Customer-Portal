@@ -19,6 +19,7 @@ import type {
 import {
   buildO2CTimeline,
   isOrderCancellable,
+  page,
   salesOrderWriteSchema,
   toCreateSalesOrderInput,
 } from "@cc/domain";
@@ -154,7 +155,7 @@ function matchesFilter(order: OrderStatusView, filter: OrderStatusFilter): boole
 export async function listOrders(
   adapter: SapAdapter,
   kunnr: string | undefined,
-  options: { filter?: OrderStatusFilter } = {},
+  options: { filter?: OrderStatusFilter; limit?: number; offset?: number } = {},
 ): Promise<OrderListResult> {
   const account = requireKunnr(kunnr);
 
@@ -165,9 +166,10 @@ export async function listOrders(
   const orders = read.data.items.filter((order) => matchesFilter(order, options.filter ?? "all"));
 
   return {
-    orders,
+    orders: page(orders, options),
     // The total is the filtered count: it drives the list's own "n orders"
-    // line, and reporting the unfiltered total there would be a lie.
+    // line and the pager's "1–10 of 34", and reporting the unfiltered total
+    // there would be a lie.
     total: orders.length,
     freshness: read.freshness,
     syncedAt: read.syncedAt,

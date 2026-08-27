@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import * as React from "react";
 
 import { useCart } from "./CartProvider";
+import { navLink } from "./NavLink";
 import { NotificationBellClient } from "./NotificationBellClient";
 
 /**
@@ -66,6 +67,7 @@ export function AppShellClient({
     <AppShell
       navItems={navItems}
       pathname={pathname}
+      renderNavLink={navLink}
       tenantName={tenantName}
       tenantLogoUrl={tenantLogoUrl}
       userEmail={userEmail}

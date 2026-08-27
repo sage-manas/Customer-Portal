@@ -5,6 +5,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   TierProgress,
 } from "@cc/ui";
@@ -12,6 +13,7 @@ import { redirect } from "next/navigation";
 
 import { AccountTabs } from "../AccountTabs";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -46,11 +48,24 @@ export default async function LoyaltyPage() {
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const loyalty = await getLoyaltyPosition(sap, {
-    tenantId: session.tenantId,
-    kunnr: session.kunnr,
-    userId: session.userId,
-  });
+  const result = await safeRead(() =>
+    getLoyaltyPosition(sap, {
+      tenantId: session.tenantId,
+      kunnr: session.kunnr,
+      userId: session.userId,
+    }),
+  );
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title="Account" subtitle={`Loyalty standing for account ${session.kunnr}.`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const loyalty = result.data;
 
   return (
     <>

@@ -1,13 +1,14 @@
 import { hasPermission } from "@cc/domain";
 import { getCustomerAccount, isCustomerError } from "@cc/service-customer";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader, SapSyncIndicator, formatDisplayDate } from "@cc/ui";
+import { PageHeader, SapSyncIndicator, SapUnavailable, formatDisplayDate } from "@cc/ui";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { AccessPanel } from "./AccessPanel";
 import { CustomerEditPanel } from "./CustomerEditPanel";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -30,13 +31,32 @@ export default async function CustomerDetailPage({
   const { kunnr } = await params;
   const sap = await getSapAdapterForTenant(session.tenantId);
 
-  const detail = await getCustomerAccount(session.tenantId, kunnr, sap).catch((error: unknown) => {
-    // A customer of another tenant lands here as `not_found` — the service
-    // never distinguishes it from one that does not exist.
-    if (isCustomerError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getCustomerAccount(session.tenantId, kunnr, sap).catch((error: unknown) => {
+      // A customer of another tenant lands here as `not_found` — the service
+      // never distinguishes it from one that does not exist.
+      if (isCustomerError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader
+          title={`Customer ${kunnr}`}
+          actions={
+            <Link href="/admin/customers" className="text-[12.5px] text-primary hover:underline">
+              ← All customers
+            </Link>
+          }
+        />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const { summary, customer } = detail;
   const canEdit = hasPermission(session, "customer:edit");
 

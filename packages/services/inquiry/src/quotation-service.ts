@@ -9,6 +9,7 @@ import type {
 } from "@cc/domain";
 import {
   canRequestQuotationRevision,
+  page,
   quotationAcceptBlock,
   quotationTax,
   quotationValidity,
@@ -44,6 +45,8 @@ export interface QuotationView {
 export interface QuotationListResult {
   quotations: QuotationView[];
   total: number;
+  /** Expiring-soon count across the whole filtered set, not just this page. */
+  expiringCount: number;
   freshness: FreshnessClass;
   syncedAt: string;
 }
@@ -91,7 +94,7 @@ function matchesFilter(view: QuotationView, filter: QuotationFilter): boolean {
 export async function listQuotations(
   adapter: SapAdapter,
   context: InquiryContext,
-  options: { filter?: QuotationFilter; now?: Date } = {},
+  options: { filter?: QuotationFilter; now?: Date; limit?: number; offset?: number } = {},
 ): Promise<QuotationListResult> {
   const account = requireAccount(context);
   const now = options.now ?? new Date();
@@ -109,8 +112,13 @@ export async function listQuotations(
     .sort((a, b) => sortKey(a) - sortKey(b));
 
   return {
-    quotations,
+    quotations: page(quotations, options),
     total: quotations.length,
+    // Counted before paging: "3 expiring" is a fact about the filtered set,
+    // not about the page the customer happens to be on.
+    expiringCount: quotations.filter(
+      (view) => view.acceptBlock === null && view.validity.state === "expiring",
+    ).length,
     freshness: read.freshness,
     syncedAt: read.syncedAt,
   };

@@ -1,7 +1,6 @@
 "use client";
 
 import type { StockAvailability } from "@cc/domain";
-import { Package } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "../lib/cn";
@@ -13,7 +12,7 @@ import { QtyStepper } from "./QtyStepper";
 import { StockChip, StockChipSkeleton } from "./StockChip";
 
 /**
- * Catalogue product card (docs/05-UI-UX-DESIGN.md §7.2): image, MATNR in
+ * Catalogue product card (docs/05-UI-UX-DESIGN.md §7.2): MATNR in
  * mono, MAKTX, **customer-specific price** labelled "your price", stock
  * chip, MEINS, qty stepper and Add to Cart.
  *
@@ -33,7 +32,6 @@ export interface ProductCardProps {
   /** MVKE-MINBM — seeds and steps the quantity control. */
   minimumOrderQty: number;
   href: string;
-  imageUrl?: string;
 
   /** VK13 net price, ex-GST. Undefined while loading, null when unpriced. */
   price?: number | null;
@@ -58,7 +56,6 @@ export function ProductCard({
   uom,
   minimumOrderQty,
   href,
-  imageUrl,
   price,
   listPrice,
   availability,
@@ -81,20 +78,6 @@ export function ProductCard({
         className,
       )}
     >
-      <a
-        href={href}
-        className="flex h-32 items-center justify-center bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-      >
-        {imageUrl ? (
-          // Portal-managed asset (GOS-linked), not a SAP field. Plain <img>
-          // rather than next/image: @cc/ui may not depend on Next (it is
-          // consumed by Storybook too), and `apps -> ui` is one-directional.
-          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <Package aria-hidden className="size-8 text-text-dim" strokeWidth={1.5} />
-        )}
-      </a>
-
       <div className="flex flex-1 flex-col gap-2 p-3.5">
         <div>
           <p className="font-mono text-[11px] tracking-tight text-text-dim">{material}</p>

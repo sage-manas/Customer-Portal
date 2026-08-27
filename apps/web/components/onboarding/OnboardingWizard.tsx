@@ -323,7 +323,6 @@ function DocumentsStep({
             key={kind}
             label={field.label}
             required={field.required === "M"}
-            hint={field.notes}
             state={uploading === kind ? "uploading" : uploaded ? "uploaded" : "empty"}
             file={
               uploaded ? { fileName: uploaded.fileName, sizeBytes: uploaded.sizeBytes } : undefined

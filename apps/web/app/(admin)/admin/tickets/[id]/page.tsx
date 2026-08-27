@@ -11,6 +11,7 @@ import {
   DocumentNumber,
   formatDisplayDate,
   PageHeader,
+  SapUnavailable,
   SlaChip,
   StatusBadge,
   TicketTimeline,
@@ -20,6 +21,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { AgentPanel } from "./AgentPanel";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -46,13 +48,25 @@ export default async function AdminTicketPage({ params }: { params: Promise<{ id
 
   const { id } = await params;
 
-  const ticket = await getTicketForAgent(
-    { tenantId: session.tenantId, userId: session.userId },
-    id,
-  ).catch((error: unknown) => {
-    if (isSupportError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getTicketForAgent({ tenantId: session.tenantId, userId: session.userId }, id).catch(
+      (error: unknown) => {
+        if (isSupportError(error) && error.code === "not_found") notFound();
+        throw error;
+      },
+    ),
+  );
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Ticket ${id}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const ticket = result.data;
 
   const transitions = availableTicketTransitions(ticket.status, "agent").map((transition) => ({
     to: transition.to,

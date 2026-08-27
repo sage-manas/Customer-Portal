@@ -4,6 +4,36 @@ ADR-style log for decisions made when a doc was ambiguous or silent. One entry p
 
 ---
 
+## ADR-066: An unreachable SAP degrades the screen; anything else reaches the error boundary
+
+**Context:** doc 05 P7 requires a screen to stay browsable when an upstream read fails, but every portal page awaited its service read directly, so one unreachable adapter took the whole route down — and there was no `error.tsx` to catch it either.
+
+**Decision:** two different mechanisms for two different things. `apps/web/lib/safe-read.ts` wraps the _expected_ failure — matched structurally on `code === "upstream_unavailable"` or a 502/503, the contract every `@cc/service-*` error class shares — and the page renders `SapUnavailable` in place of its data, with the shell, the nav and every other module untouched. Everything else still throws and reaches `error.tsx` (route group and admin) via `RouteError`, plus a dependency-free `global-error.tsx` for the root layout Next's segment boundaries cannot cover. `RouteError` deliberately does not print `error.message`: Next replaces Server Component messages with a placeholder in production, so the digest is the only thing that correlates to a log.
+
+**Consequence:** swallowing a genuine defect as "SAP is down" is how a defect survives to production, so the narrow match is the point, not an implementation detail. `loading.tsx` (`PageSkeleton`, and a grid-shaped one for the catalogue) completes the set.
+
+---
+
+## ADR-065: Lists page after filtering, and `total` stays the filtered count
+
+**Context:** the customer-facing lists (orders, invoices, deliveries, inquiries, quotations, tickets) rendered every row a KUNNR had. Adding a pager needed a rule for what `total` means, and for where the window is applied relative to the filter.
+
+**Decision:** `limit`/`offset` are optional options on each `list*` service, the window is applied **after** filtering, and `total` remains the _filtered_ count — so the list's own "n orders" line and the pager's "1–10 of 34" are the same number, which is the invariant those services' existing comments already asserted. The slice lives in one `page()` helper in `@cc/domain` rather than copied into five services. Counts a screen shows about the whole set (`awaitingCount`, `expiringCount`) are computed before the window: "3 expiring" is a fact about the filtered set, not about the page you happen to be on. Support is the exception in mechanism only — it owns its rows, so it pages in the Prisma query and takes `total` from the grouped counts it already read.
+
+**Consequence:** every non-paginated caller passes no `limit` and is unaffected. `Pager` in `@cc/ui` emits an `href` per page rather than an `onClick`, so a page is a real shareable URL and works before hydration.
+
+---
+
+## ADR-064: The design system stays framework-free — the sidebar asks for a link instead of importing one
+
+**Context:** the frontend refresh makes sidebar navigation a client transition (`next/link`, with `useLinkStatus` marking the item you just clicked) instead of a document load. `Sidebar` and `AppShell` live in `@cc/ui`, which has no Next dependency and is rendered by Storybook as well as by two Next apps — `ProductCard`'s own comment already recorded that constraint. Importing `next/link` there would have made the design system unrenderable outside Next to buy one app a router.
+
+**Decision:** `Sidebar` takes an optional `renderLink` (threaded through `AppShell` as `renderNavLink`) and defaults to a plain `<a>`; `NavItemContent` is exported so the app's link renders the same insides. `apps/web/components/NavLink.tsx` supplies the `next/link` version, and the pending indicator lives in a child component because `useLinkStatus` only reports its nearest ancestor `<Link>`. Planned modules bypass the seam entirely — they are never routed to.
+
+**Consequence:** Storybook and any future non-Next consumer still render the shell, `apps -> ui` stays one-directional, and the router lives in the app that has one. `apps/ops` gets client-side nav by passing the same renderer whenever it wants it, with no change to `@cc/ui`.
+
+---
+
 ## ADR-063: A service error that no route helper maps is a 500 wearing a 404's clothes — and the role E2E is what found it
 
 **Context:** the Phase 7 role spec asserted that a client admin asking for another tenant's KUNNR gets a 404. It got a 500. `CustomerError` carries `status: 404` and its own file says "so `toAdminErrorResponse` maps it the way it maps the rest" — but neither `toAdminErrorResponse` nor `toPortalErrorResponse` had a branch for it, so every `/api/admin/customers/*` failure and every `assertCustomerCanOrder` refusal (a deactivated account placing an order — ADR-057's whole point) fell through to `throw error` and came back as a 500.

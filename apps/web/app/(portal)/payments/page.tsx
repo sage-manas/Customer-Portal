@@ -8,6 +8,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -17,6 +18,7 @@ import { redirect } from "next/navigation";
 
 import { StatementFilters } from "./StatementFilters";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -67,14 +69,22 @@ export default async function PaymentsPage({
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const pending = await listPendingSync(session.tenantId, session.kunnr);
-  const result = await getStatement(
-    sap,
-    session.kunnr,
-    { from, to, docTypes },
-    { pendingCount: pending.length },
+  const kunnr = session.kunnr;
+  const pending = await listPendingSync(session.tenantId, kunnr);
+  const statementRead = await safeRead(() =>
+    getStatement(sap, kunnr, { from, to, docTypes }, { pendingCount: pending.length }),
   );
 
+  if (!statementRead.ok) {
+    return (
+      <>
+        <PageHeader title="Payments" subtitle={`Account statement for ${kunnr}.`} />
+        <SapUnavailable reason={statementRead.reason} />
+      </>
+    );
+  }
+
+  const result = statementRead.data;
   const { statement, aging } = result;
 
   return (

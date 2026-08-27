@@ -6,6 +6,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -14,6 +15,7 @@ import { CreditCard, Headphones, Package, Receipt } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -45,8 +47,20 @@ export default async function DashboardPage() {
     );
   }
 
+  const kunnr = session.kunnr;
   const adapter = await getSapAdapterForTenant(session.tenantId);
-  const summary = await getDashboardSummary(adapter, session.kunnr);
+  const result = await safeRead(() => getDashboardSummary(adapter, kunnr));
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title="Dashboard" subtitle="Your order-to-cash position at a glance." />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const summary = result.data;
   const { kpis } = summary;
   const utilisation = kpis.credit?.creditLimit
     ? Math.round((kpis.credit.utilized / kpis.credit.creditLimit) * 100)

@@ -5,12 +5,14 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   formatDisplayDate,
 } from "@cc/ui";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -41,8 +43,20 @@ export default async function PriceListPage() {
     );
   }
 
+  const kunnr = session.kunnr;
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const list = await getPriceList(sap, session.kunnr);
+  const result = await safeRead(() => getPriceList(sap, kunnr));
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title="Price list" />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const list = result.data;
 
   return (
     <>

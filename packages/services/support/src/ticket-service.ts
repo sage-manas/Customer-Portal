@@ -83,7 +83,7 @@ const FILTER_STATUSES: Record<TicketListFilter, TicketStatus[] | null> = {
  */
 export async function listTickets(
   context: SupportContext,
-  options: { filter?: TicketListFilter } = {},
+  options: { filter?: TicketListFilter; limit?: number; offset?: number } = {},
 ): Promise<TicketListResult> {
   const account = requireAccount(context);
   const filter = options.filter ?? "all";
@@ -97,6 +97,9 @@ export async function listTickets(
           ...(statuses ? { status: { in: statuses } } : {}),
         },
         orderBy: { updatedAt: "desc" },
+        // Paged in the query rather than after it: unlike the SAP-backed
+        // lists, this one owns its rows and can ask Postgres for a window.
+        ...(options.limit === undefined ? {} : { skip: options.offset ?? 0, take: options.limit }),
         select: TICKET_LIST_SELECT,
       }),
       db.supportTicket.groupBy({
@@ -108,10 +111,14 @@ export async function listTickets(
   );
 
   const now = new Date();
+  const counts = countsByFilter(grouped);
   return {
     tickets: rows.map((row) => toSummary(row, now)),
-    total: rows.length,
-    counts: countsByFilter(grouped),
+    // The filtered count, taken from the grouped counts rather than from
+    // `rows` — with a page window applied those are no longer the same
+    // number, and the pager needs the one that isn't the page size.
+    total: counts[filter],
+    counts,
   };
 }
 

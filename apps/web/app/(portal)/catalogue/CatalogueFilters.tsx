@@ -1,9 +1,11 @@
 "use client";
 
-import { Button, Input, Select } from "@cc/ui";
-import { Search, X } from "lucide-react";
+import { Button, Select } from "@cc/ui";
+import { X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
+
+import { MaterialSearchBox } from "./MaterialSearchBox";
 
 /**
  * Catalogue filter rail (docs/05 §7.2: search MATNR/MAKTX, category MATKL,
@@ -33,14 +35,14 @@ export function CatalogueFilters({
 }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [draft, setDraft] = React.useState(search ?? "");
-
-  React.useEffect(() => setDraft(search ?? ""), [search]);
 
   const apply = (key: string, value: string | undefined) => {
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
     else next.delete(key);
+    // A changed filter yields a different result set, so the old page number
+    // is meaningless — and often out of range.
+    next.delete("page");
     router.push(`/catalogue?${next.toString()}`);
   };
 
@@ -48,26 +50,8 @@ export function CatalogueFilters({
 
   return (
     <section className="flex flex-wrap items-end gap-3 rounded-md border border-border bg-surface p-3.5 shadow-sm">
-      <form
-        className="flex min-w-64 flex-1 items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          apply("q", draft.trim() || undefined);
-        }}
-      >
-        <label className="flex-1">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-dim">
-            Search
-          </span>
-          <Input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Material code or description"
-          />
-        </label>
-        <Button type="submit" variant="secondary" aria-label="Search catalogue">
-          <Search aria-hidden className="size-3.5" />
-        </Button>
+      <form className="flex min-w-64 flex-1" onSubmit={(event) => event.preventDefault()}>
+        <MaterialSearchBox search={search} onSubmit={(value) => apply("q", value)} />
       </form>
 
       <label className="w-44">

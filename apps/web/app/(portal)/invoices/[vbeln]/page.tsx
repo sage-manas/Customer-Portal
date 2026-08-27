@@ -8,6 +8,7 @@ import {
   O2CTimeline,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -17,6 +18,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { InvoiceActions } from "./InvoiceActions";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -45,13 +47,25 @@ export default async function InvoiceDetailPage({
   const { vbeln } = await params;
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const detail = await getInvoice(sap, session.kunnr, vbeln).catch((error: unknown) => {
-    // Another customer's invoice and one that never existed give the same
-    // answer, deliberately (CLAUDE.md rule 5).
-    if (isInvoiceError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getInvoice(sap, session.kunnr, vbeln).catch((error: unknown) => {
+      // Another customer's invoice and one that never existed give the same
+      // answer, deliberately (CLAUDE.md rule 5).
+      if (isInvoiceError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Invoice ${vbeln}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const { invoice, tax } = detail;
   const isNote = invoice.billingType === "G2" || invoice.billingType === "L2";
   const noun = isNote ? (invoice.billingType === "G2" ? "Credit note" : "Debit note") : "Invoice";

@@ -4,7 +4,9 @@ import {
   DocumentNumber,
   Money,
   PageHeader,
+  Pager,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   ValidityChip,
   formatDisplayDate,
@@ -14,6 +16,7 @@ import { redirect } from "next/navigation";
 
 import { QuotationFilterChips } from "./QuotationFilterChips";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -30,6 +33,7 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const FILTERS: readonly QuotationFilter[] = ["all", "open", "expiring", "expired", "converted"];
+const PAGE_SIZE = 10;
 
 export default async function QuotationsPage({
   searchParams,
@@ -42,6 +46,8 @@ export default async function QuotationsPage({
   const params = await searchParams;
   const requested = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const filter = FILTERS.find((f) => f === requested) ?? "all";
+  const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
+  const offset = Math.max(0, Number(pageParam ?? 1) - 1) * PAGE_SIZE;
 
   if (!session.kunnr) {
     return (
@@ -56,15 +62,29 @@ export default async function QuotationsPage({
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const result = await listQuotations(
-    sap,
-    { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
-    { filter },
+  const read = await safeRead(() =>
+    listQuotations(
+      sap,
+      { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
+      { filter, limit: PAGE_SIZE, offset },
+    ),
   );
 
-  const expiring = result.quotations.filter(
-    (view) => view.acceptBlock === null && view.validity.state === "expiring",
-  ).length;
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Quotations"
+          subtitle={`Prices we've offered account ${session.kunnr}.`}
+        />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const result = read.data;
+
+  const expiring = result.expiringCount;
 
   return (
     <>
@@ -174,6 +194,18 @@ export default async function QuotationsPage({
           </tbody>
         </table>
       </div>
+
+      <Pager
+        total={result.total}
+        pageSize={PAGE_SIZE}
+        offset={offset}
+        hrefFor={(next) =>
+          `/quotations?${new URLSearchParams({
+            ...(filter !== "all" ? { filter } : {}),
+            page: String(Math.floor(next / PAGE_SIZE) + 1),
+          })}`
+        }
+      />
     </>
   );
 }

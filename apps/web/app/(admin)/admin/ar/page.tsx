@@ -16,6 +16,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -26,6 +27,7 @@ import { redirect } from "next/navigation";
 import { DeskActionButton } from "../ap/DeskActionButton";
 import { WorkspaceTabs, resolveTab } from "../WorkspaceTabs";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -77,11 +79,32 @@ export default async function AccountsReceivablePage({
 
   const sap = await getSapAdapterForTenant(session.tenantId);
 
-  const register = tab === "register" ? await listInvoiceRegister(sap) : null;
-  const ledger = tab === "ledger" ? await getTenantLedger(sap) : null;
+  const registerResult = tab === "register" ? await safeRead(() => listInvoiceRegister(sap)) : null;
+  const ledgerResult = tab === "ledger" ? await safeRead(() => getTenantLedger(sap)) : null;
   const receipts = tab === "receipts" ? await listPaymentsReceived(session.tenantId) : null;
-  const blocked = tab === "credit" ? await listCreditBlockedOrders(sap) : null;
-  const dunning = tab === "dunning" ? await listDunningCandidates(sap) : null;
+  const blockedResult =
+    tab === "credit" ? await safeRead(() => listCreditBlockedOrders(sap)) : null;
+  const dunningResult = tab === "dunning" ? await safeRead(() => listDunningCandidates(sap)) : null;
+
+  const failedResult = [registerResult, ledgerResult, blockedResult, dunningResult].find(
+    (r) => r && !r.ok,
+  );
+  if (failedResult && !failedResult.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Accounts Receivable"
+          subtitle="Money coming in: what has been billed, what is outstanding, what has been received, and who is worth chasing."
+        />
+        <SapUnavailable reason={failedResult.reason} />
+      </>
+    );
+  }
+
+  const register = registerResult?.ok ? registerResult.data : null;
+  const ledger = ledgerResult?.ok ? ledgerResult.data : null;
+  const blocked = blockedResult?.ok ? blockedResult.data : null;
+  const dunning = dunningResult?.ok ? dunningResult.data : null;
 
   /**
    * The statement is a drill-down of the ledger rather than a tab: it needs

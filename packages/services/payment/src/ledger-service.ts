@@ -36,6 +36,8 @@ export interface TenantLedgerResult {
   /** The same ledger rolled up per account, worst overdue first. */
   customers: CustomerLedgerRow[];
   items: LedgerOpenItem[];
+  /** What the tenant is owed in total — the number above the aging bar. */
+  totalOutstanding: number;
   freshness: FreshnessClass;
   syncedAt: string;
 }
@@ -77,6 +79,7 @@ export async function getTenantLedger(
     aging: buildAging(read.data, today),
     customers: agingByCustomer(read.data, today),
     items: read.data,
+    totalOutstanding: round2(read.data.reduce((sum, item) => sum + item.openAmount, 0)),
     freshness: read.freshness,
     syncedAt: read.syncedAt,
   };

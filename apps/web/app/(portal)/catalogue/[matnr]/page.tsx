@@ -5,6 +5,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StockChip,
   formatDisplayDate,
@@ -14,6 +15,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { AddToCartPanel } from "./AddToCartPanel";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -51,12 +53,25 @@ export default async function ProductDetailPage({
     );
   }
 
+  const kunnr = session.kunnr;
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const detail = await getProductDetail(sap, session.kunnr, material).catch((error: unknown) => {
-    if (isCatalogueError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getProductDetail(sap, kunnr, material).catch((error: unknown) => {
+      if (isCatalogueError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={material} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const record = detail.material;
 
   return (

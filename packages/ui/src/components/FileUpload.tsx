@@ -31,9 +31,8 @@ export interface UploadedFileInfo {
 
 export interface FileUploadProps {
   label: string;
-  /** Renders the red REQ chip and marks the input required. */
+  /** Renders a required-marker asterisk and marks the input required. */
   required?: boolean;
-  hint?: string;
   state?: FileUploadState;
   file?: UploadedFileInfo;
   error?: string;
@@ -48,7 +47,6 @@ export interface FileUploadProps {
 export function FileUpload({
   label,
   required = false,
-  hint,
   state = "empty",
   file,
   error,
@@ -88,12 +86,8 @@ export function FileUpload({
       <div className="flex items-center justify-between">
         <label htmlFor={inputId} className="text-[11.5px] font-medium text-text-mid">
           {label}
+          {required ? <span className="ml-0.5 text-danger">*</span> : null}
         </label>
-        {required ? (
-          <span className="rounded-pill border border-danger-border bg-danger-subtle px-1.5 py-0.5 text-[9px] font-medium text-danger">
-            REQ
-          </span>
-        ) : null}
       </div>
 
       {state === "uploaded" && file ? (
@@ -188,8 +182,6 @@ export function FileUpload({
         <p id={`${inputId}-error`} role="alert" className="text-[10.5px] text-danger">
           {shownError}
         </p>
-      ) : hint ? (
-        <p className="text-[10.5px] text-text-dim">{hint}</p>
       ) : null}
     </div>
   );

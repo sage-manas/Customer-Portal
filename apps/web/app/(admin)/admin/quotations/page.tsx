@@ -1,10 +1,17 @@
 import { listInquiryQueue } from "@cc/service-inquiry";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader, SapSyncIndicator, StaleDataBanner, formatDisplayDate } from "@cc/ui";
+import {
+  PageHeader,
+  SapSyncIndicator,
+  SapUnavailable,
+  StaleDataBanner,
+  formatDisplayDate,
+} from "@cc/ui";
 import { redirect } from "next/navigation";
 
 import { IssueQuotationPanel } from "./IssueQuotationPanel";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -31,7 +38,21 @@ export default async function QuotationWorkbenchPage() {
   if (!session) redirect("/login");
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const queue = await listInquiryQueue(sap);
+  const result = await safeRead(() => listInquiryQueue(sap));
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Quotation Workbench"
+          subtitle="Inquiries nobody has answered yet, longest-waiting first."
+        />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const queue = result.data;
 
   const defaultValidUntil = new Date(Date.now() + DEFAULT_VALIDITY_DAYS * 86_400_000)
     .toISOString()

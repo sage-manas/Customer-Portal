@@ -1,7 +1,7 @@
 "use client";
 
-import { CREDIT_INCREASE_MAX_MULTIPLE, creditIncreaseIssue } from "@cc/domain";
-import { Button, Input, Money, Textarea } from "@cc/ui";
+import { creditIncreaseIssue } from "@cc/domain";
+import { Button, Input, Textarea } from "@cc/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -94,13 +94,8 @@ export function CreditIncreaseForm({ currentLimit }: { currentLimit: number }) {
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           required
-          aria-describedby="amount-hint"
           className="max-w-[16rem] font-mono"
         />
-        <span id="amount-hint" className="text-[11px] text-text-dim">
-          Your limit today is <Money value={currentLimit} className="text-[11px]" />. Ask for more
-          than that, and no more than {CREDIT_INCREASE_MAX_MULTIPLE}× it.
-        </span>
         {localIssue ? <span className="text-[11px] text-danger">{localIssue}</span> : null}
         {issueFor("requestedLimit") ? (
           <span className="text-[11px] text-danger">{issueFor("requestedLimit")}</span>
@@ -118,9 +113,6 @@ export function CreditIncreaseForm({ currentLimit }: { currentLimit: number }) {
           required
           placeholder="New contract, a seasonal peak, a second line coming on stream — whatever will help our credit team decide."
         />
-        <span className="text-[11px] text-text-dim tabular-nums">
-          {justification.trim().length}/{JUSTIFICATION_MAX}
-        </span>
         {issueFor("justification") ? (
           <span className="text-[11px] text-danger">{issueFor("justification")}</span>
         ) : null}

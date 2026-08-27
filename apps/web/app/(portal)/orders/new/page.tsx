@@ -2,12 +2,13 @@ import { hasPermission } from "@cc/domain";
 import { browseCatalogue, getCart } from "@cc/service-catalogue";
 import { getDraft, getOrderFormDefaults, isOrderError } from "@cc/service-order";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader, SapSyncIndicator, StaleDataBanner } from "@cc/ui";
+import { PageHeader, SapSyncIndicator, SapUnavailable, StaleDataBanner } from "@cc/ui";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { CreateOrderForm, type OrderFormSeed } from "./CreateOrderForm";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -51,18 +52,50 @@ export default async function NewOrderPage({
     );
   }
 
+  const kunnr = session.kunnr;
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const [defaults, catalogue] = await Promise.all([
-    getOrderFormDefaults(sap, session.kunnr),
-    browseCatalogue(sap),
-  ]);
+  const defaultsRead = await safeRead(() =>
+    Promise.all([getOrderFormDefaults(sap, kunnr), browseCatalogue(sap)]),
+  );
+
+  if (!defaultsRead.ok) {
+    return (
+      <>
+        <PageHeader title="New order" />
+        <SapUnavailable reason={defaultsRead.reason} />
+      </>
+    );
+  }
+
+  const [defaults, catalogue] = defaultsRead.data;
 
   const draftId = single("draft");
-  const seed: OrderFormSeed = draftId
-    ? await seedFromDraft(session.tenantId, session.kunnr, draftId)
-    : single("from") === "cart"
-      ? await seedFromCart(session.tenantId, session.kunnr, sap)
-      : { header: {}, lines: [] };
+  let seed: OrderFormSeed;
+  if (draftId) {
+    const seedRead = await safeRead(() => seedFromDraft(session.tenantId, kunnr, draftId));
+    if (!seedRead.ok) {
+      return (
+        <>
+          <PageHeader title="New order" />
+          <SapUnavailable reason={seedRead.reason} />
+        </>
+      );
+    }
+    seed = seedRead.data;
+  } else if (single("from") === "cart") {
+    const seedRead = await safeRead(() => seedFromCart(session.tenantId, kunnr, sap));
+    if (!seedRead.ok) {
+      return (
+        <>
+          <PageHeader title="New order" />
+          <SapUnavailable reason={seedRead.reason} />
+        </>
+      );
+    }
+    seed = seedRead.data;
+  } else {
+    seed = { header: {}, lines: [] };
+  }
 
   return (
     <>

@@ -170,6 +170,22 @@ const WEB_ROUTES: readonly ApiRoute[] = [
   },
   {
     plane: "web",
+    path: "/api/catalogue/availability",
+    method: "GET",
+    guard: { kind: "permission", permission: "catalogue:view" },
+    scope: "kunnr",
+    note: 'The same per-card read, batched for one grid page; a back-office session has no KUNNR and gets "no account", as on every other kunnr-scoped read.',
+  },
+  {
+    plane: "web",
+    path: "/api/catalogue/materials/search",
+    method: "GET",
+    guard: { kind: "permission", permission: "catalogue:view" },
+    scope: "none",
+    note: "Match code over the material master, which is tenant-wide and carries no customer data.",
+  },
+  {
+    plane: "web",
     path: "/api/cart",
     method: "GET",
     guard: { kind: "permission", permission: "catalogue:view" },

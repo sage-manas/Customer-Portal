@@ -60,9 +60,6 @@ export function TicketForm({
 
   const issueFor = (field: string) => issues.find((issue) => issue.field === field)?.message;
 
-  const categoryDef = TICKET_CATEGORY_LIST.find((def) => def.key === category);
-  const priorityDef = TICKET_PRIORITY_LIST.find((def) => def.key === priority);
-
   async function upload(file: File) {
     setUploading(true);
     setError(null);
@@ -154,7 +151,6 @@ export function TicketForm({
             </button>
           ))}
         </div>
-        {categoryDef ? <p className="text-[11px] text-text-dim">{categoryDef.hint}</p> : null}
       </fieldset>
 
       <label className="flex flex-col gap-1.5">
@@ -164,9 +160,6 @@ export function TicketForm({
           onChange={(e) => setPriority(e.target.value as TicketPriority)}
           options={TICKET_PRIORITY_LIST.map((def) => ({ value: def.key, label: def.label }))}
         />
-        {/* The SLA hint comes from the registry, so the promise on screen and
-            the clock the ticket is measured against are the same number. */}
-        {priorityDef ? <span className="text-[11px] text-text-dim">{priorityDef.hint}</span> : null}
       </label>
 
       <label className="flex flex-col gap-1.5">
@@ -176,11 +169,7 @@ export function TicketForm({
           onChange={(e) => setSubject(e.target.value)}
           maxLength={SUBJECT_MAX}
           required
-          aria-describedby="subject-hint"
         />
-        <span id="subject-hint" className="text-[11px] text-text-dim tabular-nums">
-          {subject.length}/{SUBJECT_MAX}
-        </span>
         {issueFor("subject") ? (
           <span className="text-[11px] text-danger">{issueFor("subject")}</span>
         ) : null}

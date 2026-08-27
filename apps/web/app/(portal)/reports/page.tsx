@@ -8,6 +8,7 @@ import {
   OrdersByMonthChart,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   TopProductsChart,
 } from "@cc/ui";
@@ -17,6 +18,7 @@ import { redirect } from "next/navigation";
 import { ReportControls } from "./ReportControls";
 import { ReportTabs } from "./ReportTabs";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -64,22 +66,36 @@ export default async function ReportsPage({
     );
   }
 
+  const kunnr = session.kunnr;
   const adapter = await getSapAdapterForTenant(session.tenantId);
 
-  let report;
-  let loadError: string | undefined;
-  try {
-    report = await getSalesReport(
-      adapter,
-      { tenantId: session.tenantId, kunnr: session.kunnr },
-      { period, refresh },
+  const result = await safeRead(async () => {
+    try {
+      const report = await getSalesReport(
+        adapter,
+        { tenantId: session.tenantId, kunnr },
+        { period, refresh },
+      );
+      return { report, loadError: undefined };
+    } catch (error) {
+      // Doc 05 P7: a SAP outage degrades the page, it does not 500 it. The
+      // charts render their error state and say what happened.
+      if (!isReportingError(error)) throw error;
+      return { report: undefined, loadError: error.message };
+    }
+  });
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title="Reports" />
+        <ReportTabs />
+        <SapUnavailable reason={result.reason} />
+      </>
     );
-  } catch (error) {
-    // Doc 05 P7: a SAP outage degrades the page, it does not 500 it. The
-    // charts render their error state and say what happened.
-    if (!isReportingError(error)) throw error;
-    loadError = error.message;
   }
+
+  const { report, loadError } = result.data;
 
   const activePeriod: ReportPeriodKey = report?.data.range.key ?? "last-12-months";
   const kpis = report?.data.kpis;

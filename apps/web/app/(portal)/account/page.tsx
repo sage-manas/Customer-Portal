@@ -7,6 +7,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
 } from "@cc/ui";
@@ -16,6 +17,7 @@ import { redirect } from "next/navigation";
 import { AccountTabs } from "./AccountTabs";
 import { WithdrawRequestButton } from "./WithdrawRequestButton";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -50,10 +52,23 @@ export default async function AccountPage() {
   const context = { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId };
   const sap = await getSapAdapterForTenant(session.tenantId);
 
-  const [credit, requests] = await Promise.all([
-    getCreditPosition(sap, context),
-    listCreditRequests(context),
-  ]);
+  const read = await safeRead(() =>
+    Promise.all([getCreditPosition(sap, context), listCreditRequests(context)]),
+  );
+
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Account"
+          subtitle={`Credit and loyalty standing for account ${session.kunnr}.`}
+        />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const [credit, requests] = read.data;
 
   const canRequest = hasPermission(session, "credit:request");
 
