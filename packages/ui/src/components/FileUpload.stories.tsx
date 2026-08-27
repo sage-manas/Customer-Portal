@@ -11,7 +11,7 @@ export default meta;
 
 type Story = StoryObj<typeof FileUpload>;
 
-export const Empty: Story = { args: { hint: "Must match the GSTIN you entered." } };
+export const Empty: Story = { args: {} };
 
 export const Uploading: Story = { args: { state: "uploading" } };
 
@@ -30,7 +30,7 @@ export const Rejected: Story = {
 };
 
 export const Optional: Story = {
-  args: { label: "Incorporation Certificate", required: false, hint: "Optional." },
+  args: { label: "Incorporation Certificate", required: false },
 };
 
 export const Disabled: Story = { args: { disabled: true } };

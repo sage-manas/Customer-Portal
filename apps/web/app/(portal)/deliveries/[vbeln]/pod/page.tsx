@@ -1,12 +1,13 @@
 import { hasPermission } from "@cc/domain";
 import { getPodFormDefaults, isDeliveryError } from "@cc/service-delivery";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader, SapSyncIndicator, formatDisplayDate } from "@cc/ui";
+import { PageHeader, SapSyncIndicator, SapUnavailable, formatDisplayDate } from "@cc/ui";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { PodForm } from "./PodForm";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -35,14 +36,26 @@ export default async function PodPage({ params }: { params: Promise<{ vbeln: str
   if (!hasPermission(session, "delivery:confirm-receipt")) redirect(`/deliveries/${vbeln}`);
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const defaults = await getPodFormDefaults(sap, session.kunnr, vbeln).catch((error: unknown) => {
-    if (isDeliveryError(error) && error.code === "not_found") notFound();
-    // Not despatched, or already signed for: the shipment screen explains
-    // which, and it is the right place to land.
-    if (isDeliveryError(error) && error.code === "not_allowed") redirect(`/deliveries/${vbeln}`);
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getPodFormDefaults(sap, session.kunnr, vbeln).catch((error: unknown) => {
+      if (isDeliveryError(error) && error.code === "not_found") notFound();
+      // Not despatched, or already signed for: the shipment screen explains
+      // which, and it is the right place to land.
+      if (isDeliveryError(error) && error.code === "not_allowed") redirect(`/deliveries/${vbeln}`);
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title="Confirm receipt" subtitle={`Delivery ${vbeln}.`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const defaults = result.data;
   const { delivery } = defaults;
 
   return (

@@ -214,11 +214,7 @@ export function RaiseInquiryForm({
             />
           </Field>
 
-          <Field
-            label="Quotation validity"
-            hint="How long you need the price to stand for"
-            error={issueFor("validityDays")}
-          >
+          <Field label="Quotation validity" error={issueFor("validityDays")}>
             <Select
               value={validityDays}
               onChange={(event) => setValidityDays(event.target.value)}
@@ -317,9 +313,6 @@ export function RaiseInquiryForm({
           placeholder="Delivery constraints, packing, certifications, the plant it's for…"
           onChange={(event) => setNotes(event.target.value)}
         />
-        <p className="mt-1 text-right text-[11px] text-text-dim tabular-nums">
-          {notes.length} / {NOTES_MAX}
-        </p>
         {issueFor("notes") ? (
           <p className="mt-1 text-[11.5px] text-danger">{issueFor("notes")}</p>
         ) : null}
@@ -383,13 +376,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({
   label,
-  hint,
   required,
   error,
   children,
 }: {
   label: string;
-  hint?: string;
   required?: boolean;
   error?: string;
   children: React.ReactNode;
@@ -401,11 +392,7 @@ function Field({
         {required ? <span className="ml-0.5 text-danger">*</span> : null}
       </span>
       {children}
-      {error ? (
-        <span className="mt-1 block text-[11px] text-danger">{error}</span>
-      ) : hint ? (
-        <span className="mt-1 block text-[11px] text-text-dim">{hint}</span>
-      ) : null}
+      {error ? <span className="mt-1 block text-[11px] text-danger">{error}</span> : null}
     </label>
   );
 }

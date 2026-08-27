@@ -4,5 +4,6 @@ export * from "./navigation";
 export * from "./api-routes";
 export * from "./sap-mapping";
 export * from "./validation";
+export * from "./pagination";
 export * from "./events";
 export * from "./entities";

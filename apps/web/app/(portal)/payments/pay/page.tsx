@@ -1,12 +1,13 @@
 import { hasPermission } from "@cc/domain";
 import { listPayableItems } from "@cc/service-payment";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader, SapSyncIndicator, StaleDataBanner } from "@cc/ui";
+import { PageHeader, SapSyncIndicator, SapUnavailable, StaleDataBanner } from "@cc/ui";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { MakePaymentForm } from "./MakePaymentForm";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -39,7 +40,21 @@ export default async function MakePaymentPage({
   const preselect = Array.isArray(params.invoice) ? params.invoice[0] : params.invoice;
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const payable = await listPayableItems(sap, session.kunnr);
+  const read = await safeRead(() => listPayableItems(sap, session.kunnr));
+
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Make a payment"
+          subtitle="Choose the invoices you want to settle. You can pay part of one."
+        />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const payable = read.data;
 
   return (
     <>

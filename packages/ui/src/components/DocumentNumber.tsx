@@ -30,14 +30,29 @@ export function DocumentNumber({ value, href, onClick, className }: DocumentNumb
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const content = (
-    <span
-      className={cn(
-        "group inline-flex items-center gap-1 font-mono text-[12.5px] text-primary",
-        className,
-      )}
+  // The copy button must be a *sibling* of the link/button, not a
+  // descendant: `<button>` cannot nest inside `<a>` or `<button>` (both are
+  // "interactive content" in the HTML spec), which previously produced a
+  // real hydration mismatch wherever this rendered SSR.
+  const label = <span className="underline-offset-2 group-hover:underline">{value}</span>;
+
+  const trigger = href ? (
+    <a href={href} onClick={onClick} className="font-mono text-[12.5px] text-primary">
+      {label}
+    </a>
+  ) : (
+    <button
+      type="button"
+      onClick={onClick}
+      className="font-mono text-[12.5px] text-primary text-left"
     >
-      <span className="underline-offset-2 group-hover:underline">{value}</span>
+      {label}
+    </button>
+  );
+
+  return (
+    <span className={cn("group inline-flex items-center gap-1", className)}>
+      {trigger}
       <button
         type="button"
         onClick={handleCopy}
@@ -47,19 +62,5 @@ export function DocumentNumber({ value, href, onClick, className }: DocumentNumb
         <Copy size={12} strokeWidth={1.75} />
       </button>
     </span>
-  );
-
-  if (href) {
-    return (
-      <a href={href} onClick={onClick} className="inline-flex">
-        {content}
-      </a>
-    );
-  }
-
-  return (
-    <button type="button" onClick={onClick} className="inline-flex text-left">
-      {content}
-    </button>
   );
 }

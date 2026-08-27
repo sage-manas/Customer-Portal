@@ -1,11 +1,20 @@
 import { hasPermission, TICKET_CATEGORY_DEFS, TICKET_STATUS_DEFS } from "@cc/domain";
 import { listTickets, type TicketListFilter } from "@cc/service-support";
-import { DocumentNumber, formatDisplayDate, PageHeader, SlaChip, StatusBadge } from "@cc/ui";
+import {
+  DocumentNumber,
+  formatDisplayDate,
+  PageHeader,
+  Pager,
+  SapUnavailable,
+  SlaChip,
+  StatusBadge,
+} from "@cc/ui";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { SupportFilterChips } from "./SupportFilterChips";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -19,6 +28,7 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const FILTERS: readonly TicketListFilter[] = ["all", "open", "resolved", "closed"];
+const PAGE_SIZE = 10;
 
 export default async function SupportPage({
   searchParams,
@@ -31,6 +41,8 @@ export default async function SupportPage({
   const params = await searchParams;
   const requested = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const filter = FILTERS.find((f) => f === requested) ?? "all";
+  const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
+  const offset = Math.max(0, Number(pageParam ?? 1) - 1) * PAGE_SIZE;
 
   const canCreate = hasPermission(session, "support:create");
 
@@ -46,10 +58,36 @@ export default async function SupportPage({
     );
   }
 
-  const result = await listTickets(
-    { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
-    { filter },
+  const result = await safeRead(() =>
+    listTickets(
+      { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
+      { filter, limit: PAGE_SIZE, offset },
+    ),
   );
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Support"
+          subtitle={`Queries raised for account ${session.kunnr}.`}
+          actions={
+            canCreate ? (
+              <Link
+                href="/support/new"
+                className="rounded-md bg-primary px-3 py-1.5 text-[12.5px] font-semibold text-white transition-colors duration-micro hover:bg-primary-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                Raise a ticket
+              </Link>
+            ) : null
+          }
+        />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const { tickets, counts, total } = result.data;
 
   return (
     <>
@@ -68,7 +106,7 @@ export default async function SupportPage({
         }
       />
 
-      <SupportFilterChips active={filter} counts={result.counts} />
+      <SupportFilterChips active={filter} counts={counts} />
 
       <div className="overflow-x-auto rounded-md border border-border bg-surface shadow-sm">
         <table className="w-full text-[12.5px]">
@@ -95,7 +133,7 @@ export default async function SupportPage({
             </tr>
           </thead>
           <tbody>
-            {result.tickets.length === 0 ? (
+            {tickets.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-12 text-center">
                   <p className="text-[12.5px] text-text-dim">
@@ -115,7 +153,7 @@ export default async function SupportPage({
                 </td>
               </tr>
             ) : (
-              result.tickets.map((ticket) => (
+              tickets.map((ticket) => (
                 <tr key={ticket.id} className="border-t border-border">
                   <td className="px-4 py-2.5 align-top">
                     <DocumentNumber value={ticket.ticketNo} href={`/support/${ticket.id}`} />
@@ -156,6 +194,18 @@ export default async function SupportPage({
           </tbody>
         </table>
       </div>
+
+      <Pager
+        total={total}
+        pageSize={PAGE_SIZE}
+        offset={offset}
+        hrefFor={(next) =>
+          `/support?${new URLSearchParams({
+            ...(filter !== "all" ? { filter } : {}),
+            page: String(Math.floor(next / PAGE_SIZE) + 1),
+          })}`
+        }
+      />
     </>
   );
 }

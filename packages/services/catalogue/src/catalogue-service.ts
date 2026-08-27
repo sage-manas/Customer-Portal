@@ -170,6 +170,88 @@ export async function browseCatalogue(
 }
 
 /**
+ * The distinct MARA-MATKL values the catalogue contains, for the filter
+ * dropdown.
+ *
+ * A dedicated read rather than a second unfiltered `browseCatalogue` whose
+ * items the screen then throws away: that pass grew with the catalogue and
+ * shipped on every render regardless of what was filtered.
+ */
+export async function listMaterialGroups(adapter: SapAdapter): Promise<string[]> {
+  try {
+    const read = await adapter.getMaterials({});
+    return [...new Set(read.data.items.map((material) => material.materialGroup))].sort();
+  } catch (error) {
+    throw toCatalogueError(error, "the catalogue");
+  }
+}
+
+export interface MaterialSearchHit {
+  material: string;
+  description: string;
+  materialGroup: string;
+  uom: string;
+}
+
+/** Drops the separators buyers leave out: MAT-10001 typed as "mat10001". */
+function normaliseCode(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function matchesSearch(item: Material, query: string): boolean {
+  const q = query.toLowerCase();
+
+  // MATNR: matched anywhere in the number, not just at its start — the same
+  // as an SAP match code on `*10001*`.
+  const needle = normaliseCode(query);
+  if (needle && normaliseCode(item.material).includes(needle)) return true;
+
+  // MAKTX: a hit when any word starts with the query.
+  if (
+    item.description
+      .toLowerCase()
+      .split(/\s+/)
+      .some((word) => word.startsWith(q))
+  ) {
+    return true;
+  }
+
+  // MATKL: same prefix rule as the description.
+  return item.materialGroup.toLowerCase().startsWith(q);
+}
+
+/**
+ * Match-code search over MATNR / MAKTX / MATKL, capped.
+ *
+ * The rules live here rather than in the browser because they *are* the
+ * query: when a driver pushes this down into SAP, `search` becomes a
+ * selection and the shape of the response must not change.
+ */
+export async function searchMaterials(
+  adapter: SapAdapter,
+  term: string,
+  limit = 12,
+): Promise<MaterialSearchHit[]> {
+  const query = term.trim();
+  if (!query) return [];
+
+  try {
+    const read = await adapter.getMaterials({});
+    return read.data.items
+      .filter((item) => matchesSearch(item, query))
+      .slice(0, limit)
+      .map((item) => ({
+        material: item.material,
+        description: item.description,
+        materialGroup: item.materialGroup,
+        uom: item.uom,
+      }));
+  } catch (error) {
+    throw toCatalogueError(error, "the catalogue");
+  }
+}
+
+/**
  * The lazy per-card read: customer price + stock for one material. Called
  * once per visible card, so it fails soft on pricing and hard on nothing
  * else — a card that can't price still renders with "Request quote".
@@ -204,6 +286,40 @@ export async function getMaterialAvailability(
     freshness: leastFresh([stockRead, priced.read]),
     syncedAt: earliestSyncedAt([stockRead, priced.read]),
   };
+}
+
+/**
+ * Batched sibling of `getMaterialAvailability`, for a whole catalogue page.
+ *
+ * One request for the grid instead of one per card: the per-card call
+ * couples the request count to the page size, so a bigger page cost
+ * proportionally more round trips. Each material is still read
+ * independently, so a bad one drops out of the map rather than taking the
+ * page down — the card it belongs to renders unpriced, exactly as it would
+ * have on its own failed request.
+ */
+export async function getMaterialsAvailability(
+  adapter: SapAdapter,
+  kunnr: string,
+  items: ReadonlyArray<{ material: string; quantity?: number }>,
+  plant?: string,
+): Promise<Record<string, MaterialAvailability>> {
+  const entries = await Promise.all(
+    items.map(async ({ material, quantity }) => {
+      try {
+        return [
+          material,
+          await getMaterialAvailability(adapter, kunnr, material, { plant, quantity }),
+        ] as const;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return Object.fromEntries(
+    entries.filter((entry): entry is readonly [string, MaterialAvailability] => entry !== null),
+  );
 }
 
 export async function getProductDetail(

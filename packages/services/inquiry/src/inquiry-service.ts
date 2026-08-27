@@ -1,7 +1,7 @@
 import { isSapError, type FreshnessClass, type SapAdapter } from "@cc/adapter-sap";
 import { recordEvent, runWithTenant } from "@cc/db";
 import type { Inquiry, InquiryInput, Quotation } from "@cc/domain";
-import { inquiryWriteSchema, toCreateInquiryInput } from "@cc/domain";
+import { inquiryWriteSchema, page, toCreateInquiryInput } from "@cc/domain";
 
 import { invalidFrom, InquiryError } from "./errors";
 
@@ -107,7 +107,7 @@ function matchesFilter(inquiry: Inquiry, filter: InquiryFilter): boolean {
 export async function listInquiries(
   adapter: SapAdapter,
   context: InquiryContext,
-  options: { filter?: InquiryFilter } = {},
+  options: { filter?: InquiryFilter; limit?: number; offset?: number } = {},
 ): Promise<InquiryListResult> {
   const account = requireAccount(context);
 
@@ -120,9 +120,9 @@ export async function listInquiries(
     .map((inquiry) => ({ ...inquiry, awaitingQuotation: awaitingQuotation(inquiry) }));
 
   return {
-    inquiries,
-    // The filtered count — the list's own "n inquiries" line reports what it
-    // is showing, and the unfiltered total there would be a lie.
+    inquiries: page(inquiries, options),
+    // The filtered count — the list's own "n inquiries" line and the pager
+    // report what it is showing, and the unfiltered total would be a lie.
     total: inquiries.length,
     freshness: read.freshness,
     syncedAt: read.syncedAt,

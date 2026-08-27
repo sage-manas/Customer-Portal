@@ -1,11 +1,12 @@
 import { hasPermission, paymentModeLabel } from "@cc/domain";
 import { getPayment, isPaymentError } from "@cc/service-payment";
-import { Money, PageHeader, formatDisplayDate } from "@cc/ui";
+import { Money, PageHeader, SapUnavailable, formatDisplayDate } from "@cc/ui";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { CheckoutPanel } from "./CheckoutPanel";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -29,12 +30,24 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
 
   const { id } = await params;
 
-  const payment = await getPayment(session.tenantId, session.kunnr, id).catch((error: unknown) => {
-    // Another account's payment and one that never existed answer the same.
-    if (isPaymentError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getPayment(session.tenantId, session.kunnr, id).catch((error: unknown) => {
+      // Another account's payment and one that never existed answer the same.
+      if (isPaymentError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Payment ${id}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const payment = result.data;
   const canPay = hasPermission(session, "payment:pay");
 
   return (

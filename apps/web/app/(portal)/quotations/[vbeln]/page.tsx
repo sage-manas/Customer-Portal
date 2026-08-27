@@ -6,6 +6,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   ValidityChip,
@@ -16,6 +17,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { QuotationActions } from "./QuotationActions";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -39,11 +41,23 @@ export default async function QuotationPage({ params }: { params: Promise<{ vbel
   const sap = await getSapAdapterForTenant(session.tenantId);
   const context = { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId };
 
-  const detail = await getQuotation(sap, context, vbeln).catch((error: unknown) => {
-    if (isInquiryError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getQuotation(sap, context, vbeln).catch((error: unknown) => {
+      if (isInquiryError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Quotation ${vbeln}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const { quotation, validity, tax, acceptBlock, revisable, inquiry } = detail;
 
   // Only fetched when there is something to accept — the addresses are a

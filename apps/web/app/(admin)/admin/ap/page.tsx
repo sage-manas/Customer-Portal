@@ -8,6 +8,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   formatDisplayDate,
 } from "@cc/ui";
@@ -18,6 +19,7 @@ import { WorkspaceTabs, resolveTab } from "../WorkspaceTabs";
 import { DeskActionButton } from "./DeskActionButton";
 import { ReconciliationTray } from "./ReconciliationTray";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -61,9 +63,36 @@ export default async function AccountsPayablePage({
 
   // Only the view being rendered is read: six registers on every visit would
   // make the cheapest tab pay for the most expensive one.
-  const notes = tab === "notes" ? await listNoteRegister(sap) : null;
-  const refunds = tab === "refunds" ? await listRefundQueue(sap) : null;
-  const rebates = tab === "rebates" ? await listRebateSettlements(sap) : null;
+  let notes: Awaited<ReturnType<typeof listNoteRegister>> | null = null;
+  let refunds: Awaited<ReturnType<typeof listRefundQueue>> | null = null;
+  let rebates: Awaited<ReturnType<typeof listRebateSettlements>> | null = null;
+  let sapUnavailableReason: string | undefined;
+
+  if (tab === "notes") {
+    const result = await safeRead(() => listNoteRegister(sap));
+    if (result.ok) notes = result.data;
+    else sapUnavailableReason = result.reason;
+  } else if (tab === "refunds") {
+    const result = await safeRead(() => listRefundQueue(sap));
+    if (result.ok) refunds = result.data;
+    else sapUnavailableReason = result.reason;
+  } else if (tab === "rebates") {
+    const result = await safeRead(() => listRebateSettlements(sap));
+    if (result.ok) rebates = result.data;
+    else sapUnavailableReason = result.reason;
+  }
+
+  if (sapUnavailableReason) {
+    return (
+      <>
+        <PageHeader
+          title="Accounts Payable"
+          subtitle="Money going out: notes raised, credits owed back, rebates accrued, and what reconciliation couldn't settle."
+        />
+        <SapUnavailable reason={sapUnavailableReason} />
+      </>
+    );
+  }
 
   const read = notes ?? refunds ?? rebates;
 

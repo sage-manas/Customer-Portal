@@ -6,7 +6,9 @@ import {
   DeliveryTracker,
   DocumentNumber,
   PageHeader,
+  Pager,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -16,6 +18,7 @@ import { redirect } from "next/navigation";
 
 import { DeliveryFilterChips } from "./DeliveryFilterChips";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -32,6 +35,7 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const FILTERS: readonly DeliveryStatusFilter[] = ["all", "inTransit", "awaitingPod", "delivered"];
+const PAGE_SIZE = 10;
 
 export default async function DeliveriesPage({
   searchParams,
@@ -44,6 +48,8 @@ export default async function DeliveriesPage({
   const params = await searchParams;
   const requested = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const filter = FILTERS.find((f) => f === requested) ?? "all";
+  const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
+  const offset = Math.max(0, Number(pageParam ?? 1) - 1) * PAGE_SIZE;
 
   const canConfirm = hasPermission(session, "delivery:confirm-receipt");
 
@@ -60,9 +66,23 @@ export default async function DeliveriesPage({
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const result = await listDeliveries(sap, session.kunnr, { filter });
+  const kunnr = session.kunnr;
+  const read = await safeRead(() =>
+    listDeliveries(sap, kunnr, { filter, limit: PAGE_SIZE, offset }),
+  );
 
-  const awaiting = result.deliveries.filter((d) => d.awaitingPod).length;
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader title="Deliveries" />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const result = read.data;
+
+  const awaiting = result.awaitingCount;
 
   return (
     <>
@@ -197,6 +217,18 @@ export default async function DeliveriesPage({
           </tbody>
         </table>
       </div>
+
+      <Pager
+        total={result.total}
+        pageSize={PAGE_SIZE}
+        offset={offset}
+        hrefFor={(next) =>
+          `/deliveries?${new URLSearchParams({
+            ...(filter !== "all" ? { filter } : {}),
+            page: String(Math.floor(next / PAGE_SIZE) + 1),
+          })}`
+        }
+      />
     </>
   );
 }

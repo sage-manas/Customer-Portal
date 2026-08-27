@@ -20,20 +20,19 @@ export const Default: Story = {
   args: { field: legalEntityNameField, placeholder: "As per registration certificate" },
 };
 
-export const SpecMode: Story = {
-  args: { field: gstinField, specMode: true, placeholder: "29AAAAA9999A1Z5" },
+export const Required: Story = {
+  args: { field: gstinField, placeholder: "29AAAAA9999A1Z5" },
 };
 
 export const WithError: Story = {
   args: {
     field: gstinField,
-    specMode: true,
     error: "GSTIN state (29 — Karnataka) doesn't match your billing state (27 — Maharashtra).",
   },
 };
 
-export const CurrencyType: Story = { args: { field: creditLimitField, specMode: true } };
+export const CurrencyType: Story = { args: { field: creditLimitField } };
 
 export const ReadOnly: Story = {
-  args: { field: sapCustomerCodeField, specMode: true, value: "0000123456" },
+  args: { field: sapCustomerCodeField, value: "0000123456" },
 };

@@ -7,6 +7,7 @@ import {
   O2CTimeline,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -17,6 +18,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { OrderActions } from "./OrderActions";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -39,13 +41,25 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ vb
   const { vbeln } = await params;
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const detail = await getOrder(sap, session.kunnr, vbeln).catch((error: unknown) => {
-    // Another customer's order and an order that never existed give the same
-    // answer, deliberately (CLAUDE.md rule 5).
-    if (isOrderError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getOrder(sap, session.kunnr, vbeln).catch((error: unknown) => {
+      // Another customer's order and an order that never existed give the same
+      // answer, deliberately (CLAUDE.md rule 5).
+      if (isOrderError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Order ${vbeln}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const { order } = detail;
   const blocked = order.creditStatus === "CreditHold";
 

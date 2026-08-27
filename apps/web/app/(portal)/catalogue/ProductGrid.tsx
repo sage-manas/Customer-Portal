@@ -9,10 +9,16 @@ import { useCart } from "@/components/CartProvider";
 /**
  * The card grid (docs/05 §7.2).
  *
- * Each card mounts immediately from the material master and then fetches
- * its own price and stock — "Price and stock lazily loaded per card with
- * skeletons (they're per-customer SAP calls)". One request per card is the
- * point: a slow condition record delays its own card, not the grid.
+ * Each card renders immediately from the material master; price and stock
+ * arrive separately with their own skeleton per card. Those reads used to be
+ * one `/availability` request per card (REMEDIATION-PLAN §6) — fine at a
+ * fixed 24-card page, but it coupled to the page size that §4 made a real
+ * variable, so a bigger page meant proportionally more requests.
+ *
+ * Now the grid fires **one** batched request for the whole page on mount and
+ * hands each card its own slice of the result. Cards whose material is
+ * missing from the response (a bad SAP read for just that item) fall back to
+ * `null` pricing rather than blocking the rest of the page.
  */
 
 interface Availability {
@@ -22,6 +28,11 @@ interface Availability {
   quantity: number | null;
   reason?: string;
 }
+
+const AvailabilityContext = React.createContext<{
+  data: Record<string, Availability>;
+  loading: boolean;
+}>({ data: {}, loading: false });
 
 export function ProductGrid({
   materials,
@@ -34,6 +45,72 @@ export function ProductGrid({
   canAddToCart: boolean;
   hasAccount: boolean;
 }) {
+  const [data, setData] = React.useState<Record<string, Availability>>({});
+  const [loading, setLoading] = React.useState(hasAccount && materials.length > 0);
+
+  // The effect's dependency, rather than `materials` itself: the array is a
+  // fresh reference on every render, and what actually decides the request is
+  // which materials and quantities are on the page.
+  const signature = materials.map((m) => `${m.material}:${m.minimumOrderQty}`).join(",");
+
+  React.useEffect(() => {
+    // No sold-to account means no customer-specific price to fetch — the
+    // grid renders without one rather than firing a request that 409s.
+    // `loading`/`data` already default correctly for this case, so there is
+    // nothing to reset here.
+    if (!hasAccount || materials.length === 0) return;
+
+    let cancelled = false;
+
+    const query = new URLSearchParams();
+    for (const material of materials) {
+      query.append("m", `${material.material}:${material.minimumOrderQty}`);
+    }
+    if (plant) query.set("plant", plant);
+
+    fetch(`/api/catalogue/availability?${query}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return (await response.json()) as {
+          availability: Record<
+            string,
+            {
+              price: { netPrice: number; listPrice: number } | null;
+              availability: StockAvailability;
+              quantity: number | null;
+              priceUnavailableReason?: string;
+            }
+          >;
+        };
+      })
+      .then((body) => {
+        if (cancelled) return;
+        const next: Record<string, Availability> = {};
+        for (const [material, entry] of Object.entries(body.availability)) {
+          next[material] = {
+            price: entry.price?.netPrice ?? null,
+            listPrice: entry.price?.listPrice ?? null,
+            availability: entry.availability,
+            quantity: entry.quantity,
+            reason: entry.priceUnavailableReason,
+          };
+        }
+        setData(next);
+      })
+      .catch(() => {
+        // A failed batch read leaves every card browsable and quotable, with
+        // the chip saying stock is unavailable (docs/05 P7).
+        if (!cancelled) setData({});
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [signature, plant, hasAccount]);
+
   if (materials.length === 0) {
     return (
       <section className="rounded-md border border-border bg-surface p-10 text-center shadow-sm">
@@ -46,83 +123,31 @@ export function ProductGrid({
   }
 
   return (
-    <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-      {materials.map((material) => (
-        <LazyProductCard
-          key={material.material}
-          material={material}
-          plant={plant}
-          canAddToCart={canAddToCart}
-          hasAccount={hasAccount}
-        />
-      ))}
-    </section>
+    <AvailabilityContext.Provider value={{ data, loading }}>
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {materials.map((material) => (
+          <PricedProductCard
+            key={material.material}
+            material={material}
+            canAddToCart={canAddToCart}
+          />
+        ))}
+      </section>
+    </AvailabilityContext.Provider>
   );
 }
 
-function LazyProductCard({
+function PricedProductCard({
   material,
-  plant,
   canAddToCart,
-  hasAccount,
 }: {
   material: Material;
-  plant?: string;
   canAddToCart: boolean;
-  hasAccount: boolean;
 }) {
   const { addLine } = useCart();
-  const [data, setData] = React.useState<Availability | null>(null);
-  const [loading, setLoading] = React.useState(hasAccount);
+  const { data, loading } = React.useContext(AvailabilityContext);
   const [adding, setAdding] = React.useState(false);
-
-  React.useEffect(() => {
-    // No sold-to account means no customer-specific price to fetch — the
-    // card renders without one rather than firing a request that 409s.
-    if (!hasAccount) return;
-
-    let cancelled = false;
-    const params = new URLSearchParams({ quantity: String(material.minimumOrderQty) });
-    if (plant) params.set("plant", plant);
-
-    setLoading(true);
-    fetch(
-      `/api/catalogue/materials/${encodeURIComponent(material.material)}/availability?${params}`,
-    )
-      .then(async (response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return (await response.json()) as {
-          availability: {
-            price: { netPrice: number; listPrice: number } | null;
-            availability: StockAvailability;
-            quantity: number | null;
-            priceUnavailableReason?: string;
-          };
-        };
-      })
-      .then((body) => {
-        if (cancelled) return;
-        setData({
-          price: body.availability.price?.netPrice ?? null,
-          listPrice: body.availability.price?.listPrice ?? null,
-          availability: body.availability.availability,
-          quantity: body.availability.quantity,
-          reason: body.availability.priceUnavailableReason,
-        });
-      })
-      .catch(() => {
-        // A failed price/stock read leaves the card browsable and quotable,
-        // with the chip saying stock is unavailable (docs/05 P7).
-        if (!cancelled) setData(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [material.material, material.minimumOrderQty, plant, hasAccount]);
+  const entry = data[material.material];
 
   const addToCart = async (quantity: number) => {
     setAdding(true);
@@ -140,13 +165,12 @@ function LazyProductCard({
       uom={material.uom}
       minimumOrderQty={material.minimumOrderQty}
       href={`/catalogue/${encodeURIComponent(material.material)}`}
-      imageUrl={material.imageUrl}
-      price={loading ? undefined : (data?.price ?? null)}
-      listPrice={data?.listPrice}
-      availability={data?.availability ?? "unknown"}
-      stockQuantity={data?.quantity}
+      price={loading ? undefined : (entry?.price ?? null)}
+      listPrice={entry?.listPrice}
+      availability={entry?.availability ?? "unknown"}
+      stockQuantity={entry?.quantity}
       pricingLoading={loading}
-      priceUnavailableReason={data?.reason}
+      priceUnavailableReason={entry?.reason}
       adding={adding}
       onAddToCart={canAddToCart ? addToCart : undefined}
       onRequestQuote={undefined}

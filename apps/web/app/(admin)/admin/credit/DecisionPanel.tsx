@@ -55,12 +55,15 @@ export function DecisionPanel({
       });
 
       const body = (await response.json().catch(() => null)) as {
-        id?: string;
+        request?: { id?: string };
         error?: string;
         issues?: FieldIssue[];
       } | null;
 
-      if (!response.ok || !body?.id) {
+      // The route returns `{ request }`, not a flat `{ id }` -- checking for
+      // a top-level id here always came back empty, so this reported
+      // failure on every decision even though it had already been recorded.
+      if (!response.ok || !body?.request?.id) {
         setError(body?.error ?? "We couldn't record that decision.");
         setIssues(body?.issues ?? []);
         return;

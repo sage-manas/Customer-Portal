@@ -1,4 +1,4 @@
-import { ADMIN_NAV, visibleNavItems } from "@cc/domain";
+import { ADMIN_NAV, hasPermission, visibleNavItems } from "@cc/domain";
 import { unreadNotificationCount } from "@cc/service-notification";
 import { redirect } from "next/navigation";
 
@@ -15,6 +15,9 @@ import { resolveRequestTenant } from "@/lib/tenant";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session) redirect("/login");
+  // Middleware gates this too; this is the server-render half of the same
+  // rule, and the half that still holds if middleware is ever bypassed.
+  if (!hasPermission(session, "admin:view")) redirect("/403");
 
   const tenant = await resolveRequestTenant();
   const navItems = visibleNavItems(ADMIN_NAV, session, tenant?.moduleToggles);

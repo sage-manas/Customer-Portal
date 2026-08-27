@@ -10,6 +10,7 @@ import {
   O2CTimeline,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -17,6 +18,7 @@ import {
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -44,17 +46,27 @@ export default async function DeliveryDetailPage({
   const { vbeln } = await params;
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const detail = await getDelivery(
-    sap,
-    { tenantId: session.tenantId, kunnr: session.kunnr },
-    vbeln,
-  ).catch((error: unknown) => {
-    // Another customer's delivery and one that never existed give the same
-    // answer, deliberately (CLAUDE.md rule 5).
-    if (isDeliveryError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getDelivery(sap, { tenantId: session.tenantId, kunnr: session.kunnr }, vbeln).catch(
+      (error: unknown) => {
+        // Another customer's delivery and one that never existed give the same
+        // answer, deliberately (CLAUDE.md rule 5).
+        if (isDeliveryError(error) && error.code === "not_found") notFound();
+        throw error;
+      },
+    ),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Delivery ${vbeln}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const { delivery, pod } = detail;
   const canConfirm = hasPermission(session, "delivery:confirm-receipt");
 

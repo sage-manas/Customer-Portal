@@ -2,23 +2,8 @@ import type { SapFieldDef, SapType } from "@cc/domain/sap-mapping";
 import * as React from "react";
 
 import { cn } from "../lib/cn";
-import { Badge } from "../primitives/badge";
 import { Input, type InputProps } from "../primitives/input";
 import { Select, type SelectOption } from "../primitives/select";
-
-const TYPE_CHIP_CLASS: Record<SapType, string> = {
-  CHAR: "border-info-border bg-info-subtle text-info",
-  TEXT: "border-info-border bg-info-subtle text-info",
-  NUMC: "border-success-border bg-success-subtle text-success",
-  CURR: "border-success-border bg-success-subtle text-success",
-  QUAN: "border-success-border bg-success-subtle text-success",
-  UNIT: "border-success-border bg-success-subtle text-success",
-  DATS: "border-warning-border bg-warning-subtle text-warning",
-  FILE: "border-danger-border bg-danger-subtle text-danger",
-  BOOLEAN: "border-border bg-background text-text-mid",
-  STATUS: "border-border bg-background text-text-mid",
-  SELECT: "border-border bg-background text-text-mid",
-};
 
 const HTML_INPUT_TYPE: Partial<Record<SapType, InputProps["type"]>> = {
   DATS: "date",
@@ -30,11 +15,6 @@ const HTML_INPUT_TYPE: Partial<Record<SapType, InputProps["type"]>> = {
 export interface SapFieldProps extends Omit<InputProps, "type" | "id" | "onChange" | "onBlur"> {
   field: SapFieldDef;
   error?: string;
-  /**
-   * Shows the SAP table/field/type/length footer strip. Off by default for
-   * end customers; a tenant admin/dev toggle flips this on (docs/05 §3.2).
-   */
-  specMode?: boolean;
   /**
    * Turns the field into a select. The list belongs to the domain layer
    * (state codes, GST registration types, account groups) — this component
@@ -48,15 +28,13 @@ export interface SapFieldProps extends Omit<InputProps, "type" | "id" | "onChang
 }
 
 /**
- * Wraps any input with its SAP field contract: label + REQ chip, the input
- * itself (type/length derived from the registry), and an optional spec-mode
- * footer showing table/field/type/length. This is the concrete
- * implementation of docs/05 P3 — "every field carries its contract."
+ * Wraps any input with its SAP field contract: label + required asterisk and
+ * the input itself (type/length derived from the registry). This is the
+ * concrete implementation of docs/05 P3 — "every field carries its contract."
  */
 export function SapField({
   field,
   error,
-  specMode = false,
   options,
   placeholder,
   className,
@@ -70,12 +48,8 @@ export function SapField({
       <div className="flex items-center justify-between">
         <label htmlFor={inputId} className="text-[11.5px] font-medium text-text-mid">
           {field.label}
+          {field.required === "M" && <span className="ml-0.5 text-danger">*</span>}
         </label>
-        {field.required === "M" && (
-          <Badge variant="danger" className="text-[9px]">
-            REQ
-          </Badge>
-        )}
       </div>
 
       {options ? (
@@ -110,30 +84,6 @@ export function SapField({
         <p id={`${inputId}-error`} className="text-[10.5px] text-danger">
           {error}
         </p>
-      )}
-      {!error && field.notes && <p className="text-[10.5px] text-text-dim">{field.notes}</p>}
-
-      {specMode && (
-        <div className="flex items-center justify-between border-t border-border pt-1 text-[10px]">
-          <div className="flex items-center gap-1">
-            <span
-              className={cn(
-                "rounded-sm border px-1 py-0.5 font-mono",
-                TYPE_CHIP_CLASS[field.sapType],
-              )}
-            >
-              {field.sapType}
-            </span>
-            {field.length !== undefined && (
-              <span className="rounded-sm border border-border px-1 py-0.5 font-mono text-text-dim">
-                LEN {field.length}
-              </span>
-            )}
-          </div>
-          <span className="font-mono text-text-dim">
-            {field.sapTable}-{field.sapField}
-          </span>
-        </div>
       )}
     </div>
   );

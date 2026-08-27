@@ -7,7 +7,9 @@ import {
   DocumentNumber,
   Money,
   PageHeader,
+  Pager,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -17,6 +19,7 @@ import { redirect } from "next/navigation";
 
 import { InvoiceFilterChips } from "./InvoiceFilterChips";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -36,6 +39,7 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const FILTERS: readonly InvoiceStatusFilter[] = ["all", "open", "overdue", "paid"];
+const PAGE_SIZE = 10;
 
 export default async function InvoicesPage({
   searchParams,
@@ -48,6 +52,8 @@ export default async function InvoicesPage({
   const params = await searchParams;
   const requested = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const filter = FILTERS.find((f) => f === requested) ?? "all";
+  const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
+  const offset = Math.max(0, Number(pageParam ?? 1) - 1) * PAGE_SIZE;
 
   const canPay = hasPermission(session, "payment:pay");
 
@@ -64,7 +70,20 @@ export default async function InvoicesPage({
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const result = await listInvoices(sap, session.kunnr, { filter });
+  const read = await safeRead(() =>
+    listInvoices(sap, session.kunnr, { filter, limit: PAGE_SIZE, offset }),
+  );
+
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader title="Invoices" subtitle={`Billing documents for account ${session.kunnr}.`} />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const result = read.data;
 
   return (
     <>
@@ -188,6 +207,18 @@ export default async function InvoicesPage({
           </tbody>
         </table>
       </div>
+
+      <Pager
+        total={result.total}
+        pageSize={PAGE_SIZE}
+        offset={offset}
+        hrefFor={(next) =>
+          `/invoices?${new URLSearchParams({
+            ...(filter !== "all" ? { filter } : {}),
+            page: String(Math.floor(next / PAGE_SIZE) + 1),
+          })}`
+        }
+      />
 
       <p className="text-[11.5px] text-text-dim">
         GST is calculated by SAP on the invoice. Amounts here are exactly as billed.

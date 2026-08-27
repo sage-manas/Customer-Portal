@@ -1,13 +1,14 @@
 import { hasPermission } from "@cc/domain";
 import { getArSummary, isReportingError } from "@cc/service-reporting";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { Money, PageHeader, SapSyncIndicator, StaleDataBanner } from "@cc/ui";
+import { Money, PageHeader, SapSyncIndicator, SapUnavailable, StaleDataBanner } from "@cc/ui";
 import { redirect } from "next/navigation";
 
 import { ReportTabs } from "../ReportTabs";
 
 import { ArBucketDrilldown } from "./ArBucketDrilldown";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -52,20 +53,37 @@ export default async function ArSummaryPage({
     );
   }
 
+  const kunnr = session.kunnr;
   const adapter = await getSapAdapterForTenant(session.tenantId);
 
-  let summary;
-  let loadError: string | undefined;
-  try {
-    summary = await getArSummary(
-      adapter,
-      { tenantId: session.tenantId, kunnr: session.kunnr },
-      { refresh },
+  const result = await safeRead(async () => {
+    try {
+      const summary = await getArSummary(
+        adapter,
+        { tenantId: session.tenantId, kunnr },
+        { refresh },
+      );
+      return { summary, loadError: undefined };
+    } catch (error) {
+      if (!isReportingError(error)) throw error;
+      return { summary: undefined, loadError: error.message };
+    }
+  });
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Reports"
+          subtitle={`Receivables position for account ${session.kunnr}.`}
+        />
+        <ReportTabs />
+        <SapUnavailable reason={result.reason} />
+      </>
     );
-  } catch (error) {
-    if (!isReportingError(error)) throw error;
-    loadError = error.message;
   }
+
+  const { summary, loadError } = result.data;
 
   return (
     <>

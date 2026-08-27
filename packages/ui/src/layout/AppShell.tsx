@@ -5,7 +5,7 @@ import * as React from "react";
 
 import { cn } from "../lib/cn";
 
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type SidebarProps } from "./Sidebar";
 import { TopBar, type TopBarProps } from "./TopBar";
 
 /**
@@ -28,6 +28,8 @@ export interface AppShellProps extends TopBarProps {
   children: React.ReactNode;
   /** Rendered above the page content — e.g. the SAP stale-data banner. */
   banner?: React.ReactNode;
+  /** Passed straight to `Sidebar` — see its `renderLink`. */
+  renderNavLink?: SidebarProps["renderLink"];
   contentClassName?: string;
 }
 
@@ -36,6 +38,7 @@ export function AppShell({
   pathname,
   children,
   banner,
+  renderNavLink,
   contentClassName,
   ...topBar
 }: AppShellProps) {
@@ -74,6 +77,7 @@ export function AppShell({
           pathname={pathname}
           collapsed={collapsed}
           onToggleCollapsed={toggle}
+          renderLink={renderNavLink}
           className="hidden md:flex"
         />
         <main className={cn("min-w-0 flex-1 overflow-y-auto", contentClassName)}>

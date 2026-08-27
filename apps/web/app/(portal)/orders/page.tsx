@@ -6,7 +6,9 @@ import {
   DocumentNumber,
   Money,
   PageHeader,
+  Pager,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -16,6 +18,7 @@ import { redirect } from "next/navigation";
 
 import { OrderFilterChips } from "./OrderFilterChips";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -34,6 +37,7 @@ import { getSession } from "@/lib/session";
 export const dynamic = "force-dynamic";
 
 const FILTERS: readonly OrderStatusFilter[] = ["all", "open", "creditHold", "completed"];
+const PAGE_SIZE = 10;
 
 export default async function OrdersPage({
   searchParams,
@@ -46,6 +50,8 @@ export default async function OrdersPage({
   const params = await searchParams;
   const requested = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const filter = FILTERS.find((f) => f === requested) ?? "all";
+  const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
+  const offset = Math.max(0, Number(pageParam ?? 1) - 1) * PAGE_SIZE;
 
   const canCreate = hasPermission(session, "order:create");
 
@@ -62,10 +68,26 @@ export default async function OrdersPage({
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const [result, drafts] = await Promise.all([
-    listOrders(sap, session.kunnr, { filter }),
-    listDrafts(session.tenantId, session.kunnr),
-  ]);
+  const read = await safeRead(() =>
+    Promise.all([
+      listOrders(sap, session.kunnr, { filter, limit: PAGE_SIZE, offset }),
+      listDrafts(session.tenantId, session.kunnr),
+    ]),
+  );
+
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Orders"
+          subtitle={`Everything you've placed on account ${session.kunnr}.`}
+        />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const [result, drafts] = read.data;
 
   return (
     <>
@@ -185,6 +207,18 @@ export default async function OrdersPage({
           </tbody>
         </table>
       </div>
+
+      <Pager
+        total={result.total}
+        pageSize={PAGE_SIZE}
+        offset={offset}
+        hrefFor={(next) =>
+          `/orders?${new URLSearchParams({
+            ...(filter !== "all" ? { filter } : {}),
+            page: String(Math.floor(next / PAGE_SIZE) + 1),
+          })}`
+        }
+      />
     </>
   );
 }

@@ -13,6 +13,7 @@ import {
   DocumentNumber,
   formatDisplayDate,
   PageHeader,
+  SapUnavailable,
   SlaChip,
   StatusBadge,
   TicketTimeline,
@@ -22,6 +23,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { TicketActions } from "./TicketActions";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -53,13 +55,26 @@ export default async function TicketPage({ params }: { params: Promise<{ id: str
 
   const { id } = await params;
 
-  const ticket = await getTicket(
-    { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
-    id,
-  ).catch((error: unknown) => {
-    if (isSupportError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getTicket(
+      { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
+      id,
+    ).catch((error: unknown) => {
+      if (isSupportError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title="Support" />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const ticket = result.data;
 
   const canAct = hasPermission(session, "support:create");
 

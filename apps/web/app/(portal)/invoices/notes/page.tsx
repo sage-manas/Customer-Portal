@@ -5,6 +5,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -12,6 +13,7 @@ import {
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -42,7 +44,21 @@ export default async function CreditDebitNotesPage() {
   }
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const result = await listCreditDebitNotes(sap, session.kunnr);
+  const read = await safeRead(() => listCreditDebitNotes(sap, session.kunnr));
+
+  if (!read.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Credit & debit notes"
+          subtitle="Adjustments raised against your invoices."
+        />
+        <SapUnavailable reason={read.reason} />
+      </>
+    );
+  }
+
+  const result = read.data;
 
   return (
     <>

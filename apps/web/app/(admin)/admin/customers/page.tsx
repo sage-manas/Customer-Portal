@@ -1,10 +1,11 @@
 import { hasPermission } from "@cc/domain";
 import { listCustomerAccounts } from "@cc/service-customer";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader, SapSyncIndicator, formatDisplayDate } from "@cc/ui";
+import { PageHeader, SapSyncIndicator, SapUnavailable, formatDisplayDate } from "@cc/ui";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -39,10 +40,34 @@ export default async function CustomersPage({
   const active = FILTERS.find((filter) => filter.label === params.status) ?? FILTERS[0]!;
 
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const read = await listCustomerAccounts(session.tenantId, sap, {
-    status: active.status,
-    search: params.q,
-  });
+  const result = await safeRead(() =>
+    listCustomerAccounts(session.tenantId, sap, {
+      status: active.status,
+      search: params.q,
+    }),
+  );
+
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader
+          title="Customers"
+          subtitle="The accounts registered on your portal. Names and tax details come from SAP; portal access is yours to grant and withdraw."
+          actions={
+            <Link
+              href="/admin/customers/new"
+              className="rounded-md bg-primary px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-primary-dark"
+            >
+              Register customer
+            </Link>
+          }
+        />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const read = result.data;
   const customers = read.data;
 
   return (

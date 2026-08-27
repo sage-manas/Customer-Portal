@@ -273,11 +273,7 @@ export function CreateOrderForm({
       {/* --- Header (docs/03 Screen 4.1) ---------------------------------- */}
       <Section title="Header">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field
-            label="Your PO reference"
-            hint="Printed on the confirmation"
-            error={issueFor("customerPoRef")}
-          >
+          <Field label="Your PO reference" error={issueFor("customerPoRef")}>
             <Input
               value={customerPoRef}
               maxLength={20}
@@ -427,7 +423,7 @@ export function CreateOrderForm({
       {/* --- Terms -------------------------------------------------------- */}
       <Section title="Terms">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Payment terms" hint="From your account's agreed terms">
+          <Field label="Payment terms">
             <Input
               value={paymentTerms}
               maxLength={4}
@@ -544,13 +540,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Field({
   label,
-  hint,
   required,
   error,
   children,
 }: {
   label: string;
-  hint?: string;
   required?: boolean;
   error?: string;
   children: React.ReactNode;
@@ -562,11 +556,7 @@ function Field({
         {required ? <span className="ml-0.5 text-danger">*</span> : null}
       </span>
       {children}
-      {error ? (
-        <span className="mt-1 block text-[11px] text-danger">{error}</span>
-      ) : hint ? (
-        <span className="mt-1 block text-[11px] text-text-dim">{hint}</span>
-      ) : null}
+      {error ? <span className="mt-1 block text-[11px] text-danger">{error}</span> : null}
     </label>
   );
 }

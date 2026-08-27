@@ -2,12 +2,13 @@ import { hasPermission } from "@cc/domain";
 import { browseCatalogue } from "@cc/service-catalogue";
 import { getDraft, isInquiryError, listDrafts } from "@cc/service-inquiry";
 import { getSapAdapterForTenant } from "@cc/service-sap";
-import { PageHeader } from "@cc/ui";
+import { PageHeader, SapUnavailable } from "@cc/ui";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { RaiseInquiryForm, type InquiryFormSeed } from "./RaiseInquiryForm";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -47,15 +48,37 @@ export default async function NewInquiryPage({
     );
   }
 
+  const kunnr = session.kunnr;
   const sap = await getSapAdapterForTenant(session.tenantId);
-  const [catalogue, drafts] = await Promise.all([
-    browseCatalogue(sap),
-    listDrafts(session.tenantId, session.kunnr),
-  ]);
+  const listRead = await safeRead(() =>
+    Promise.all([browseCatalogue(sap), listDrafts(session.tenantId, kunnr)]),
+  );
 
-  const seed: InquiryFormSeed = requested
-    ? await seedFromDraft(session.tenantId, session.kunnr, requested)
-    : { header: {}, lines: [] };
+  if (!listRead.ok) {
+    return (
+      <>
+        <PageHeader title="New inquiry" />
+        <SapUnavailable reason={listRead.reason} />
+      </>
+    );
+  }
+
+  const [catalogue, drafts] = listRead.data;
+
+  const seedRead = requested
+    ? await safeRead(() => seedFromDraft(session.tenantId, kunnr, requested))
+    : null;
+
+  if (seedRead && !seedRead.ok) {
+    return (
+      <>
+        <PageHeader title="New inquiry" />
+        <SapUnavailable reason={seedRead.reason} />
+      </>
+    );
+  }
+
+  const seed: InquiryFormSeed = seedRead ? seedRead.data : { header: {}, lines: [] };
 
   const resumable = requested ? [] : drafts;
 

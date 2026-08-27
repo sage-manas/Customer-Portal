@@ -5,6 +5,7 @@ import {
   Money,
   PageHeader,
   SapSyncIndicator,
+  SapUnavailable,
   StaleDataBanner,
   StatusBadge,
   formatDisplayDate,
@@ -12,6 +13,7 @@ import {
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { safeRead } from "@/lib/safe-read";
 import { getSession } from "@/lib/session";
 
 /**
@@ -32,15 +34,27 @@ export default async function InquiryPage({ params }: { params: Promise<{ vbeln:
   const { vbeln } = await params;
   const sap = await getSapAdapterForTenant(session.tenantId);
 
-  const detail = await getInquiry(
-    sap,
-    { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
-    vbeln,
-  ).catch((error: unknown) => {
-    if (isInquiryError(error) && error.code === "not_found") notFound();
-    throw error;
-  });
+  const result = await safeRead(() =>
+    getInquiry(
+      sap,
+      { tenantId: session.tenantId, kunnr: session.kunnr, userId: session.userId },
+      vbeln,
+    ).catch((error: unknown) => {
+      if (isInquiryError(error) && error.code === "not_found") notFound();
+      throw error;
+    }),
+  );
 
+  if (!result.ok) {
+    return (
+      <>
+        <PageHeader title={`Inquiry ${vbeln}`} />
+        <SapUnavailable reason={result.reason} />
+      </>
+    );
+  }
+
+  const detail = result.data;
   const { inquiry, quotation } = detail;
 
   return (

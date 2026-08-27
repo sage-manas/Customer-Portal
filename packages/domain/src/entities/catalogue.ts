@@ -15,7 +15,6 @@ export interface Material {
   /** MVKE-MINBM — minimum order quantity */
   minimumOrderQty: number;
   /** Portal-managed asset, GOS-linked (not a SAP field). */
-  imageUrl?: string;
   specSheetUrl?: string;
 }
 
