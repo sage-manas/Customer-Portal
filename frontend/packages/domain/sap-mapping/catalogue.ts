@@ -1,0 +1,122 @@
+import type { SapFieldDef } from "./types";
+
+/**
+ * Module 2 — Product Catalogue.
+ * Source: docs/03-FUNCTIONAL-SPEC.md, Screens 2.1-2.2.
+ */
+export const catalogueMapping: readonly SapFieldDef[] = [
+  // Screen 2.1 — Browse Catalogue
+  {
+    portalField: "material",
+    label: "Material Code",
+    sapTable: "MARA",
+    sapField: "MATNR",
+    sapType: "CHAR",
+    length: 18,
+    required: "R",
+  },
+  {
+    portalField: "description",
+    label: "Description",
+    sapTable: "MAKT",
+    sapField: "MAKTX",
+    sapType: "CHAR",
+    length: 40,
+    required: "R",
+  },
+  {
+    portalField: "materialGroup",
+    label: "Material Group",
+    sapTable: "MARA",
+    sapField: "MATKL",
+    sapType: "CHAR",
+    length: 9,
+    required: "O",
+    notes: "T023; catalogue filter",
+  },
+  {
+    portalField: "plant",
+    label: "Plant",
+    sapTable: "MARC",
+    sapField: "WERKS",
+    sapType: "CHAR",
+    length: 4,
+    required: "O",
+    notes: "Catalogue filter; also scopes the stock read",
+  },
+  {
+    portalField: "listPrice",
+    label: "List Price",
+    sapTable: "KONP",
+    sapField: "KBETR",
+    sapType: "CURR",
+    length: 11,
+    required: "R",
+    notes: "Condition PR00; customer-specific via VK11/VK13",
+  },
+  {
+    portalField: "availableStock",
+    label: "Available Stock",
+    sapTable: "MARD",
+    sapField: "LABST",
+    sapType: "QUAN",
+    length: 13,
+    required: "R",
+    notes: "ATP; consider MARC-WEBAZ lead time",
+  },
+  {
+    portalField: "uom",
+    label: "UoM",
+    sapTable: "MARA",
+    sapField: "MEINS",
+    sapType: "UNIT",
+    length: 3,
+    required: "R",
+  },
+
+  // Screen 2.2 — Customer-Specific Price List
+  {
+    portalField: "conditionRecord",
+    label: "Condition Record",
+    sapTable: "KONH",
+    sapField: "KNUMH",
+    sapType: "CHAR",
+    length: 10,
+    required: "R",
+  },
+  {
+    portalField: "validFrom",
+    label: "Valid From",
+    sapTable: "KONH",
+    sapField: "DATAB",
+    sapType: "DATS",
+    required: "R",
+  },
+  {
+    portalField: "validTo",
+    label: "Valid To",
+    sapTable: "KONH",
+    sapField: "DATBI",
+    sapType: "DATS",
+    required: "R",
+  },
+  {
+    portalField: "discountPercent",
+    label: "Discount %",
+    sapTable: "KONP",
+    sapField: "KBETR",
+    sapType: "CURR",
+    length: 11,
+    required: "R",
+    notes: "Condition K007/K005",
+  },
+  {
+    portalField: "minimumOrderQty",
+    label: "Minimum Order Qty",
+    sapTable: "MVKE",
+    sapField: "MINBM",
+    sapType: "QUAN",
+    length: 13,
+    required: "R",
+  },
+] as const;

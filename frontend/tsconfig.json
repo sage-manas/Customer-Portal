@@ -1,0 +1,109 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      /* The workspace packages of /client, vendored into this app.
+         Aliasing them under their original specifiers is what lets every
+         migrated page keep its import lines untouched. */
+      "@cc/ui": [
+        "./packages/ui/index.ts"
+      ],
+      "@cc/domain": [
+        "./packages/domain/index.ts"
+      ],
+      "@cc/domain/*": [
+        "./packages/domain/*"
+      ],
+      "@cc/config/constants": [
+        "./packages/config/constants.ts"
+      ],
+      /* Frontend-only mock stand-ins for the backend service packages.
+         TODO(BACKEND): repoint these aliases at the real @cc/service-*
+         packages once the backend migration lands. */
+      "@cc/service-catalogue": [
+        "./packages/services/catalogue.ts"
+      ],
+      "@cc/service-customer": [
+        "./packages/services/customer.ts"
+      ],
+      "@cc/service-delivery": [
+        "./packages/services/delivery.ts"
+      ],
+      "@cc/service-identity": [
+        "./packages/services/identity.ts"
+      ],
+      "@cc/service-inquiry": [
+        "./packages/services/inquiry.ts"
+      ],
+      "@cc/service-invoice": [
+        "./packages/services/invoice.ts"
+      ],
+      "@cc/service-loyalty": [
+        "./packages/services/loyalty.ts"
+      ],
+      "@cc/service-notification": [
+        "./packages/services/notification.ts"
+      ],
+      "@cc/service-onboarding": [
+        "./packages/services/onboarding.ts"
+      ],
+      "@cc/service-order": [
+        "./packages/services/order.ts"
+      ],
+      "@cc/service-payment": [
+        "./packages/services/payment.ts"
+      ],
+      "@cc/service-platform": [
+        "./packages/services/platform.ts"
+      ],
+      "@cc/service-reconciliation": [
+        "./packages/services/reconciliation.ts"
+      ],
+      "@cc/service-reporting": [
+        "./packages/services/reporting.ts"
+      ],
+      "@cc/service-sap": [
+        "./packages/services/sap.ts"
+      ],
+      "@cc/service-support": [
+        "./packages/services/support.ts"
+      ]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next"
+  ]
+}
