@@ -170,6 +170,22 @@ const WEB_ROUTES: readonly ApiRoute[] = [
   },
   {
     plane: "web",
+    path: "/api/catalogue/availability",
+    method: "POST",
+    guard: { kind: "permission", permission: "catalogue:view" },
+    scope: "kunnr",
+    note: "The grid's batched form of the row above: one request for a page of cards rather than one per card. POST because the material list is a body, not a query string long enough to be refused.",
+  },
+  {
+    plane: "web",
+    path: "/api/catalogue/materials/search",
+    method: "POST",
+    guard: { kind: "permission", permission: "catalogue:view" },
+    scope: "kunnr",
+    note: "Typeahead. Server-side so the material master is never shipped to the browser, and KUNNR-scoped because what a customer may search is what they may buy.",
+  },
+  {
+    plane: "web",
     path: "/api/cart",
     method: "GET",
     guard: { kind: "permission", permission: "catalogue:view" },

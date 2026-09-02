@@ -5,9 +5,6 @@ import { Button, Textarea } from "@cc/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-// TODO(BACKEND): swap `demoFetch` back to `fetch` once /api/* is migrated.
-import { demoFetch } from "@/lib/demo-fetch";
-
 /**
  * What an agent can do to a ticket (docs/05 §7.8, docs/03 Screen 8.2).
  *
@@ -47,7 +44,7 @@ export function AgentPanel({ ticketId, transitions, canResolve, assigned }: Agen
     setBusy(true);
     setError(null);
     try {
-      const response = await demoFetch(url, {
+      const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

@@ -29,6 +29,16 @@ export default [
       // (`__ENV`) that no eslint env here declares. Out of scope for the
       // boundaries graph the same way `.storybook/**` already is.
       "loadtest/**",
+      // `frontend/` is a standalone Next.js app, not a pnpm workspace member
+      // (see pnpm-workspace.yaml: apps/*, packages/*). It has its own
+      // npm-installed toolchain and its own `frontend/eslint.config.mjs`
+      // (eslint-config-next), and it takes no part in the boundaries element
+      // graph above — none of its paths match `packages/**` or `apps/**`, so
+      // linting it from here made every file "not of any known element type".
+      // It is linted by its own config instead: `pnpm --dir frontend lint`,
+      // and, on commit, via `frontend/.lintstagedrc.json`, which lint-staged
+      // picks up as the config closest to those files.
+      "frontend/**",
     ],
   },
 ];

@@ -1,39 +1,34 @@
 import { hasPermission, type SessionClaims } from "@cc/domain";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { verifyToken } from "@/server/auth/jwt";
+
 /**
- * Auth + route guard, migrated from client/apps/web/middleware.ts and merged
- * with client/apps/ops/middleware.ts.
+ * Auth + route guard, merged from client/apps/web/middleware.ts and
+ * client/apps/ops/middleware.ts.
  *
  * Named `proxy.ts`, not `middleware.ts`: Next 16 renamed the convention and
  * warns on the old name at build time. The export below is `proxy` for the
- * same reason. Behaviour is unchanged.
+ * same reason.
  *
- * What was kept, because it is what the *frontend* behaviour is:
- *   - unauthenticated requests to a non-public route redirect to /login,
- *     preserving where the user was heading via `?next=`,
- *   - `/admin/*` needs `admin:view`, rewritten to /403 when it isn't held,
- *   - the console routes need `platform:operate`, same treatment — this is
- *     apps/ops's own coarse gate, folded in with the app.
+ * This is the coarse gate, not the enforcement. Every page re-checks its own
+ * permission on render and every route handler re-checks its own through the
+ * `route()` wrapper (docs/05 §4.3), because a middleware matcher is a list
+ * somebody can forget to add to. What it buys is that an unauthenticated
+ * browser is sent to the login screen instead of to a page that would redirect
+ * it there one render later.
  *
- * What was dropped, because it is backend:
- *   - JWT signature verification (there is no AUTH_SECRET here),
- *   - host/tenant matching and the cross-tenant 404 rewrite (single tenant),
- *   - the per-tenant/per-IP rate limiter (@cc/observability),
- *   - the x-request-id propagation into the observability context.
- *
- * This was never *the* enforcement even in /client — the guards inside each
- * page and route handler are (docs/05 §4.3). Those came across intact, so a
- * URL typed by hand is still refused by the page itself, not only here.
- *
- * TODO(BACKEND):
- * Restore token verification, tenant/host matching and rate limiting.
+ * It runs on the edge runtime, so it may not touch Prisma. `jose` verifies the
+ * signature there, which is the reason the tokens are signed with it.
  */
 
 const PUBLIC_PATHS = ["/login", "/register", "/403", "/404"];
 
 /** Route prefixes owned by the operator console (migrated from apps/ops). */
 const CONSOLE_PATHS = ["/tenants", "/sap", "/operators", "/billing"];
+
+const ACCESS_COOKIE = "cc_access";
+const OPS_ACCESS_COOKIE = "cc_ops_access";
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -51,44 +46,68 @@ function unauthorized(request: NextRequest): NextResponse {
 }
 
 /**
- * Reads the demo cookie. Deliberately *not* called "verify": there is no
- * signature to check in this phase — see lib/session.ts.
+ * Verifies whichever realm's cookie is present.
+ *
+ * Signature, issuer, audience, expiry and claim version are all checked — an
+ * unverified token is treated as no token, never as its unverified contents.
  */
-function readDemoSession(request: NextRequest): Pick<SessionClaims, "roles"> | null {
-  const accountId = request.cookies.get("cc_demo_account")?.value;
-  if (!accountId) return null;
-  const roles = DEMO_ROLES[accountId];
-  return roles ? { roles } : null;
+async function readSession(
+  request: NextRequest,
+): Promise<{ claims: SessionClaims; realm: "web" | "ops" } | null> {
+  const webToken = request.cookies.get(ACCESS_COOKIE)?.value;
+  if (webToken) {
+    const secret = process.env.AUTH_SECRET ?? process.env.JWT_SECRET;
+    if (secret) {
+      try {
+        return { claims: await verifyToken(webToken, secret, "access"), realm: "web" };
+      } catch {
+        /* fall through to the operator cookie */
+      }
+    }
+  }
+
+  const opsToken = request.cookies.get(OPS_ACCESS_COOKIE)?.value;
+  if (opsToken) {
+    const secret = process.env.OPS_AUTH_SECRET ?? process.env.AUTH_SECRET ?? process.env.JWT_SECRET;
+    if (secret) {
+      try {
+        return { claims: await verifyToken(opsToken, secret, "access"), realm: "ops" };
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
 }
 
-/**
- * The account -> roles map, inlined because middleware runs on the edge
- * runtime and must stay free of the service layer's imports. It mirrors
- * DEMO_ACCOUNTS in packages/services/identity.ts.
- */
-const DEMO_ROLES: Record<string, SessionClaims["roles"]> = {
-  "demo-customer": ["customer"],
-  "demo-client-admin": ["client_admin"],
-  "demo-ap-manager": ["ap_manager"],
-  "demo-ar-manager": ["ar_manager"],
-  "demo-super-admin": ["super_admin"],
-  "demo-sap-manager": ["sap_manager"],
-};
-
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  /**
+   * API routes are passed straight through.
+   *
+   * They guard themselves — `route()` refuses an unauthenticated call with a
+   * 401 and an unpermitted one with a 403 — and they must answer in JSON. A
+   * redirect to /login here would hand `fetch()` a 307 to an HTML page, which
+   * every caller would then fail to parse and report as a confusing error
+   * instead of "your session expired". It would also break the genuinely
+   * public routes (login, the onboarding applicant flow, the gateway webhook),
+   * whose whole point is that they run without a session.
+   */
+  if (pathname.startsWith("/api/")) return NextResponse.next();
 
   if (isPublic(pathname)) return NextResponse.next();
 
-  const session = readDemoSession(request);
+  const session = await readSession(request);
   if (!session) return unauthorized(request);
 
-  if (pathname.startsWith("/admin") && !hasPermission(session, "admin:view")) {
+  if (pathname.startsWith("/admin") && !hasPermission(session.claims, "admin:view")) {
     return NextResponse.rewrite(new URL("/403", request.url), { status: 403 });
   }
 
   // The console's coarse gate — `platform:operate` is its `admin:view`.
-  if (isConsole(pathname) && !hasPermission(session, "platform:operate")) {
+  if (isConsole(pathname) && !hasPermission(session.claims, "platform:operate")) {
     return NextResponse.rewrite(new URL("/403", request.url), { status: 403 });
   }
 

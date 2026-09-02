@@ -1,21 +1,22 @@
-import { DEMO_TENANT, findTenantByHost, findTenantBySlug, type TenantSummary } from "@cc/service-identity";
+import { resolveTenantByHost, type TenantSummary } from "@/server/services/tenant-service";
 
 import { getRequestHost } from "./session";
 
 /**
- * Migrated from client/apps/web/lib/tenant.ts.
+ * The tenant this request belongs to, resolved from its host (docs/02 §2).
  *
- * The original resolves the tenant from the host (`<slug>.<ROOT_DOMAIN>` or
- * a custom domain) against the Tenant table. Demo mode is single-tenant, so
- * this always resolves to `DEMO_TENANT` — but the call site and the shape
- * are unchanged, so the layouts, the login screen's branding and the nav's
- * module toggles all still read a tenant rather than a constant.
+ * Phase 1 always answered with a single hardcoded tenant. It now reads the
+ * Tenant table: `<slug>.<ROOT_DOMAIN>` or a registered custom domain, so
+ * `acme.localhost:3000` and `globex.localhost:3000` are different portals with
+ * different branding, different module toggles and — via the session's
+ * `tenantId` — different data.
  *
- * TODO(BACKEND):
- * Restore host-based tenant resolution against the Tenant table, and the
- * middleware check that a token's `tenantId` claim matches the host.
+ * Returns null when the host names no tenant and none can be assumed. Callers
+ * already handle that: the login screen falls back to the product name, and the
+ * layouts treat it as "not a tenant portal".
  */
+export type { TenantSummary };
+
 export async function resolveRequestTenant(): Promise<TenantSummary | null> {
-  const host = await getRequestHost();
-  return (await findTenantByHost(host, "localhost")) ?? (await findTenantBySlug(DEMO_TENANT.slug));
+  return resolveTenantByHost(await getRequestHost());
 }

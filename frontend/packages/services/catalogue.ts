@@ -1,13 +1,15 @@
 /**
- * Frontend-only stand-in for `@cc/service-catalogue`.
+ * `@cc/service-catalogue` — the catalogue reads and the cart.
  *
- * Reads (browse, product detail, price list, availability) come from the
- * seeded SAP landscape and are faithful. The cart is portal-owned state —
- * a Prisma table in /client — so it lives in the in-memory demo store here.
+ * The two halves have different owners, and the split is the whole design.
+ * Materials, prices and stock are SAP's: every read composes adapter calls and
+ * carries their freshness, and nothing is cached in Postgres. The cart is the
+ * portal's: it stores material and quantity, and nothing else.
  *
- * TODO(BACKEND):
- * Replace with the real @cc/service-catalogue; the cart moves back to the
- * `Cart`/`CartLine` tables and repricing happens against the live adapter.
+ * That is why `priceCart` reprices on every read and every mutation. A stored
+ * price would be a price the order might not honour — customer-specific
+ * conditions change, stock moves — so the cart survives a SAP outage unpriced
+ * and says so, rather than showing a number it cannot stand behind (ADR-014).
  */
 
 import {
@@ -27,11 +29,12 @@ import {
 import {
   DemoServiceError,
   DEMO_FRESHNESS,
-  demoStore,
   demoSyncedAt,
   notFound,
   requireDemoKunnr,
 } from "./_demo";
+
+import * as cartRepo from "@/server/repositories/cart-repository";
 
 import { isSapError, type FreshnessClass, type SapAdapter } from "../sap-mock";
 
@@ -111,7 +114,13 @@ function matchesSearch(item: Material, query: string): boolean {
   if (needle && normaliseCode(item.material).includes(needle)) return true;
 
   // MAKTX: a hit when any word starts with the query.
-  if (item.description.toLowerCase().split(/\s+/).some((word) => word.startsWith(q))) return true;
+  if (
+    item.description
+      .toLowerCase()
+      .split(/\s+/)
+      .some((word) => word.startsWith(q))
+  )
+    return true;
 
   // MATKL: same prefix rule as the description.
   return item.materialGroup.toLowerCase().startsWith(q);
@@ -367,63 +376,76 @@ function notFoundMaterialOrUnavailable(error: unknown, material: string): never 
   if (isSapError(error) && error.kind === "unavailable") throw toCatalogueError(error);
   throw notFoundMaterial(material);
 }
-
 // ---------------------------------------------------------------------------
 // Cart (portal-owned)
 // ---------------------------------------------------------------------------
 
-/** What the demo store holds: the raw lines. Prices are never stored. */
-interface StoredCart {
-  key: string;
+/** What the table holds. Everything else about a line is read from SAP. */
+interface StoredLine {
   id: string;
-  kunnr: string;
-  lines: Array<{
-    id: string;
-    material: string;
-    description: string;
-    quantity: number;
-    uom: string;
-    minimumOrderQty: number;
-    addedAt: Date;
-  }>;
+  material: string;
+  quantity: number;
+  addedAt: Date;
 }
 
-function cartFor(tenantId: string, kunnr: string): StoredCart {
-  const store = demoStore();
-  const key = `${tenantId}:${kunnr}`;
-  const carts = store.carts as StoredCart[];
-  let cart = carts.find((row) => row.key === key);
-  if (!cart) {
-    cart = { key, id: `cart-${carts.length + 1}`, kunnr, lines: [] };
-    carts.push(cart);
-  }
-  return cart;
+interface StoredCart {
+  id: string;
+  kunnr: string;
+  lines: StoredLine[];
+}
+
+async function loadCart(tenantId: string, kunnr: string): Promise<StoredCart> {
+  const row = await cartRepo.ensureCart(tenantId, kunnr);
+  return {
+    id: row.id,
+    kunnr,
+    lines: row.lines.map((line) => ({
+      id: line.id,
+      material: line.material,
+      // Decimal in Postgres, so it arrives as a Decimal object.
+      quantity: Number(line.quantity),
+      addedAt: line.addedAt,
+    })),
+  };
 }
 
 /**
- * Reprices the whole cart on every read and every mutation, exactly as the
- * real service does: the drawer must never show a price the order would not
- * honour, so nothing priced is ever stored (ADR-018's rule).
+ * Reprices the whole cart on every read and every mutation.
+ *
+ * Description, UOM and minimum order quantity are read from SAP alongside the
+ * price rather than stored, because they are master data that changes and a
+ * stale copy in the cart is a promise the order cannot keep.
+ *
+ * A material whose read fails leaves the line in place, unpriced, and marks
+ * the cart `priced: false`. Dropping the line would silently delete something
+ * the customer chose; refusing the whole cart would make one bad material
+ * hide the rest of the basket.
  */
 async function priceCart(adapter: SapAdapter, cart: StoredCart, kunnr: string): Promise<Cart> {
   const lines: CartLine[] = [];
   let priced = true;
 
   for (const stored of cart.lines) {
-    const availability = await getMaterialAvailability(adapter, kunnr, stored.material, {
-      quantity: stored.quantity,
-    }).catch(() => null);
+    const [availability, material] = await Promise.all([
+      getMaterialAvailability(adapter, kunnr, stored.material, {
+        quantity: stored.quantity,
+      }).catch(() => null),
+      adapter.getMaterial(stored.material).catch(() => null),
+    ]);
 
     if (!availability) priced = false;
 
+    const uom = availability?.uom ?? material?.data.uom ?? "EA";
+    const description = material?.data.description ?? stored.material;
+    const minimumOrderQty = material?.data.minimumOrderQty ?? 1;
     const netPrice = availability?.price?.netPrice ?? null;
     const availableStock = availability?.quantity ?? null;
     const issues: CartLineIssue[] = [];
 
-    if (stored.quantity < stored.minimumOrderQty) {
+    if (stored.quantity < minimumOrderQty) {
       issues.push({
         code: "below_moq",
-        message: `Minimum order quantity is ${stored.minimumOrderQty} ${stored.uom}.`,
+        message: `Minimum order quantity is ${minimumOrderQty} ${uom}.`,
         severity: "blocker",
       });
     }
@@ -444,7 +466,7 @@ async function priceCart(adapter: SapAdapter, cart: StoredCart, kunnr: string): 
     } else if (availableStock !== null && availableStock < stored.quantity) {
       issues.push({
         code: "insufficient_stock",
-        message: `Only ${availableStock} ${stored.uom} available today.`,
+        message: `Only ${availableStock} ${uom} available today.`,
         severity: "warning",
       });
     }
@@ -452,10 +474,10 @@ async function priceCart(adapter: SapAdapter, cart: StoredCart, kunnr: string): 
     lines.push({
       id: stored.id,
       material: stored.material,
-      description: stored.description,
+      description,
       quantity: stored.quantity,
-      uom: availability?.uom ?? stored.uom,
-      minimumOrderQty: stored.minimumOrderQty,
+      uom,
+      minimumOrderQty,
       netPrice,
       lineValue: netPrice === null ? null : round2(netPrice * stored.quantity),
       availableStock,
@@ -485,7 +507,7 @@ export async function getCart(
   adapter: SapAdapter,
 ): Promise<Cart> {
   const account = requireDemoKunnr(kunnr);
-  return priceCart(adapter, cartFor(tenantId, account), account);
+  return priceCart(adapter, await loadCart(tenantId, account), account);
 }
 
 export async function getCartLineCount(
@@ -493,7 +515,7 @@ export async function getCartLineCount(
   kunnr: string | undefined,
 ): Promise<number> {
   if (!kunnr) return 0;
-  return cartFor(tenantId, kunnr).lines.length;
+  return cartRepo.countLines(tenantId, kunnr);
 }
 
 export async function addToCart(
@@ -503,8 +525,9 @@ export async function addToCart(
   input: { material: string; quantity: number },
 ): Promise<Cart> {
   const account = requireDemoKunnr(kunnr);
-  const cart = cartFor(tenantId, account);
 
+  // The material has to exist in SAP before it can be staged, and the MOQ is
+  // SAP's answer too — checked here so the refusal names the real limit.
   const material = await adapter.getMaterial(input.material).catch(() => null);
   if (!material) throw notFoundMaterial(input.material);
   if (input.quantity < material.data.minimumOrderQty) {
@@ -515,21 +538,11 @@ export async function addToCart(
     );
   }
 
-  const existing = cart.lines.find((line) => line.material === input.material);
-  if (existing) existing.quantity += input.quantity;
-  else {
-    cart.lines.push({
-      id: `line-${cart.lines.length + 1}-${input.material}`,
-      material: input.material,
-      description: material.data.description,
-      quantity: input.quantity,
-      uom: material.data.uom,
-      minimumOrderQty: material.data.minimumOrderQty,
-      addedAt: new Date(),
-    });
-  }
+  const cart = await cartRepo.ensureCart(tenantId, account);
+  await cartRepo.upsertLine(tenantId, cart.id, input.material, input.quantity);
+  await cartRepo.touchCart(cart.id);
 
-  return priceCart(adapter, cart, account);
+  return priceCart(adapter, await loadCart(tenantId, account), account);
 }
 
 export async function updateCartLine(
@@ -540,11 +553,17 @@ export async function updateCartLine(
   quantity: number,
 ): Promise<Cart> {
   const account = requireDemoKunnr(kunnr);
-  const cart = cartFor(tenantId, account);
-  const line = cart.lines.find((row) => row.id === lineId);
+  const cart = await cartRepo.ensureCart(tenantId, account);
+
+  // Scoped to this account's cart, so a line id from another customer's cart
+  // is simply not found rather than editable.
+  const line = await cartRepo.findLine(tenantId, cart.id, lineId);
   if (!line) throw notFound("Cart line");
-  line.quantity = quantity;
-  return priceCart(adapter, cart, account);
+
+  await cartRepo.setLineQuantity(line.id, quantity);
+  await cartRepo.touchCart(cart.id);
+
+  return priceCart(adapter, await loadCart(tenantId, account), account);
 }
 
 export async function removeCartLine(
@@ -554,9 +573,15 @@ export async function removeCartLine(
   lineId: string,
 ): Promise<Cart> {
   const account = requireDemoKunnr(kunnr);
-  const cart = cartFor(tenantId, account);
-  cart.lines = cart.lines.filter((row) => row.id !== lineId);
-  return priceCart(adapter, cart, account);
+  const cart = await cartRepo.ensureCart(tenantId, account);
+
+  const line = await cartRepo.findLine(tenantId, cart.id, lineId);
+  if (!line) throw notFound("Cart line");
+
+  await cartRepo.deleteLine(line.id);
+  await cartRepo.touchCart(cart.id);
+
+  return priceCart(adapter, await loadCart(tenantId, account), account);
 }
 
 export async function clearCart(
@@ -565,9 +590,12 @@ export async function clearCart(
   kunnr: string | undefined,
 ): Promise<Cart> {
   const account = requireDemoKunnr(kunnr);
-  const cart = cartFor(tenantId, account);
-  cart.lines = [];
-  return priceCart(adapter, cart, account);
+  const cart = await cartRepo.ensureCart(tenantId, account);
+
+  await cartRepo.clearLines(tenantId, cart.id);
+  await cartRepo.touchCart(cart.id);
+
+  return priceCart(adapter, await loadCart(tenantId, account), account);
 }
 
 const round2 = (value: number): number => Math.round(value * 100) / 100;

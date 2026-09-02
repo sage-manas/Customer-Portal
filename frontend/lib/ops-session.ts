@@ -1,27 +1,33 @@
-import { sessionPlane } from "@cc/domain";
-import type { OperatorClaims } from "@cc/service-platform";
+import { isPlatformRole, type Role } from "@cc/domain";
 
-import { getSession } from "./session";
+import { readSession } from "@/server/auth/session";
+
+export interface OperatorClaims {
+  operatorId: string;
+  email: string;
+  roles: Role[];
+}
 
 /**
- * Migrated from client/apps/ops/lib/session.ts.
+ * The operator session, read from the platform realm's own cookie.
  *
- * apps/ops kept its own cookie pair (`cc_ops_access`/`cc_ops_refresh`) so
- * the two realms could sit on one browser. Phase 1 merges both apps into a
- * single Next app with one demo login, so the operator session is derived
- * from the same demo session — and only for a session whose *plane* is
- * `platform`, which is the distinction `sessionPlane` already draws
- * (ADR-062). A tenant or customer session resolves to null here, exactly as
- * a portal cookie would have in /client.
+ * Phase 1 derived this from the single demo session and merely checked its
+ * plane. It is now a genuinely separate realm again, as it was in apps/ops:
+ * its own cookie pair (`cc_ops_access`/`cc_ops_refresh`) signed with
+ * OPS_AUTH_SECRET, so a tenant session — however privileged inside its tenant
+ * — cannot be presented here, and a leak of either realm's secret cannot forge
+ * a token in the other (ADR-045).
  *
- * TODO(BACKEND):
- * Restore the separate operator realm: its own cookie names, its own JWT
- * signed with OPS_AUTH_SECRET, verified by @cc/service-platform.
+ * The plane is re-checked on top of the signature: a token that verifies but
+ * carries no platform role is not an operator, and the console must not treat
+ * it as one.
  */
 export async function getOperatorSession(): Promise<OperatorClaims | null> {
-  const session = await getSession();
+  const session = await readSession("ops");
   if (!session) return null;
-  if (sessionPlane(session) !== "platform") return null;
 
-  return { operatorId: session.userId, email: session.email, roles: session.roles };
+  const roles = session.roles.filter(isPlatformRole);
+  if (roles.length === 0) return null;
+
+  return { operatorId: session.userId, email: session.email, roles };
 }

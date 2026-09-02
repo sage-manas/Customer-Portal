@@ -1,23 +1,31 @@
 /**
- * Frontend-only stand-in for `@cc/service-support` (customer tickets and the
- * back-office ticket workbench).
+ * `@cc/service-support` — customer tickets and the back-office workbench.
  *
- * Tickets are entirely portal-owned — no SAP read anywhere in this module —
- * so the demo store carries the whole module. Raising, commenting,
- * assigning, resolving and rating all work within a server session; SLA is
- * derived on every read by `@cc/domain`, never stored, exactly as in /client.
+ * The one module the portal owns end to end: there is no SAP read anywhere in
+ * it, because while a tenant runs portal-native SAP owns nothing here
+ * (ADR-028). Every row lives in Postgres.
  *
- * TODO(BACKEND):
- * Replace with the real @cc/service-support (Prisma `Ticket`/`TicketComment`
- * tables, attachment storage, SLA breach sweep, notification fan-out).
+ * Two invariants the screens rely on and do not implement:
+ *
+ *  - **The SLA deadline is derived on every read**, from `openedAt` plus the
+ *    priority, by `slaView` in `@cc/domain`. It is never stored, so changing a
+ *    tenant's SLA table re-answers every open ticket with nothing to backfill.
+ *  - **Internal notes are excluded in the query, not filtered in the screen**
+ *    (`support-repository`). The customer and agent planes are separate
+ *    functions rather than one function with a flag, so a missing argument
+ *    cannot widen a customer read into a tenant-wide one.
+ *
+ * The transition table in `@cc/domain` is the authority on who may make which
+ * move — a customer may close and reopen, never resolve — and it is consulted
+ * here rather than re-expressed.
  */
 
 import {
   buildTicketTimeline,
   canTransitionTicket,
-  formatTicketNo,
   isTicketClosedState,
   slaView,
+  TICKET_CATEGORY_DEFS,
   type SlaView,
   type TicketCategory,
   type TicketPriority,
@@ -25,21 +33,12 @@ import {
   type TicketStatus,
 } from "@cc/domain";
 
-import { DemoServiceError, demoStore, nextSequence, requireDemoKunnr } from "./_demo";
+import { AppError, ConflictError, NotFoundError } from "@/server/errors";
+import * as repo from "@/server/repositories/support-repository";
 
-/** A file attached to a ticket or a comment. Portal-owned, like the ticket. */
-export interface AttachmentRecord {
-  id: string;
-  storageKey: string;
-  fileName: string;
-  contentType: string;
-  sizeBytes: number;
-  createdAt: Date;
-}
-
-export class SupportError extends DemoServiceError {
+export class SupportError extends AppError {
   constructor(message: string, code = "support_error", status = 400) {
-    super(message, { code, status });
+    super(message, { code: code as never, status });
     this.name = "SupportError";
   }
 }
@@ -64,8 +63,17 @@ export interface AgentContext {
 }
 
 // ---------------------------------------------------------------------------
-// Records
+// Records — the shapes the screens already render
 // ---------------------------------------------------------------------------
+
+export interface AttachmentRecord {
+  id: string;
+  storageKey: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: Date;
+}
 
 export interface TicketCommentRecord {
   id: string;
@@ -108,32 +116,100 @@ export interface TicketRecord extends TicketSummary {
   attachments: AttachmentRecord[];
 }
 
-/** What the store actually holds; `sla` and `timeline` are derived per read. */
-type StoredTicket = Omit<TicketRecord, "sla" | "timeline">;
+/** The row shape both planes read, before SLA and the timeline are derived. */
+type Row = {
+  id: string;
+  ticketNo: string;
+  customerKunnr: string;
+  raisedByUserId: string | null;
+  category: TicketCategory;
+  priority: TicketPriority;
+  status: TicketStatus;
+  subject: string;
+  description: string;
+  relatedDocType: "order" | "delivery" | "invoice" | null;
+  relatedDocNumber: string | null;
+  assigneeUserId: string | null;
+  resolution: string | null;
+  rating: number | null;
+  ratingComment: string | null;
+  slaBreachedAt: Date | null;
+  openedAt: Date;
+  startedAt: Date | null;
+  resolvedAt: Date | null;
+  closedAt: Date | null;
+  updatedAt: Date;
+};
 
-const tickets = () => demoStore().tickets as StoredTicket[];
+type RowWithThread = Row & {
+  comments: Array<{
+    id: string;
+    authorUserId: string | null;
+    authorIsAgent: boolean;
+    body: string;
+    internal: boolean;
+    createdAt: Date;
+    attachments: AttachmentRecord[];
+  }>;
+  attachments: AttachmentRecord[];
+};
 
-/** SLA and the status timeline are derived on every read, never stored. */
-function hydrate(ticket: StoredTicket): TicketRecord {
+function summarize(row: Row): TicketSummary {
   return {
-    ...ticket,
-    sla: slaView(ticket.openedAt, ticket.priority, { resolvedAt: ticket.resolvedAt }),
-    timeline: buildTicketTimeline(ticket),
+    id: row.id,
+    ticketNo: row.ticketNo,
+    customerKunnr: row.customerKunnr,
+    category: row.category,
+    priority: row.priority,
+    status: row.status,
+    subject: row.subject,
+    relatedDocType: row.relatedDocType,
+    relatedDocNumber: row.relatedDocNumber,
+    assigneeUserId: row.assigneeUserId,
+    openedAt: row.openedAt,
+    startedAt: row.startedAt,
+    resolvedAt: row.resolvedAt,
+    closedAt: row.closedAt,
+    rating: row.rating,
+    slaBreachedAt: row.slaBreachedAt,
+    // Derived per read, never stored.
+    sla: slaView(row.openedAt, row.priority, { resolvedAt: row.resolvedAt }),
+    updatedAt: row.updatedAt,
   };
 }
 
-/** The list shape: everything on the record except its body and thread. */
-function summarize(ticket: StoredTicket): TicketSummary {
-  const {
-    comments: _comments,
-    attachments: _attachments,
-    description: _description,
-    resolution: _resolution,
-    ratingComment: _ratingComment,
-    raisedByUserId: _raisedByUserId,
-    ...rest
-  } = hydrate(ticket);
-  return rest;
+function hydrate(row: RowWithThread): TicketRecord {
+  return {
+    ...summarize(row),
+    raisedByUserId: row.raisedByUserId,
+    description: row.description,
+    resolution: row.resolution,
+    ratingComment: row.ratingComment,
+    timeline: buildTicketTimeline(row),
+    comments: row.comments.map((comment) => ({
+      id: comment.id,
+      authorUserId: comment.authorUserId,
+      authorIsAgent: comment.authorIsAgent,
+      body: comment.body,
+      internal: comment.internal,
+      createdAt: comment.createdAt,
+      attachments: comment.attachments,
+    })),
+    attachments: row.attachments,
+  };
+}
+
+function requireAccount(kunnr: string | undefined): string {
+  if (!kunnr) {
+    throw new SupportError("No customer account is linked to this login.", "no_account", 403);
+  }
+  return kunnr;
+}
+
+function ticketNotFound(): never {
+  // 404, never 403: a customer must not learn that another account's ticket
+  // number is real.
+  throw new NotFoundError("That ticket");
 }
 
 // ---------------------------------------------------------------------------
@@ -148,16 +224,17 @@ export interface TicketListResult {
   counts: Record<TicketListFilter, number>;
 }
 
-function matches(ticket: StoredTicket, filter: TicketListFilter): boolean {
+/** The filter's status set, so the query does the filtering, not a loop. */
+function statusesFor(filter: TicketListFilter): TicketStatus[] | undefined {
   switch (filter) {
     case "open":
-      return !isTicketClosedState(ticket.status);
+      return ["open", "in_progress"];
     case "resolved":
-      return ticket.status === "resolved";
+      return ["resolved"];
     case "closed":
-      return ticket.status === "closed";
+      return ["closed"];
     default:
-      return true;
+      return undefined;
   }
 }
 
@@ -170,37 +247,36 @@ export async function listTickets(
     offset?: number;
   } = {},
 ): Promise<TicketListResult> {
-  const account = requireDemoKunnr(context.kunnr);
-  const mine = tickets().filter((ticket) => ticket.customerKunnr === account);
+  const kunnr = requireAccount(context.kunnr);
+  const filter = options.filter ?? "all";
+  const base = { kunnr, category: options.category };
 
-  let rows = mine.filter((ticket) => matches(ticket, options.filter ?? "all"));
-  if (options.category) rows = rows.filter((ticket) => ticket.category === options.category);
-
-  rows = rows.sort((a, b) => b.openedAt.getTime() - a.openedAt.getTime());
-  const total = rows.length;
-  const offset = options.offset ?? 0;
-  if (options.limit !== undefined) rows = rows.slice(offset, offset + options.limit);
+  const [rows, total, all, open, resolved, closed] = await Promise.all([
+    repo.listTicketRows(
+      context.tenantId,
+      { ...base, status: statusesFor(filter) },
+      { limit: options.limit, offset: options.offset },
+    ),
+    repo.countTickets(context.tenantId, { ...base, status: statusesFor(filter) }),
+    repo.countTickets(context.tenantId, { kunnr }),
+    repo.countTickets(context.tenantId, { kunnr, status: statusesFor("open") }),
+    repo.countTickets(context.tenantId, { kunnr, status: statusesFor("resolved") }),
+    repo.countTickets(context.tenantId, { kunnr, status: statusesFor("closed") }),
+  ]);
 
   return {
-    tickets: rows.map(summarize),
+    tickets: (rows as Row[]).map(summarize),
     total,
-    counts: {
-      all: mine.length,
-      open: mine.filter((t) => matches(t, "open")).length,
-      resolved: mine.filter((t) => matches(t, "resolved")).length,
-      closed: mine.filter((t) => matches(t, "closed")).length,
-    },
+    counts: { all, open, resolved, closed },
   };
 }
 
 export async function getTicket(context: SupportContext, id: string): Promise<TicketRecord> {
-  const account = requireDemoKunnr(context.kunnr);
-  const ticket = tickets().find((row) => row.id === id && row.customerKunnr === account);
-  if (!ticket) throw notFoundTicket();
-
-  const record = hydrate(ticket);
-  // A customer never sees internal agent notes.
-  return { ...record, comments: record.comments.filter((comment) => !comment.internal) };
+  const kunnr = requireAccount(context.kunnr);
+  const row = await repo.findTicketForCustomer(context.tenantId, kunnr, id);
+  if (!row) ticketNotFound();
+  // Internal notes were already excluded by the query.
+  return hydrate(row as unknown as RowWithThread);
 }
 
 export async function readOwnedTicket(context: SupportContext, id: string): Promise<TicketRecord> {
@@ -222,49 +298,20 @@ export interface InsertTicketInput {
 }
 
 export async function insertTicket(input: InsertTicketInput): Promise<TicketRecord> {
-  const sequence = nextSequence("ticket");
-  const stored: StoredTicket = {
-    id: `ticket-${sequence}`,
-    ticketNo: formatTicketNo(sequence),
-    customerKunnr: input.kunnr,
+  const row = await repo.createTicketRow({
+    tenantId: input.tenantId,
+    kunnr: input.kunnr,
+    raisedByUserId: input.raisedByUserId ?? null,
     category: input.category,
     priority: input.priority,
-    status: "open",
     subject: input.subject,
     description: input.description,
     relatedDocType: input.relatedDocType ?? null,
     relatedDocNumber: input.relatedDocNumber ?? null,
-    assigneeUserId: null,
-    raisedByUserId: input.raisedByUserId ?? null,
-    openedAt: new Date(),
-    startedAt: null,
-    resolvedAt: null,
-    closedAt: null,
-    resolution: null,
-    rating: null,
-    ratingComment: null,
-    slaBreachedAt: null,
-    comments: [],
-    attachments: [],
-    updatedAt: new Date(),
-  };
-
-  tickets().push(stored);
-  return hydrate(stored);
-}
-
-export async function createTicket(
-  context: SupportContext,
-  input: Omit<InsertTicketInput, "tenantId" | "kunnr" | "raisedByUserId">,
-  _validateRelatedDoc?: RelatedDocValidator,
-): Promise<TicketRecord> {
-  const account = requireDemoKunnr(context.kunnr);
-  return insertTicket({
-    ...input,
-    tenantId: context.tenantId,
-    kunnr: account,
-    raisedByUserId: context.userId,
+    sourceKey: input.sourceKey ?? null,
+    attachmentKeys: input.attachmentKeys,
   });
+  return hydrate(row as unknown as RowWithThread);
 }
 
 export type RelatedDocValidator = (
@@ -272,26 +319,57 @@ export type RelatedDocValidator = (
   docNumber: string,
 ) => Promise<boolean>;
 
+export async function createTicket(
+  context: SupportContext,
+  input: Omit<InsertTicketInput, "tenantId" | "kunnr" | "raisedByUserId">,
+  validateRelatedDoc?: RelatedDocValidator,
+): Promise<TicketRecord> {
+  const kunnr = requireAccount(context.kunnr);
+
+  // A ticket may name an order, delivery or invoice. The document is SAP's, so
+  // the check is a SAP read the caller passes in — the service does not reach
+  // for an adapter itself, and a number the customer cannot see is refused
+  // rather than silently attached.
+  if (validateRelatedDoc && input.relatedDocType && input.relatedDocNumber) {
+    const exists = await validateRelatedDoc(input.relatedDocType, input.relatedDocNumber);
+    if (!exists) {
+      throw new SupportError(
+        "We couldn't find that document on your account.",
+        "related_doc_not_found",
+        400,
+      );
+    }
+  }
+
+  return insertTicket({
+    ...input,
+    tenantId: context.tenantId,
+    kunnr,
+    raisedByUserId: context.userId,
+  });
+}
+
 export async function addCustomerComment(
   context: SupportContext,
   id: string,
   body: string,
 ): Promise<TicketRecord> {
-  const account = requireDemoKunnr(context.kunnr);
-  const ticket = tickets().find((row) => row.id === id && row.customerKunnr === account);
-  if (!ticket) throw notFoundTicket();
+  const kunnr = requireAccount(context.kunnr);
+  const ticket = await repo.findTicketForCustomer(context.tenantId, kunnr, id);
+  if (!ticket) ticketNotFound();
 
-  ticket.comments.push({
-    id: `comment-${nextSequence("comment")}`,
+  await repo.addComment({
+    tenantId: context.tenantId,
+    ticketId: ticket.id,
     authorUserId: context.userId ?? null,
     authorIsAgent: false,
-    body,
+    // A customer session may never write an internal note. Not a parameter:
+    // there is no argument a caller could pass to make this true.
     internal: false,
-    createdAt: new Date(),
-    attachments: [],
+    body,
   });
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+
+  return getTicket(context, id);
 }
 
 export async function transitionTicketAsCustomer(
@@ -299,20 +377,24 @@ export async function transitionTicketAsCustomer(
   id: string,
   to: TicketStatus,
 ): Promise<TicketRecord> {
-  const account = requireDemoKunnr(context.kunnr);
-  const ticket = tickets().find((row) => row.id === id && row.customerKunnr === account);
-  if (!ticket) throw notFoundTicket();
+  const kunnr = requireAccount(context.kunnr);
+  const ticket = await repo.findTicketForCustomer(context.tenantId, kunnr, id);
+  if (!ticket) ticketNotFound();
 
-  // The transition table is the authority on who may make which move; the
-  // customer's is closing a resolved ticket (doc 05 §7.8).
   if (!canTransitionTicket(ticket.status, to, "customer")) {
-    throw new SupportError("That isn't a move you can make on this ticket.", "invalid_transition", 409);
+    throw new ConflictError("That isn't a move you can make on this ticket.");
   }
 
-  ticket.status = to;
-  if (to === "closed") ticket.closedAt = new Date();
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+  await repo.updateTicketRow(context.tenantId, ticket.id, {
+    status: to,
+    ...(to === "closed" ? { closedAt: new Date() } : {}),
+    // A reopen restarts the SLA clock and clears the breach flag: the tenant
+    // owes a fresh response, and measuring against the original opening would
+    // book every reopened ticket as breached on arrival.
+    ...(to === "open" ? { openedAt: new Date(), slaBreachedAt: null, closedAt: null } : {}),
+  });
+
+  return getTicket(context, id);
 }
 
 export async function rateTicket(
@@ -320,21 +402,24 @@ export async function rateTicket(
   id: string,
   input: { rating: number; comment?: string },
 ): Promise<TicketRecord> {
-  const account = requireDemoKunnr(context.kunnr);
-  const ticket = tickets().find((row) => row.id === id && row.customerKunnr === account);
-  if (!ticket) throw notFoundTicket();
+  const kunnr = requireAccount(context.kunnr);
+  const ticket = await repo.findTicketForCustomer(context.tenantId, kunnr, id);
+  if (!ticket) ticketNotFound();
+
   if (ticket.status !== "resolved" && ticket.status !== "closed") {
-    throw new SupportError("You can rate a ticket once it's been resolved.", "not_resolved", 409);
+    throw new ConflictError("You can rate a ticket once it's been resolved.");
   }
 
-  ticket.rating = input.rating;
-  ticket.ratingComment = input.comment ?? null;
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+  await repo.updateTicketRow(context.tenantId, ticket.id, {
+    rating: input.rating,
+    ratingComment: input.comment ?? null,
+  });
+
+  return getTicket(context, id);
 }
 
 // ---------------------------------------------------------------------------
-// Agent workbench
+// Agent workbench — a separate plane, deliberately separate functions
 // ---------------------------------------------------------------------------
 
 export type WorkbenchFilter = "open" | "unassigned" | "mine" | "breached" | "all";
@@ -353,59 +438,61 @@ export interface WorkbenchResult {
   counts: Record<WorkbenchFilter, number>;
 }
 
-function matchesWorkbench(
-  ticket: StoredTicket,
-  filter: WorkbenchFilter,
-  userId?: string,
-): boolean {
+function workbenchFilters(filter: WorkbenchFilter, userId?: string): repo.TicketFilters {
   switch (filter) {
     case "open":
-      return !isTicketClosedState(ticket.status);
+      return { status: ["open", "in_progress"] };
     case "unassigned":
-      return !ticket.assigneeUserId && !isTicketClosedState(ticket.status);
+      return { status: ["open", "in_progress"], unassigned: true };
     case "mine":
-      return Boolean(userId) && ticket.assigneeUserId === userId;
+      return { assigneeUserId: userId ?? "__none__" };
     case "breached":
-      return (
-        slaView(ticket.openedAt, ticket.priority, { resolvedAt: ticket.resolvedAt }).state ===
-        "breached"
-      );
+      // Breach is a derived answer, so the query narrows to live work and the
+      // domain decides. Filtering it in SQL would mean a second copy of the
+      // priority-to-hours table.
+      return { status: ["open", "in_progress"] };
     default:
-      return true;
+      return {};
   }
+}
+
+function isBreached(row: Row): boolean {
+  return slaView(row.openedAt, row.priority, { resolvedAt: row.resolvedAt }).state === "breached";
 }
 
 export async function listWorkbench(
   context: AgentContext,
   query: WorkbenchQuery = {},
 ): Promise<WorkbenchResult> {
-  const all = tickets();
-  let rows = all.filter((ticket) =>
-    matchesWorkbench(ticket, query.filter ?? "open", context.userId),
-  );
-  if (query.category) rows = rows.filter((ticket) => ticket.category === query.category);
-  if (query.priority) rows = rows.filter((ticket) => ticket.priority === query.priority);
+  const filter = query.filter ?? "open";
 
-  const counts = Object.fromEntries(
-    (["open", "unassigned", "mine", "breached", "all"] as WorkbenchFilter[]).map((filter) => [
-      filter,
-      all.filter((ticket) => matchesWorkbench(ticket, filter, context.userId)).length,
-    ]),
-  ) as Record<WorkbenchFilter, number>;
+  const rows = (await repo.listTicketRows(context.tenantId, {
+    ...workbenchFilters(filter, context.userId),
+    category: query.category,
+    priority: query.priority,
+  })) as Row[];
+
+  const visible = filter === "breached" ? rows.filter(isBreached) : rows;
+
+  const [all, open, unassigned, mine, liveForBreach] = await Promise.all([
+    repo.countTickets(context.tenantId, {}),
+    repo.countTickets(context.tenantId, workbenchFilters("open")),
+    repo.countTickets(context.tenantId, workbenchFilters("unassigned")),
+    repo.countTickets(context.tenantId, workbenchFilters("mine", context.userId)),
+    repo.listTicketRows(context.tenantId, workbenchFilters("breached")) as Promise<Row[]>,
+  ]);
 
   return {
-    tickets: rows
-      .sort((a, b) => b.openedAt.getTime() - a.openedAt.getTime())
-      .map(summarize),
-    total: rows.length,
-    counts,
+    tickets: visible.map(summarize),
+    total: visible.length,
+    counts: { all, open, unassigned, mine, breached: liveForBreach.filter(isBreached).length },
   };
 }
 
-export async function getTicketForAgent(_context: AgentContext, id: string): Promise<TicketRecord> {
-  const ticket = tickets().find((row) => row.id === id);
-  if (!ticket) throw notFoundTicket();
-  return hydrate(ticket);
+export async function getTicketForAgent(context: AgentContext, id: string): Promise<TicketRecord> {
+  const row = await repo.findTicketForAgent(context.tenantId, id);
+  if (!row) ticketNotFound();
+  return hydrate(row as unknown as RowWithThread);
 }
 
 export async function assignTicket(
@@ -413,15 +500,18 @@ export async function assignTicket(
   id: string,
   assigneeUserId: string | null,
 ): Promise<TicketRecord> {
-  const ticket = tickets().find((row) => row.id === id);
-  if (!ticket) throw notFoundTicket();
-  ticket.assigneeUserId = assigneeUserId;
-  if (assigneeUserId && ticket.status === "open") {
-    ticket.status = "in_progress";
-    ticket.startedAt = new Date();
-  }
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+  const ticket = await repo.findTicketForAgent(context.tenantId, id);
+  if (!ticket) ticketNotFound();
+
+  await repo.updateTicketRow(context.tenantId, ticket.id, {
+    assigneeUserId,
+    // Claiming an unstarted ticket starts it — the first response has begun.
+    ...(assigneeUserId && ticket.status === "open"
+      ? { status: "in_progress" as const, startedAt: new Date() }
+      : {}),
+  });
+
+  return getTicketForAgent(context, id);
 }
 
 export async function addAgentComment(
@@ -430,20 +520,19 @@ export async function addAgentComment(
   body: string,
   visibility: CommentVisibility = "customer",
 ): Promise<TicketRecord> {
-  const ticket = tickets().find((row) => row.id === id);
-  if (!ticket) throw notFoundTicket();
+  const ticket = await repo.findTicketForAgent(context.tenantId, id);
+  if (!ticket) ticketNotFound();
 
-  ticket.comments.push({
-    id: `comment-${nextSequence("comment")}`,
+  await repo.addComment({
+    tenantId: context.tenantId,
+    ticketId: ticket.id,
     authorUserId: context.userId ?? null,
     authorIsAgent: true,
-    body,
     internal: visibility === "agent",
-    createdAt: new Date(),
-    attachments: [],
+    body,
   });
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+
+  return getTicketForAgent(context, id);
 }
 
 export async function transitionTicketAsAgent(
@@ -451,14 +540,21 @@ export async function transitionTicketAsAgent(
   id: string,
   to: TicketStatus,
 ): Promise<TicketRecord> {
-  const ticket = tickets().find((row) => row.id === id);
-  if (!ticket) throw notFoundTicket();
+  const ticket = await repo.findTicketForAgent(context.tenantId, id);
+  if (!ticket) ticketNotFound();
 
-  ticket.status = to;
-  if (to === "in_progress" && !ticket.startedAt) ticket.startedAt = new Date();
-  if (to === "closed") ticket.closedAt = new Date();
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+  if (!canTransitionTicket(ticket.status, to, "agent")) {
+    throw new ConflictError("That isn't a move you can make on this ticket.");
+  }
+
+  await repo.updateTicketRow(context.tenantId, ticket.id, {
+    status: to,
+    ...(to === "in_progress" && !ticket.startedAt ? { startedAt: new Date() } : {}),
+    ...(to === "closed" ? { closedAt: new Date() } : {}),
+    ...(to === "open" ? { openedAt: new Date(), slaBreachedAt: null, closedAt: null } : {}),
+  });
+
+  return getTicketForAgent(context, id);
 }
 
 export async function resolveTicket(
@@ -466,22 +562,25 @@ export async function resolveTicket(
   id: string,
   resolution: string,
 ): Promise<TicketRecord> {
-  const ticket = tickets().find((row) => row.id === id);
-  if (!ticket) throw notFoundTicket();
+  const ticket = await repo.findTicketForAgent(context.tenantId, id);
+  if (!ticket) ticketNotFound();
 
-  ticket.status = "resolved";
-  ticket.resolution = resolution;
-  ticket.resolvedAt = new Date();
-  ticket.updatedAt = new Date();
-  return hydrate(ticket);
+  await repo.updateTicketRow(context.tenantId, ticket.id, {
+    status: "resolved",
+    resolution,
+    resolvedAt: new Date(),
+  });
+
+  return getTicketForAgent(context, id);
 }
 
-export function routedRoleFor(_category: TicketCategory): string {
-  return "client_admin";
+/** Category → the role its queue routes to. The registry decides, not this. */
+export function routedRoleFor(category: TicketCategory): string {
+  return TICKET_CATEGORY_DEFS[category].routesTo;
 }
 
 // ---------------------------------------------------------------------------
-// Attachments, SLA sweep, auto-tickets
+// Attachments
 // ---------------------------------------------------------------------------
 
 export interface UploadAttachmentInput {
@@ -501,10 +600,11 @@ export interface UploadedAttachment {
 export async function uploadTicketAttachment(
   input: UploadAttachmentInput,
 ): Promise<UploadedAttachment> {
-  // TODO(BACKEND):
-  // The real service streams the file into object storage
-  // (@cc/adapter-storage) and returns its key. Demo mode records the
-  // metadata so the UI can list the file; there are no bytes behind it.
+  // TODO: OBJECT STORAGE
+  // The bytes belong in object storage (S3/Azure Blob), never in Postgres —
+  // only the key is a database concern, which is why the schema stores one.
+  // Until a storage adapter exists the metadata is recorded so the UI can
+  // list the file, and nothing pretends the bytes were kept.
   return {
     storageKey: attachmentStorageKey(input.tenantId, input.fileName),
     fileName: input.fileName,
@@ -518,21 +618,45 @@ export function describeAttachments(attachments: readonly AttachmentRecord[]): s
 }
 
 export function attachmentStorageKey(tenantId: string, fileName: string): string {
-  return `${tenantId}/support/${fileName}`;
+  return `${tenantId}/support/${Date.now()}-${fileName}`;
 }
 
 export function getSupportStorage(): null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// SLA sweep
+// ---------------------------------------------------------------------------
+
 export interface SlaBreach {
   ticketId: string;
   ticketNo: string;
 }
 
-export async function sweepSlaBreaches(): Promise<SlaBreach[]> {
-  // TODO(BACKEND): runs as a cron job in @cc/workers.
-  return [];
+/**
+ * Marks tickets whose SLA deadline has passed.
+ *
+ * This is the exception to "write the event in the transaction that caused it"
+ * (ADR-029): a deadline passing with nothing happening has no causing
+ * transaction, so it has to be swept. `slaBreachedAt` makes the sweep
+ * idempotent — a ticket is reported once per `openedAt` window, and a reopen
+ * clears it.
+ */
+export async function sweepSlaBreaches(tenantId: string): Promise<SlaBreach[]> {
+  const candidates = (await repo.findUnbreachedOpenTickets(tenantId)) as Row[];
+  const now = new Date();
+  const breached: SlaBreach[] = [];
+
+  for (const row of candidates) {
+    if (slaView(row.openedAt, row.priority, { resolvedAt: row.resolvedAt }).state !== "breached") {
+      continue;
+    }
+    await repo.markSlaBreached(row.id, now);
+    breached.push({ ticketId: row.id, ticketNo: row.ticketNo });
+  }
+
+  return breached;
 }
 
 export interface AutoTicketResult {
@@ -540,11 +664,45 @@ export interface AutoTicketResult {
   created: boolean;
 }
 
-export async function raiseDiscrepancyTicket(): Promise<AutoTicketResult> {
-  // TODO(BACKEND): raised by the delivery worker on a POD discrepancy event.
-  return { ticket: null, created: false };
+/**
+ * Raises the ticket a POD discrepancy owes the customer.
+ *
+ * `sourceKey` is unique per tenant, so a redelivered event hits the constraint
+ * instead of raising a second ticket — which is what makes the handler
+ * idempotent, as at-least-once delivery requires (ADR-023).
+ */
+export async function raiseDiscrepancyTicket(input: {
+  tenantId: string;
+  kunnr: string;
+  deliveryVbeln: string;
+  notes?: string | null;
+  raisedByUserId?: string | null;
+}): Promise<AutoTicketResult> {
+  const sourceKey = `pod-discrepancy:${input.deliveryVbeln}`;
+
+  try {
+    const ticket = await insertTicket({
+      tenantId: input.tenantId,
+      kunnr: input.kunnr,
+      raisedByUserId: input.raisedByUserId ?? undefined,
+      category: "delivery",
+      priority: "high",
+      subject: `Delivery discrepancy reported on ${input.deliveryVbeln}`,
+      description:
+        input.notes?.trim() || "The quantities received did not match the quantities dispatched.",
+      relatedDocType: "delivery",
+      relatedDocNumber: input.deliveryVbeln,
+      sourceKey,
+    });
+    return { ticket, created: true };
+  } catch (error) {
+    // Unique violation on (tenantId, sourceKey): the ticket already exists,
+    // which is success for an at-least-once consumer, not a failure.
+    if ((error as { code?: string }).code === "P2002") {
+      return { ticket: null, created: false };
+    }
+    throw error;
+  }
 }
 
-function notFoundTicket(): SupportError {
-  return new SupportError("We couldn't find that ticket.", "not_found", 404);
-}
+export { isTicketClosedState };

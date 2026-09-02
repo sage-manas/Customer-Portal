@@ -8,7 +8,7 @@ import * as React from "react";
 import { useCart } from "./CartProvider";
 import { NotificationBellClient } from "./NotificationBellClient";
 
-import { signOut as demoSignOut, switchKunnr } from "@/lib/demo-auth";
+import { signOut, switchKunnr } from "@/lib/auth-client";
 
 /**
  * Client wrapper around the `@cc/ui` AppShell.
@@ -46,30 +46,27 @@ export function AppShellClient({
   const router = useRouter();
   const pathname = usePathname();
 
-  // Logout is entirely client-side in this phase: clear the demo cookies and
-  // leave. Route protection is restored the moment the cookie is gone —
-  // middleware and every page guard read the same session.
-  //
-  // TODO(BACKEND):
-  // Connect logout to server-side session invalidation.
-  // Expected endpoint: POST /api/auth/logout
-  const signOut = React.useCallback(() => {
-    demoSignOut();
-    router.replace("/login");
-    router.refresh();
+  // The session cookies are HttpOnly, so signing out is a request rather than
+  // a cookie the browser can clear itself. The redirect happens either way: if
+  // the call fails the cookie may survive, and leaving the user on a page that
+  // still looks signed-in would be worse than a redirect to a login screen that
+  // bounces them back.
+  const onSignOut = React.useCallback(() => {
+    void signOut().finally(() => {
+      router.replace("/login");
+      router.refresh();
+    });
   }, [router]);
 
-  // The switcher only ever selects a KUNNR the session is linked to —
-  // `lib/session.ts` re-checks that against `availableKunnrs` on every read,
-  // which is the same rule the real `switchAccount` enforces.
-  //
-  // TODO(BACKEND):
-  // Expected endpoint: POST /api/auth/switch-account (re-issues the token
-  // with the new `kunnr` claim).
-  const switchAccount = React.useCallback(
+  // Switching re-issues the token with the new `kunnr` claim, and the server
+  // re-checks the link against the database before it does — the token's own
+  // `availableKunnrs` is not treated as evidence, because it was minted before
+  // whatever changed since.
+  const onSwitchAccount = React.useCallback(
     (kunnr: string) => {
-      switchKunnr(kunnr);
-      router.refresh();
+      void switchKunnr(kunnr)
+        .then(() => router.refresh())
+        .catch(() => router.refresh());
     },
     [router],
   );
@@ -83,8 +80,8 @@ export function AppShellClient({
       userEmail={userEmail}
       accounts={accounts}
       activeKunnr={activeKunnr}
-      onSwitchAccount={switchAccount}
-      onSignOut={signOut}
+      onSwitchAccount={onSwitchAccount}
+      onSignOut={onSignOut}
       banner={banner}
       actions={showCart ? <CartTrigger /> : undefined}
       notifications={<NotificationBellClient initialUnreadCount={unreadNotifications} />}

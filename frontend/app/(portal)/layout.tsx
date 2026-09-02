@@ -80,8 +80,8 @@ export default async function PortalLayout({ children }: { children: React.React
         unreadNotifications={unread}
       >
         {children}
-        {/* Phase-1 scaffolding — see components/RoleSwitcher.tsx. */}
-        <RoleSwitcher />
+        {/* Development-only scaffolding — see components/RoleSwitcher.tsx. */}
+        <RoleSwitcher activeEmail={session.email} />
       </AppShellClient>
     </CartProvider>
   );

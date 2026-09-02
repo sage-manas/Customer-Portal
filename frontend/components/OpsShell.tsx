@@ -5,7 +5,7 @@ import { AppShell } from "@cc/ui";
 import { usePathname, useRouter } from "next/navigation";
 import * as React from "react";
 
-import { signOut as demoSignOut } from "@/lib/demo-auth";
+import { signOut } from "@/lib/auth-client";
 
 /**
  * Client wrapper around `@cc/ui`'s AppShell for the operator console — the
@@ -33,13 +33,14 @@ export function OpsShell({
   const router = useRouter();
   const pathname = usePathname();
 
-  // TODO(BACKEND):
-  // Connect logout to server-side session invalidation.
-  // Expected endpoint: POST /api/auth/logout
-  const signOut = React.useCallback(() => {
-    demoSignOut();
-    router.replace("/login");
-    router.refresh();
+  // Clears both realms' cookies — see lib/auth-client. An operator signing out
+  // of the console has left the machine, and a tenant session lingering in the
+  // same browser is exactly what should not survive that.
+  const onSignOut = React.useCallback(() => {
+    void signOut().finally(() => {
+      router.replace("/login");
+      router.refresh();
+    });
   }, [router]);
 
   return (
@@ -48,7 +49,7 @@ export function OpsShell({
       pathname={pathname}
       tenantName="CustomerConnect Ops"
       userEmail={operatorEmail}
-      onSignOut={signOut}
+      onSignOut={onSignOut}
     >
       {children}
     </AppShell>

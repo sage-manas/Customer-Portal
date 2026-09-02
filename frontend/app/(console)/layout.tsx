@@ -30,8 +30,8 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <OpsShell navItems={navItems} operatorEmail={session.email}>
       {children}
-      {/* Phase-1 scaffolding — see components/RoleSwitcher.tsx. */}
-      <RoleSwitcher />
+      {/* Development-only scaffolding — see components/RoleSwitcher.tsx. */}
+      <RoleSwitcher activeEmail={session.email} />
     </OpsShell>
   );
 }

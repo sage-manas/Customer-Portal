@@ -5,9 +5,6 @@ import { CartDrawer } from "@cc/ui";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 
-// TODO(BACKEND): swap `demoFetch` back to `fetch` once /api/* is migrated.
-import { demoFetch } from "@/lib/demo-fetch";
-
 /**
  * Cart state for the whole portal shell (docs/05 §7.2 — the drawer is
  * persistent, so it lives above the page, not inside the catalogue route).
@@ -72,7 +69,7 @@ export function CartProvider({
   const refresh = React.useCallback(async () => {
     setLoading(true);
     try {
-      const response = await demoFetch("/api/cart");
+      const response = await fetch("/api/cart");
       if (!response.ok) {
         setError(await readError(response));
         return;
@@ -92,7 +89,7 @@ export function CartProvider({
     async (input: RequestInfo, init: RequestInit, lineId?: string) => {
       setBusyLineId(lineId);
       try {
-        const response = await demoFetch(input, init);
+        const response = await fetch(input, init);
         if (!response.ok) {
           setError(await readError(response));
           return;

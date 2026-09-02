@@ -37,8 +37,8 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       unreadNotifications={unread}
     >
       {children}
-      {/* Phase-1 scaffolding — see components/RoleSwitcher.tsx. */}
-      <RoleSwitcher />
+      {/* Development-only scaffolding — see components/RoleSwitcher.tsx. */}
+      <RoleSwitcher activeEmail={session.email} />
     </AppShellClient>
   );
 }

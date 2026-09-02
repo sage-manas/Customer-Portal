@@ -5,9 +5,6 @@ import { Button, Textarea } from "@cc/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-// TODO(BACKEND): swap `demoFetch` back to `fetch` once /api/* is migrated.
-import { demoFetch } from "@/lib/demo-fetch";
-
 /**
  * What the customer can do to a ticket (docs/05 §7.8): reply, close, reopen,
  * and rate the resolution.
@@ -38,7 +35,7 @@ export function TicketActions({ ticketId, transitions, canComment, canRate }: Ti
     setBusy(true);
     setError(null);
     try {
-      const response = await demoFetch(url, {
+      const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

@@ -6,9 +6,6 @@ import * as React from "react";
 
 import { useCart } from "@/components/CartProvider";
 
-// TODO(BACKEND): swap `demoFetch` back to `fetch` once /api/* is migrated.
-import { demoFetch } from "@/lib/demo-fetch";
-
 /**
  * The card grid (docs/05 §7.2).
  *
@@ -60,7 +57,7 @@ export function ProductGrid({
 
     let cancelled = false;
 
-    demoFetch("/api/catalogue/availability", {
+    fetch("/api/catalogue/availability", {
       method: "POST",
       body: JSON.stringify({
         materials: materials.map((material) => ({

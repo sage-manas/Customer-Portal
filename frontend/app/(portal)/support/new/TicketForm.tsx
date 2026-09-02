@@ -10,9 +10,6 @@ import { Button, cn, Input, Select, Textarea } from "@cc/ui";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-// TODO(BACKEND): swap `demoFetch` back to `fetch` once /api/* is migrated.
-import { demoFetch } from "@/lib/demo-fetch";
-
 /**
  * Raise Ticket (docs/03 Screen 8.1, docs/05 §7.8).
  *
@@ -69,7 +66,7 @@ export function TicketForm({
     try {
       const form = new FormData();
       form.set("file", file);
-      const response = await demoFetch("/api/support/attachments", { method: "POST", body: form });
+      const response = await fetch("/api/support/attachments", { method: "POST", body: form });
       const body = (await response.json()) as { storageKey?: string; error?: string };
       if (!response.ok || !body.storageKey) {
         setError(body.error ?? "We couldn't upload that file.");
@@ -88,7 +85,7 @@ export function TicketForm({
     setIssues([]);
 
     try {
-      const response = await demoFetch("/api/support", {
+      const response = await fetch("/api/support", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -167,7 +164,12 @@ export function TicketForm({
 
       <label className="flex flex-col gap-1.5">
         <span className="text-[12.5px] font-semibold text-text">Subject</span>
-        <Input value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={SUBJECT_MAX} required />
+        <Input
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          maxLength={SUBJECT_MAX}
+          required
+        />
         {issueFor("subject") ? (
           <span className="text-[11px] text-danger">{issueFor("subject")}</span>
         ) : null}

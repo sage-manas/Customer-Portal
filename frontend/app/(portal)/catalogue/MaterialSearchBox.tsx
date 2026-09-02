@@ -5,8 +5,6 @@ import { Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 
-import { demoFetch } from "@/lib/demo-fetch";
-
 /**
  * SAP-style material match-code search.
  *
@@ -60,7 +58,7 @@ export function MaterialSearchBox({
     // enough that a typed word costs one request rather than one per
     // keystroke.
     const timer = setTimeout(() => {
-      demoFetch("/api/catalogue/materials/search", {
+      fetch("/api/catalogue/materials/search", {
         method: "POST",
         body: JSON.stringify({ q: query }),
         signal: controller.signal,
